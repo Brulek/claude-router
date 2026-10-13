@@ -1,7 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
-  fmtDuration, fmtCost, estimateCost, quotaMeters, verbOf, MAIN_LANE,
+  fmtDuration, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -88,9 +88,9 @@ test('bandSegments reads the spec sample sentences at 90+ columns', () => {
   expect(L(bandSegments(geminiActive, 100))).toBe('spick   Gemini is searching · gemini-3.8-flash · low effort · 31s')
   expect(R(bandSegments(geminiActive, 100))).toBe('main: Fable 5.1')
   expect(L(bandSegments(coderIdle, 100))).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s')
-  expect(R(bandSegments(coderIdle, 120))).toBe(WIDE_METERS)
+  expect(R(bandSegments(coderIdle, 160))).toBe(WIDE_METERS)
   expect(L(bandSegments(mainIdle, 100))).toBe('spick   Idle · last turn: Fable 5.1 · high effort · took 36s')
-  expect(R(bandSegments(mainIdle, 120))).toBe(WIDE_METERS)
+  expect(R(bandSegments(mainIdle, 160))).toBe(WIDE_METERS)
 })
 
 test('bandSegments attention samples: the cause replaces the right group, only the cause is colored', () => {
@@ -134,9 +134,10 @@ test('bandSegments drops the agent ordinal for a single agent or the main sessio
 test('bandSegments width tiers: 90+, 70-89, 50-69, 40-49, under 40', () => {
   const warned = { ...coderActive, note: { kind: 'warning' as const, text: 'review: codex' } }
   // 90-109: meters with five-cell bars; 110+: ten cells
-  expect(R(bandSegments(coderIdle, 109))).toBe('claude ▱▱▱▱▱ 8%   codex ▰▰▱▱▱ 37%')
-  expect(R(bandSegments(coderIdle, 90))).toBe('claude ▱▱▱▱▱ 8%   codex ▰▰▱▱▱ 37%')
-  expect(R(bandSegments(coderIdle, 110))).toBe(WIDE_METERS)
+  const short = { ...mainActive, durationMs: undefined, meters: METERS }
+  expect(R(bandSegments(short, 109))).toBe('claude ▱▱▱▱▱ 8%   codex ▰▰▱▱▱ 37%')
+  expect(R(bandSegments(short, 90))).toBe('claude ▱▱▱▱▱ 8%   codex ▰▰▱▱▱ 37%')
+  expect(R(bandSegments(short, 110))).toBe(WIDE_METERS)
   // 70-89: no right group except an attention cause
   expect(L(bandSegments(coderActive, 80))).toBe('spick   coder is working · Sonnet 5.5 · medium effort · agent 2 of 2 · 44s')
   expect(R(bandSegments(coderActive, 80))).toBe('')
@@ -146,12 +147,15 @@ test('bandSegments width tiers: 90+, 70-89, 50-69, 40-49, under 40', () => {
   expect(R(bandSegments(warned, 80))).toBe('review: codex')
   // 50-69: also no agent ordinal and no elapsed; effort keeps its word
   expect(L(bandSegments(coderActive, 60))).toBe('spick   coder is working · Sonnet 5.5 · medium effort')
-  expect(L(bandSegments(coderIdle, 60))).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s')
+  // measured fitting then drops took and effort from the 75-cell idle sentence
+  expect(L(bandSegments(coderIdle, 60))).toBe('spick   Idle · last turn: coder on Sonnet 5.5')
   expect(R(bandSegments(warned, 60))).toBe('review: codex')
   // 40-49: also no effort; the cause and the idle duration still show
   expect(L(bandSegments(coderActive, 45))).toBe('spick   coder is working · Sonnet 5.5')
   expect(R(bandSegments(warned, 45))).toBe('review: codex')
-  expect(L(bandSegments(coderIdle, 45))).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · took 2m 14s')
+  // the idle duration still shows at 40-49 when it fits
+  expect(L(bandSegments({ ...mainIdle, model: 'Haiku 5.5', durationMs: 6000 }, 45))).toBe('spick   Idle · last turn: Haiku 5.5 · took 6s')
+  expect(L(bandSegments(coderIdle, 45))).toBe('spick   Idle · last turn: coder on Sonnet 5.5')
   // under 40: wordmark, lane or Working, model
   expect(L(bandSegments(coderActive, 35))).toBe('spick · coder · Sonnet 5.5')
   expect(L(bandSegments(mainActive, 35))).toBe('spick · Working · Fable 5.1')
@@ -160,7 +164,7 @@ test('bandSegments width tiers: 90+, 70-89, 50-69, 40-49, under 40', () => {
 })
 
 test('bandSegments meters: a hot provider is warning as a whole, the others subtle, three spaces apart', () => {
-  const b = bandSegments({ ...coderIdle, meters: [{ name: 'claude', pct: 8 }, { name: 'codex', pct: 83 }] }, 120)
+  const b = bandSegments({ ...coderIdle, meters: [{ name: 'claude', pct: 8 }, { name: 'codex', pct: 83 }] }, 160)
   expect(b.right).toEqual([
     { text: 'claude ▰▱▱▱▱▱▱▱▱▱ 8%', style: 'dim' },
     { text: '   ', style: 'plain' },
@@ -179,9 +183,65 @@ test('bandSegments right group fallbacks: idle with no provider is empty, active
 
 test('bandSegments active delegate without a known main model falls through to the meters, then the hint', () => {
   const noMain = { ...coderActive, mainModel: undefined }
-  expect(bandSegments({ ...noMain, meters: METERS }, 120).right).toEqual(bandSegments({ ...mainActive, meters: METERS }, 120).right)
-  expect(R(bandSegments({ ...noMain, meters: METERS }, 120))).toBe(WIDE_METERS)
+  expect(bandSegments({ ...noMain, meters: METERS }, 160).right).toEqual(bandSegments({ ...mainActive, meters: METERS }, 160).right)
+  expect(R(bandSegments({ ...noMain, meters: METERS }, 160))).toBe(WIDE_METERS)
   expect(R(bandSegments({ ...noMain, meters: [] }, 120))).toBe('/spick for details')
+})
+
+const W = (b: { left: { text: string }[]; right: { text: string }[] }) =>
+  displayWidth(L(b)) + (b.right.length > 0 ? 2 + displayWidth(R(b)) : 0)
+
+test('displayWidth counts the meter glyphs and CJK as two cells', () => {
+  expect(displayWidth('▰▱')).toBe(4)
+  expect(displayWidth('claude ▰▱▱▱▱▱▱▱▱▱ 8%')).toBe(30)
+  expect(displayWidth('spick · coder')).toBe(13)
+  expect(displayWidth('中文')).toBe(4)
+})
+
+test('bandSegments fits by measured width: a right group that would overflow goes first', () => {
+  const codexReview = { lane: 'Codex', isReview: true, model: 'gpt-5.5-mini', effort: 'low', agents: 0, isIdle: false, durationMs: 9000, meters: METERS }
+  const b = bandSegments(codexReview, 100)
+  // the tier output: a 59-cell sentence, the gap and 43 cells of five-cell meters, 104 in all
+  expect(displayWidth(L(b)) + 2 + displayWidth('claude ▱▱▱▱▱ 8%   codex ▰▰▱▱▱ 37%')).toBe(104)
+  expect(L(b)).toBe('spick   Codex is reviewing · gpt-5.5-mini · low effort · 9s')
+  expect(b.right).toEqual([])
+  expect(W(b)).toBeLessThanOrEqual(100)
+})
+
+test('bandSegments fits a 60-column idle view by dropping took, then effort', () => {
+  const b = bandSegments(coderIdle, 60)
+  expect(W(b)).toBeLessThanOrEqual(60)
+  expect(L(b)).toBe('spick   Idle · last turn: coder on Sonnet 5.5')
+  // narrower still: the wording goes (bare lane and model), then the model
+  expect(L(bandSegments(coderIdle, 42))).toBe('spick   Idle · coder · Sonnet 5.5')
+})
+
+test('bandSegments keeps an attention cause at 45 columns and drops left segments instead', () => {
+  const review = bandSegments({ ...coderActive, note: { kind: 'warning' as const, text: 'review: codex' } }, 45)
+  expect(review.right).toEqual([{ text: 'review: codex', style: 'warning' }])
+  expect(L(review)).toBe('spick   coder · Sonnet 5.5')
+  expect(W(review)).toBeLessThanOrEqual(45)
+  const edited = bandSegments({ ...mainActive, model: 'Haiku 5.5', note: { kind: 'error' as const, text: 'edited src/lru.py' } }, 40)
+  expect(R(edited)).toBe('edited src/lru.py')
+  expect(L(edited)).toBe('spick   Working')
+})
+
+test('every sample view fits its columns by measured width', () => {
+  const note = (kind: 'warning' | 'error', text: string) => ({ note: { kind, text } })
+  const views = [
+    mainActive, coderActive, geminiActive, coderIdle, mainIdle,
+    { ...mainActive, meters: METERS }, { ...coderActive, mainModel: undefined, meters: METERS },
+    { ...mainIdle, meters: [{ name: 'claude', pct: 8 }, { name: 'codex', pct: 83 }] },
+    { ...mainActive, model: 'Haiku 5.5', effort: 'low', durationMs: 8000, ...note('error', 'edited src/lru.py') },
+    { ...coderActive, ...note('warning', 'review: codex') },
+    { lane: 'Codex', isReview: true, model: 'gpt-5.5-mini', effort: 'low', agents: 0, isIdle: false, durationMs: 9000, meters: METERS },
+  ]
+  for (const v of views) {
+    for (const columns of [40, 45, 60, 80, 90, 100, 110, 140]) {
+      const b = bandSegments(v, columns)
+      expect(displayWidth(L(b)) + (b.right.length > 0 ? 2 + displayWidth(R(b)) : 0) <= columns).toBe(true)
+    }
+  }
 })
 
 test('quotaMeters counts only finite values: a NaN weekly falls back to a finite five-hour, none at all omits the provider', () => {

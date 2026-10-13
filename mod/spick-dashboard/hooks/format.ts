@@ -140,41 +140,83 @@ function meterSegs(meters: QuotaMeter[], cells: number): Seg[] {
   })
 }
 
+/** Terminal cells a string takes: the meter glyphs and CJK/fullwidth characters count two, everything else one. */
+export function displayWidth(s: string): number {
+  let w = 0
+  for (const ch of s) w += /[\u2580-\u259F\u25A0-\u25FF\u2E80-\u9FFF\uFF00-\uFFEF]/.test(ch) ? 2 : 1
+  return w
+}
+const segsWidth = (segs: Seg[]): number => segs.reduce((n, s) => n + displayWidth(s.text), 0)
+/** the renderer's gap={2} between the left and right groups */
+const GROUP_GAP = 2
+/** what a band too wide for its columns gives up, first to last; the wordmark and the subject never go */
+type Droppable = 'ordinal' | 'elapsed' | 'effort' | 'wording' | 'model'
+const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'effort', 'wording', 'model']
+
+/**
+ * The band for a view at a width. Tiers pick the candidate segments; then the band is
+ * fitted by measured width: a right group that is not an attention cause goes first,
+ * then left segments in DROP_ORDER, until it fits. A cause is kept even when nothing else fits.
+ */
 export function bandSegments(v: BandView, columns: number): Band {
   const brand: Seg = { text: 'spick', style: 'brand' }
   const isMain = v.lane === MAIN_LANE
   const style = (s: Seg['style']): Seg['style'] => (v.isIdle ? 'dim' : s)
-  if (columns < 40) {
-    const left: Seg[] = [brand, SEP, { text: v.isIdle ? 'Idle' : isMain ? 'Working' : v.lane, style: style('lane') }]
-    if (v.model) left.push(SEP, { text: v.model, style: style('plain') })
-    return { left, right: [] }
+  const show: Record<Droppable, boolean> = {
+    ordinal: columns >= 70 && !v.isIdle && v.agents > 1 && v.agentIndex !== undefined,
+    elapsed: v.durationMs !== undefined && (v.isIdle || columns >= 70),
+    effort: columns >= 50 && !!v.effort,
+    wording: true,
+    model: !!v.model,
   }
 
-  const parts: Seg[][] = []
-  if (v.isIdle) {
-    const who = isMain ? v.model || MAIN_LANE : v.model ? `${v.lane} on ${v.model}` : v.lane
-    parts.push([{ text: 'Idle', style: 'dim' }], [{ text: `last turn: ${who}`, style: 'dim' }])
-  } else {
-    parts.push(isMain ? [{ text: 'Working', style: 'lane' }] : [{ text: v.lane, style: 'lane' }, { text: ` ${verbOf(v.lane, v.isReview)}`, style: 'plain' }])
-    if (v.model) parts.push([{ text: v.model, style: 'plain' }])
+  const buildLeft = (): Seg[] => {
+    if (columns < 40) {
+      const left: Seg[] = [brand, SEP, { text: v.isIdle ? 'Idle' : isMain ? 'Working' : v.lane, style: style('lane') }]
+      if (show.model) left.push(SEP, { text: v.model, style: style('plain') })
+      return left
+    }
+    const parts: Seg[][] = []
+    if (v.isIdle) {
+      parts.push([{ text: 'Idle', style: 'dim' }])
+      if (show.wording) {
+        const who = isMain ? v.model || MAIN_LANE : v.model ? `${v.lane} on ${v.model}` : v.lane
+        parts.push([{ text: `last turn: ${who}`, style: 'dim' }])
+      } else {
+        if (!isMain) parts.push([{ text: v.lane, style: 'dim' }])
+        if (show.model) parts.push([{ text: v.model, style: 'dim' }])
+      }
+    } else {
+      parts.push(isMain ? [{ text: 'Working', style: 'lane' }]
+        : show.wording ? [{ text: v.lane, style: 'lane' }, { text: ` ${verbOf(v.lane, v.isReview)}`, style: 'plain' }]
+        : [{ text: v.lane, style: 'lane' }])
+      if (show.model) parts.push([{ text: v.model, style: 'plain' }])
+    }
+    if (show.effort) parts.push([{ text: `${v.effort} effort`, style: style('plain') }])
+    if (show.ordinal) parts.push([{ text: `agent ${v.agentIndex} of ${v.agents}`, style: 'dim' }])
+    if (show.elapsed && v.durationMs !== undefined) parts.push([{ text: v.isIdle ? `took ${fmtDuration(v.durationMs)}` : fmtDuration(v.durationMs), style: 'dim' }])
+    return [brand, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
   }
-  if (columns >= 50 && v.effort) parts.push([{ text: `${v.effort} effort`, style: style('plain') }])
-  if (columns >= 70 && !v.isIdle && v.agents > 1 && v.agentIndex !== undefined) parts.push([{ text: `agent ${v.agentIndex} of ${v.agents}`, style: 'dim' }])
-  if (v.durationMs !== undefined) {
-    if (v.isIdle) parts.push([{ text: `took ${fmtDuration(v.durationMs)}`, style: 'dim' }])
-    else if (columns >= 70) parts.push([{ text: fmtDuration(v.durationMs), style: 'dim' }])
-  }
-  const left: Seg[] = [brand, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
 
   // right group: an attention cause from 40 columns; from 90, the main model for a delegate,
   // else quota meters (ten cells from 110, five below), else the hint while active
   let right: Seg[] = []
-  if (v.note) right = noteParts(v.note)
+  if (columns >= 40 && v.note) right = noteParts(v.note)
   else if (columns >= 90) {
     const meters = v.meters ?? []
     if (!v.isIdle && !isMain && v.mainModel) right = [{ text: `main: ${v.mainModel}`, style: 'dim' }]
     else if (meters.length > 0) right = meterSegs(meters, columns >= 110 ? 10 : 5)
     else if (!v.isIdle) right = [{ text: HINT, style: 'dim' }]
+  }
+
+  const fits = (left: Seg[]) => segsWidth(left) + (right.length > 0 ? GROUP_GAP + segsWidth(right) : 0) <= columns
+  let left = buildLeft()
+  if (!fits(left) && !v.note) right = []
+  for (const k of DROP_ORDER) {
+    if (fits(left)) break
+    if (!show[k]) continue
+    show[k] = false
+    left = buildLeft()
   }
   return { left, right }
 }

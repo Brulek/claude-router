@@ -90,7 +90,9 @@ Width tiers (from `e.props.bodyColumns`):
 
 "Elapsed" in the 50–69 row means the active timer only; the idle `took <duration>` keeps showing from 40 columns up. Below 40 the idle band reads `spick · Idle · <model>` (the last turn's model), all `subtle` after the wordmark.
 
-The band never wraps: every `Text` in it has `wrap="truncate-end"`.
+The tiers pick the candidate segments; the band is then also fitted by measured length (left + 2-cell gap + right, with `▰`/`▱` and CJK counted as two cells) to `bodyColumns`: a right group that is not an attention cause drops first, then left segments in this order until it fits: agent ordinal, elapsed/`took`, effort, the `is working`/`last turn:` wording (falling back to the bare lane), model; the wordmark and the subject never drop, and an attention cause is kept while the left gives way.
+
+The band never wraps: every `Text` in it has `wrap="truncate-end"`. Both groups' `Box`es have `flexShrink={1}` and the row `flexWrap="nowrap"`.
 
 ## The pane
 

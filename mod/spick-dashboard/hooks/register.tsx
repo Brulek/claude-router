@@ -324,9 +324,9 @@ export const register: Register = on => {
       }
     }
     return (
-      <Box flexDirection="row" justifyContent="space-between" gap={2} width="100%">
-        <Box flexDirection="row">{left.map(paint)}</Box>
-        {right.length > 0 ? <Box flexDirection="row">{right.map(paint)}</Box> : null}
+      <Box flexDirection="row" flexWrap="nowrap" justifyContent="space-between" gap={2} width="100%">
+        <Box flexDirection="row" flexShrink={1}>{left.map(paint)}</Box>
+        {right.length > 0 ? <Box flexDirection="row" flexShrink={1}>{right.map(paint)}</Box> : null}
       </Box>
     )
   })
