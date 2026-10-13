@@ -67,6 +67,11 @@ skills/buyongxuanze/
 └── assets/                  subagent definitions, CLAUDE.md snippet
 ```
 
+## Pairs well with
+
+- [alexei-led/claude-router](https://github.com/alexei-led/claude-router): a Claude Code Mod that switches the main session's model and effort per turn using a local or hosted classifier. It covers the one thing this skill cannot (re-pricing the main conversation); this skill covers what it leaves out (outside CLIs, review triggers, quota gate, onboarding). Install both.
+- [tzachbon/claude-model-router-hook](https://github.com/tzachbon/claude-model-router-hook): hook-based variant that warns or sets the next session's model.
+
 ## Known limits
 
 - A Claude Code session cannot change its own model or effort; only delegates can be re-priced. That is why the main session is cheap and everything else is pinned.

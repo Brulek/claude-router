@@ -125,6 +125,15 @@ End **every** reply with one line stating what ran. The user uses it to catch mi
 
 Model names are versions (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1, or the CLI model id). Your own effort is whatever the session is set to; write `Default` if you do not know. If the user switched the session to a stronger model themselves, the tiering table is suspended for that session - do the work yourself - but still print the label.
 
+## Works with the Router mod (optional, recommended)
+
+[alexei-led/claude-router](https://github.com/alexei-led/claude-router) is a Claude Code Mod that re-prices the **main conversation** itself: a local classifier (Ollama works) picks the model and effort for every turn, so the session is not stuck on Haiku and context is never lost to a handoff. This skill does not do that and does not try to; the two compose:
+
+- Router mod: which Claude model and effort the main session runs on, turn by turn; subagents that pin a model (ours do) pass through untouched.
+- This skill: the outside lanes (Gemini, Grok, Codex), the review triggers, the quota gate, and the onboarding.
+
+If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haiku, delegate everything heavy" reflex for pure reasoning and writing tasks (the mod will have raised the tier already), keep delegating coding to `coder` only when you want an isolated worker, and keep the label line honest about which model actually answered (the mod's band above the prompt shows it).
+
 ## Failures
 
 - **Auth failure** (401, "not authenticated", browser login prompt): do not retry. Move to the next lane and, at the end, tell the user the exact re-login command (`codex login`, `grok login`, `agy` opens a browser). Never try to log in on their behalf.

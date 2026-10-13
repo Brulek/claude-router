@@ -65,6 +65,11 @@ skills/buyongxuanze/
 └── assets/                  子代理定义、CLAUDE.md 片段
 ```
 
+## 搭配使用
+
+- [alexei-led/claude-router](https://github.com/alexei-led/claude-router)：一个 Claude Code Mod，用本地或托管分类器逐轮切换主会话的模型与推理强度。它解决本技能做不到的那件事（给主会话换挡），本技能补上它不管的部分（外家 CLI、审核触发、额度闸门、引导）。建议两个一起装。
+- [tzachbon/claude-model-router-hook](https://github.com/tzachbon/claude-model-router-hook)：基于 hook 的变体，只能提醒或设置下一个会话的模型。
+
 ## 已知限制
 
 - Claude Code 会话不能改自己的模型和强度，只能给被委派方定价。所以主会话用便宜的，其余全部钉死。
