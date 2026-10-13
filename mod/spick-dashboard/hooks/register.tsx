@@ -232,7 +232,8 @@ export const register: Register = on => {
     let block: string | null = null
     try {
       if (!isDelivery(e.origin.kind)) {
-        const fresh = await $.session.model()
+        // an unreadable model ('') falls back to the last one read, then the main loop's
+        const fresh = await modelNow($)
         if (fresh) await update($, sessionModel, () => fresh)
         // a /model whose picker answered after the command returned: compare now
         if (modelBeforePick !== null) {
@@ -241,7 +242,7 @@ export const register: Register = on => {
           if (fresh && fresh !== before) await modelPickedByHand($, fresh)
         }
         const surfaces = await $.session.surfaces().catch(() => [] as readonly RenderSurface[])
-        block = checklist(await read($, controls), fresh || mainModel, !(await bandShowing($, surfaces)))
+        block = checklist(await read($, controls), fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)))
         // keep the bash hook silent through long sessions: refresh the marker hourly
         const now = await $.clock.now()
         if (now - markerAt >= MARKER_REFRESH_MS) {
@@ -264,7 +265,7 @@ export const register: Register = on => {
     try {
       if (isUser && before) {
         const after = await modelNow($)
-        if (after && after !== before) await modelPickedByHand($, after)
+        if (after && after !== before) { modelBeforePick = null; await modelPickedByHand($, after) }
         // unchanged: maybe a picker still open; the next prompt compares again
         else modelBeforePick = before
       }
@@ -275,7 +276,7 @@ export const register: Register = on => {
     const r = await next(e)
     try {
       const isUser = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
-      if (isUser && !r.deny && e.value !== e.previous) await modelPickedByHand($, await modelNow($))
+      if (isUser && !r.deny && e.value !== e.previous) { modelBeforePick = null; await modelPickedByHand($, await modelNow($)) }
     } catch {}
     return r
   }).catch(passThrough)
@@ -459,6 +460,8 @@ export const register: Register = on => {
         await update($, hidden, () => cmd.hidden)
         return { text: cmd.hidden ? 'spick: band hidden · /spick show restores it' : 'spick: band shown' }
       case 'routing':
+        // the user has decided: a /model still pending comparison no longer counts
+        modelBeforePick = null
         await setControls($, c => ({ ...c, routing: cmd.value, manualModel: false }))
         return { text: await routingLine($) }
       case 'review':

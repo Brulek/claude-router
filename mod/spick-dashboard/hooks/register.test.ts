@@ -266,8 +266,8 @@ const MODELS: Record<string, string> = { opus: 'claude-opus-5-5', haiku: 'claude
  * a marker write recorded (never the real file), toasts recorded, a prompt that enters.
  */
 function session(on: Parameters<TestBody>[1], model = 'claude-haiku-5-5', surfaces: ('terminal' | 'desktop')[] = ['terminal']) {
-  const world = { model, writes: [] as { path: string; text: string }[], toasts: [] as string[], submits: [] as unknown[] }
-  on('session.model', async () => ({ value: world.model }))
+  const world = { model, isModelBroken: false, writes: [] as { path: string; text: string }[], toasts: [] as string[], submits: [] as unknown[] }
+  on('session.model', async () => { if (world.isModelBroken) throw new Error('no model'); return { value: world.model } })
   on('session.surfaces', async () => ({ value: surfaces }))
   on('fs.write', async ($, e) => { world.writes.push({ path: e.path, text: e.text }); return { value: undefined } })
   on('ui.toast', async ($, e) => { world.toasts.push(e.text); return { value: undefined } })
@@ -357,17 +357,27 @@ test('a delivery (task notification) gets no block', async ($, on) => {
   expect(r.context).toBeUndefined()
 })
 
-test('the session model unreadable: the prompt passes on once, unchanged', async ($, on) => {
+test('the session model unreadable: the block is still attached, from the cached session model', async ($, on) => {
   mock.clock(on)
   mock.store(on)
-  const submits: unknown[] = []
-  on('session.model', async () => { throw new Error('no model') })
-  on('session.surfaces', async () => ({ value: ['terminal' as const] }))
-  on('prompt.submit', async ($, e) => { submits.push(e); return { text: e.text, context: e.context } })
-  const r = await $.prompt.submit(PROMPT)
-  expect(submits).toHaveLength(1)
-  expect(submits[0]).toEqual(PROMPT)
-  expect(r.context).toBeUndefined()
+  const world = session(on)
+  await $.session.start(START)
+  world.isModelBroken = true
+  // the cached Haiku keeps auto on: the checklist, not the off sentence
+  expect(isChecklist(await contextOf($))).toBe(true)
+  expect(world.submits).toHaveLength(1)
+})
+
+test('a /model that changed nothing, then /spick on: the next prompt raises no toast and routing stays on', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const world = session(on)
+  await $.session.start(START)
+  await $.command.run({ command: 'model', args: '', ...RUN })
+  expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on')
+  world.model = 'claude-opus-5-5' // a later change the pending comparison must not claim
+  expect(isChecklist(await contextOf($))).toBe(true)
+  expect(world.toasts).toEqual([])
 })
 
 test('session.start resolves when the store, the session model and fs.write all fail', async ($, on) => {
