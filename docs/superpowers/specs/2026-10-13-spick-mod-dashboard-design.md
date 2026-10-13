@@ -79,7 +79,7 @@ Width tiers (terminal columns from `e.viewport.columns`, desktop uses its own wi
 
 ## The pane
 
-Opened with `/spick` or the hint; title `Spick`. Three sections stacked, each with a bold heading and a one-line description in `subtle`, separated by one blank line. The pane uses `e.viewport.rows` to cap the history list so it never scrolls past the bottom.
+Opened with `/spick` or the hint; title `Spick`. Three sections stacked, each with a bold heading, separated by one blank line. The pane uses `e.viewport.rows` to cap the history list so it never scrolls past the bottom.
 
 ```
 Spick                                                         stop picking, just start
