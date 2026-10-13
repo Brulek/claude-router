@@ -8,7 +8,7 @@ Spick already decides *who* works on each task (Haiku main session, pinned subag
 
 Success looks like: a user glances at the band above the prompt and knows, without reading the reply, who is working, on which model, at what effort, and whether anything needs attention. The band reads as part of Claude Code, not as a widget bolted on.
 
-Non-goals for this version: rewriting models or efforts, denying tool calls, replacing the triage hook, quota enforcement. Those are observed and shown, not acted on.
+Non-goals for this version: rewriting models or efforts, denying tool calls, quota enforcement. Those are observed and shown, not acted on. The one exception is the per-prompt triage checklist: while the mod is loaded it replaces the bash triage hook and shapes the checklist from its switches (see Controls).
 
 ## Visual principles
 
@@ -128,8 +128,71 @@ Rules:
 - Table columns are padded with spaces to fixed widths computed from the longest value in the column, so digits line up; costs are right-aligned to two decimals; the em dash marks "not priced" for outside lanes.
 - Quota bars are ten cells of `▰` (used) and `▱` (free); at 80% or more the bar and percentage take `warning`; `unknown` is `subtle` text, no bar.
 - `refreshed 4m ago` tells the user how stale the numbers are; the Mod reads the two local files at most every ten minutes.
-- Recent turns shows the newest first, at most `rows - 14` entries; the trailing note column carries attention causes in their colors.
+- Recent turns shows the newest first, at most `max(1, rows - 19 - N)` entries, where N is the number of lane rows in This session (the other sections take 19 fixed rows); the trailing note column carries attention causes in their colors.
 - No borders inside the pane. Structure comes from spacing and weight, as in Claude Code's own panes.
+
+## Controls (added 2026-10-13)
+
+The mod gains switches. They are the one place the mod *does* act: by changing what the model is told at each prompt. Three preferences are remembered across sessions in `$.store` (the "three choices"): routing, review, and the per-lane switches. The band's hidden state stays per session.
+
+### Switches
+
+| Switch | Values | Default | Effect on the prompt context |
+|---|---|---|---|
+| routing | `auto` · `on` · `off` | `auto` | `auto` = on while the session model is Haiku, off otherwise (a user who picked a stronger model wants it to work itself). `on` forces the triage checklist regardless of model. `off` injects: "Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; still end with the label line", except while the band is showing, when it ends "…; the status band shows who worked, so print no label line." |
+| review | `auto` · `off` | `auto` | `off` injects "Codex review is off: skip the review step and write `Review: off` in the label line." (while the band is showing: "Codex review is off: skip the review step.") |
+| lane gemini / grok / codex | `on` · `off` | `on` | an off lane injects "<Lane> lane is off: use the fallback chain" (Grok adds "X data has no fallback: say so.") and the checklist omits it |
+| band | `shown` · `hidden` | `shown` | band render yields; label line returns (existing behaviour) |
+
+A manual `/model` (or a model change through settings) by the user sets routing to `off` for the session only, like the router mod does, with a toast `spick: routing off (model selected manually) · /spick on to resume`. `/spick on` or `/spick auto` resumes.
+
+### Who injects the checklist
+
+When the mod is loaded, it owns the per-prompt checklist: a `prompt.submit` hook attaches one context block built from the switches (the three questions when routing is on; the off sentence when off; lane and review notes appended). On `session.start` the mod writes the marker file `~/.claude/.spick-mod-active` (via `$.fs.write`, unawaited) holding the ISO time, and `prompt.submit` rewrites it when the last write is an hour old; `scripts/triage-hook.sh` prints nothing when the marker exists and is younger than 24 hours, so a machine without the mod keeps the bash hook, and a stale marker (mod uninstalled) expires on its own. While the band is showing (the same test as the label-line section below: a `terminal` or `desktop` surface and the band not hidden), no sentence of the block asks for the label line; the checklist's last line becomes "Reply starts with the deliverable; the status band shows model and effort, so print no label line." Deliveries that are not someone asking for work (task notifications, peer messages, relays, observer reports) get no block. A manual model pick counts only when the model really changed, by the user (`composer` or `bridge` origin); a picker answered after `/model` returned is compared at the next prompt. The checklist text lives in one place in the mod (`hooks/checklist.ts`, pure) and the bash hook keeps its own copy for mod-less machines.
+
+### Commands
+
+`/spick` is registered with `immediate: true` and `argumentHint: '[on|off|auto|review on|off|lane <gemini|grok|codex> on|off|hide|show|quota]'`.
+
+| Command | Result |
+|---|---|
+| `/spick` | opens the pane; with no UI surface prints a one-paragraph status |
+| `/spick on` / `off` / `auto` | routing switch; remembered |
+| `/spick review on` / `off` | review switch; remembered |
+| `/spick lane <gemini\|grok\|codex> on\|off` | lane switch; remembered |
+| `/spick hide` / `show` | band visibility; session only |
+| `/spick quota` | refresh quota now and show the meters in the reply |
+
+Every change answers with one line of text and, when a pane is open, redraws it.
+
+### Pane: Controls section
+
+The pane gains a first section above "This session":
+
+```
+Controls
+  Routing   [ ◉ auto ] [ ○ on ] [ ○ off ]      on for this session (Haiku 5.5)
+  Review    [ ◉ auto ] [ ○ off ]
+  Lanes     [ Gemini on ] [ Grok on ] [ Codex off ]
+  Band      [ shown ]        [ Refresh quota ]        [ Close ]
+```
+
+Buttons carry hotkeys: `r` cycles routing, `v` toggles review, `g` / `k` / `c` toggle the lanes, `b` the band, `q` refreshes quota, `Esc`/`x` closes. The active value of a button group uses `variant: 'primary'`, the others `secondary`. The line after the routing group states the effective value for this session and why (`on for this session (Haiku 5.5)`, `off: model selected manually`, `off: Fable 5.1 is not Haiku`). No borders; same spacing rules as the other sections.
+
+### Band
+
+While routing is effectively off, the wordmark reads `spick off` with `off` in `warning`; everything else is unchanged. No buttons on the band.
+
+### State
+
+`$.state['spick-dashboard']` gains `controls: { routing: 'auto'|'on'|'off'; review: 'auto'|'off'; lanes: { gemini: boolean; grok: boolean; codex: boolean }; manualModel: boolean }`. `$.store` keys: `spick:routing`, `spick:review`, `spick:lanes` (JSON), read at `session.start` and written on every change.
+
+### Verification additions
+
+8. `/spick off` then a code request: the model does the work itself and the band reads `spick off`; `/spick on` restores the checklist.
+9. `/model opus` in a Haiku session: toast appears, pane says `off: model selected manually`, `/spick auto` returns to on.
+10. `/spick lane gemini off`, then a web lookup: the checklist names Grok as the search lane; the preference survives a new session.
+11. With the mod loaded, the bash hook prints nothing (marker fresh); after uninstalling the mod, the hook resumes within 24 hours.
 
 ## Behaviour
 
@@ -144,7 +207,7 @@ What the Mod observes and how it turns it into state:
 | `tool.call` on `Bash` | if any command segment (split on `;` `&` `|` `(` and newlines) starts a known CLI (`agy -p`, `grok -p` / `grok agent`, `codex exec`), an in-flight entry for that CLI, which also becomes the turn's delegate, and one turn on that CLI's totals row (no tokens, unpriced); `--model` / `-m` and `--effort` / `model_reasoning_effort` are parsed for display; `codex exec … review` sets `review: codex`; the entry leaves when the call returns |
 | `tool.call` on `Edit` or `Write` from the main loop while its model is Haiku | if the path is a source file (not `.md`, `.txt`, `.json`, `.csv`, plan files, or anything under `.claude/`), set the breach note `edited <file>` for this turn |
 | `turn.complete` | close the record with wall time under the turn's delegate (lane, model, effort; `main session` when it had none); roll the loop's usage and estimated cost into the session table under the loop's own lane (`main session` for main, the subagent type for a subagent) |
-| `session.start` | register `/spick`; read quota |
+| `session.start` | register `/spick`; read quota; load the three stored switches; read the session model; write the mod-active marker (unawaited) |
 | `prompt.compose` | when the render's `surfaces` include `terminal` or `desktop` and the band is not hidden, add a section telling the model the band is showing so it omits the label line |
 
 Lane on the band: every Agent or CLI call in flight is held in a map keyed by `tool_use_id`, in start order. The band shows the most recent entry still in the map and falls back to `main session` only when the map is empty, so parallel agents never show the wrong lane and one finishing early does not drop the band to `main session` while another still works.
@@ -155,9 +218,9 @@ Cost estimate: tokens per model from the engine's usage events when available (i
 
 Quota: the same two sources as `scripts/quota.sh`. `~/.claude.json` → `cachedUsageUtilization` for Claude; newest `$CODEX_HOME/sessions/**/*.jsonl` (default `~/.codex`) with `rate_limits` for Codex, walking days newest first and files newest first within a day, skipping files over 4 MiB (the engine refuses to read them), stopping at the first that parses or after 20 files. Grok and Gemini are `unknown`. Read through `$.fs`, cached for ten minutes, refreshed at session start, at each turn start (within the TTL) and on pane open.
 
-Label line: while the band shows, a `prompt.compose` hook appends a session-scoped section: "The Spick status band is showing; do not print the `[Model: … | Effort: …]` line." It does so only when the render's `surfaces` include `terminal` or `desktop` (the surfaces that draw `AbovePrompt`) and the band is not hidden; under `claude -p` or the SDK (no surfaces), in VS Code, or with the band hidden, the label line stays. Without the Mod the skill's rule stands.
+Label line: while the band shows, a `prompt.compose` hook appends a session-scoped section: "The Spick status band is showing; do not print the `[Model: … | Effort: …]` line at the end of replies; this overrides any note that asks for it." It does so only when the render's `surfaces` include `terminal` or `desktop` (the surfaces that draw `AbovePrompt`) and the band is not hidden; under `claude -p` or the SDK (no surfaces), in VS Code, or with the band hidden, the label line stays. Without the Mod the skill's rule stands.
 
-Hide: a `Hide` action in the pane sets a session flag; the band returns `next(e)` while hidden. `/spick show` clears it.
+Hide: the pane's Band button (or `/spick hide`) sets a session flag; the band returns `next(e)` while hidden. `/spick show` clears it.
 
 ## State
 
@@ -169,8 +232,9 @@ All values live in `$.state` under `spick-dashboard`, declared in `types/index.d
 - `totals`: per-lane `{ turns, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd | null }`
 - `quota`: `{ claude: {...} | null, codex: {...} | null, readAt }`
 - `hidden`: boolean
+- `controls`, `sessionModel`: the switches and the session model id (see Controls)
 
-`$.store` is not used; the dashboard is per session by design.
+`$.store` holds only the three remembered switches: `spick:routing`, `spick:review`, `spick:lanes` (JSON); everything else is per session by design.
 
 ## Files
 
@@ -179,6 +243,7 @@ mod/spick-dashboard/
 ├── .claude-plugin/plugin.json
 ├── hooks/hooks.json
 ├── hooks/register.tsx        events → state, band, pane, command
+├── hooks/checklist.ts        the per-prompt block from the switches, /spick parsing (pure functions)
 ├── hooks/format.ts           display names, width tiers, padding, bars (pure functions)
 ├── hooks/quota.ts            the two file readers (pure parse + $.fs)
 ├── hooks/format.test.ts      width tiers, padding, name mapping, bar rendering

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 # spick: UserPromptSubmit hook. Prints a 3-question triage checklist that Claude Code adds to the prompt context.
 # Small models follow a checklist they see every turn far better than a rule they read once at session start.
+# When the spick-dashboard mod is loaded it injects the checklist itself (built from its switches) and
+# writes ~/.claude/.spick-mod-active at session start; a marker younger than 24 hours silences this copy.
+# A stale marker (mod uninstalled) expires on its own. `find -mmin` works on both macOS and Linux.
+marker="${HOME}/.claude/.spick-mod-active"
+if [ -f "$marker" ] && [ -n "$(find "$marker" -mmin -1440 2>/dev/null)" ]; then
+  exit 0
+fi
 cat <<'TXT'
 [spick triage - answer all three before the first tool call]
 1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).

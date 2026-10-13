@@ -1,6 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
-import type { LaneTotals, Quota, QuotaWindows, TurnRecord } from '../types'
+import type { EngineInterface, Register, RenderSurface } from 'claude-code'
+import type { Controls, LaneKey, LaneTotals, Quota, QuotaWindows, Review, Routing, TurnRecord } from '../types'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
 import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
@@ -12,10 +13,13 @@ const turns = atom({ plugin: 'spick-dashboard', key: 'turns' } as const, [])
 const totals = atom({ plugin: 'spick-dashboard', key: 'totals' } as const, {})
 const quota = atom({ plugin: 'spick-dashboard', key: 'quota' } as const, null)
 const hidden = atom({ plugin: 'spick-dashboard', key: 'hidden' } as const, false)
+const controls = atom({ plugin: 'spick-dashboard', key: 'controls' } as const, DEFAULT_CONTROLS)
+const sessionModel = atom({ plugin: 'spick-dashboard', key: 'sessionModel' } as const, '')
 
 const QUOTA_TTL_MS = 600_000
 const TICK_MS = 1_000
 const PANE = 'spick'
+const MARKER_REFRESH_MS = 3_600_000
 
 // Helpers that take $ are top-level function declarations: the validator
 // follows $ only into functions declared at the top of this file.
@@ -28,6 +32,95 @@ async function refreshQuota($: EngineInterface, force = false): Promise<Quota> {
   const fresh: Quota = await readQuota({ env, read: path => $.fs.read(path), list: path => $.fs.list(path) }, now)
   await update($, quota, () => fresh)
   return fresh
+}
+
+/** The three remembered choices: routing, review and the lanes (a JSON string). */
+async function loadControls($: EngineInterface): Promise<void> {
+  const routing = parseRouting(await $.store.get('spick:routing'))
+  const review = parseReview(await $.store.get('spick:review'))
+  const lanes = parseLanes(await $.store.get('spick:lanes'))
+  // a manual model pick lasts one session only
+  await update($, controls, () => ({ routing, review, lanes, manualModel: false }))
+}
+
+/** Change the switches and write the three remembered ones back to $.store. */
+async function setControls($: EngineInterface, change: (c: Controls) => Controls): Promise<Controls> {
+  const next = await update($, controls, change)
+  try {
+    await $.store.set('spick:routing', next.routing)
+    await $.store.set('spick:review', next.review)
+    await $.store.set('spick:lanes', JSON.stringify(next.lanes))
+  } catch {}
+  return next
+}
+
+/** The session model, read fresh where the engine answers, else the last one read. */
+async function readSessionModel($: EngineInterface): Promise<string> {
+  try {
+    const m = await $.session.model()
+    if (typeof m === 'string' && m) return await update($, sessionModel, () => m)
+  } catch {}
+  return await read($, sessionModel)
+}
+
+/**
+ * Tell scripts/triage-hook.sh that the mod owns the checklist: it prints nothing
+ * while this marker is younger than 24 hours.
+ */
+async function writeMarker($: EngineInterface): Promise<void> {
+  const home = await $.env.get('HOME')
+  if (!home) return
+  await $.fs.write(`${home}/.claude/.spick-mod-active`, new Date(await $.clock.now()).toISOString())
+}
+
+/**
+ * Whether the band is on screen: a surface that draws AbovePrompt and the band not hidden.
+ * One test for both prompt.compose (its label-line section) and prompt.submit (the checklist's wording).
+ */
+async function bandShowing($: EngineInterface, surfaces: readonly RenderSurface[]): Promise<boolean> {
+  return drawsBand(surfaces) && !(await read($, hidden))
+}
+
+/** the model now, or '' when the engine cannot say */
+async function modelNow($: EngineInterface): Promise<string> {
+  try {
+    const m = await $.session.model()
+    return typeof m === 'string' ? m : ''
+  } catch {
+    return ''
+  }
+}
+
+/** A user's own model pick (a real change) turns routing off for the session; one toast. */
+async function modelPickedByHand($: EngineInterface, model: string): Promise<void> {
+  if (model) await update($, sessionModel, () => model)
+  const before = await read($, controls)
+  if (before.manualModel) return
+  await update($, controls, c => ({ ...c, manualModel: true }))
+  $.ui.toast(MANUAL_TOAST)
+}
+
+/** the reply to a routing change: the reason only where the value alone does not say it (auto, a manual pick) */
+async function routingLine($: EngineInterface): Promise<string> {
+  const c = await read($, controls)
+  if (c.routing !== 'auto' && !c.manualModel) return `spick: routing ${c.routing}`
+  return `spick: routing ${c.routing} · ${effectiveRouting(c, await readSessionModel($)).why}`
+}
+
+/** the quota meters as one line of text */
+async function quotaLine($: EngineInterface, force: boolean): Promise<string> {
+  const q = await refreshQuota($, force)
+  const meters = quotaMeters(q).map(m => `${m.name} ${quotaBar(m.pct)} ${Math.round(m.pct)}%`)
+  return meters.length > 0 ? `spick: quota ${meters.join('   ')}` : 'spick: quota unknown (no provider known; grok and gemini report unknown)'
+}
+
+/** `/spick` where nothing can draw a pane: one paragraph of status. */
+async function statusParagraph($: EngineInterface): Promise<string> {
+  const c = await read($, controls)
+  const eff = effectiveRouting(c, await readSessionModel($))
+  const lanes = LANE_KEYS.map(k => `${LANE_NAMES[k]} ${c.lanes[k] ? 'on' : 'off'}`).join(', ')
+  const quotaText = await quotaLine($, false).catch(() => 'spick: quota not read')
+  return `spick: routing ${c.routing} (${eff.why}); review ${c.review}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
 }
 
 async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promise<void> {
@@ -81,6 +174,11 @@ function passThrough<E, R>($: unknown, e: E, next: (e: E) => R): R {
   return next(e)
 }
 
+const routingOptions: readonly Routing[] = ['auto', 'on', 'off']
+const reviewOptions: readonly Review[] = ['auto', 'off']
+const nextRouting = (r: Routing): Routing => (r === 'auto' ? 'on' : r === 'on' ? 'off' : 'auto')
+const LANE_HOTKEYS: Record<LaneKey, string> = { gemini: 'g', grok: 'k', codex: 'c' }
+
 const clock = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 
 // Every hook here only observes: its own work sits in try/catch so a failure
@@ -99,6 +197,10 @@ export const register: Register = on => {
   let mainEffort: string | undefined
   /** the last elapsed-time stamp written to `current` */
   let lastTickMs = 0
+  /** when the mod-active marker was last written */
+  let markerAt = 0
+  /** the model before a user's /model that changed nothing yet (a picker may still be open) */
+  let modelBeforePick: string | null = null
 
   const mainLane = (): Lane => ({ lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort })
   /** the most recent call still in flight; the main session only when none is */
@@ -110,20 +212,82 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     try {
-      await $.command.register({ name: 'spick', description: 'Spick dashboard: lanes, quota, recent turns', argumentHint: '[show|hide|quota]' })
+      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, lanes, band, quota', argumentHint: ARGUMENT_HINT, immediate: true })
       void refreshQuota($).catch(() => undefined)
+    } catch {}
+    try { await loadControls($) } catch {}
+    try { await readSessionModel($) } catch {}
+    // unawaited: a slow write must not hold the session's start
+    try {
+      markerAt = await $.clock.now()
+      void writeMarker($).catch(() => undefined)
     } catch {}
     return next(e)
   })
+
+  // The per-prompt checklist: exactly one block, built from the switches, worded for
+  // whether the band shows. Rewrites only the context it attaches; any failure
+  // (the session model unreadable included) passes the prompt on unchanged.
+  on('prompt.submit', async ($, e, next) => {
+    let block: string | null = null
+    try {
+      if (!isDelivery(e.origin.kind)) {
+        // an unreadable model ('') falls back to the last one read, then the main loop's
+        const fresh = await modelNow($)
+        if (fresh) await update($, sessionModel, () => fresh)
+        // a /model whose picker answered after the command returned: compare now
+        if (modelBeforePick !== null) {
+          const before = modelBeforePick
+          modelBeforePick = null
+          if (fresh && fresh !== before) await modelPickedByHand($, fresh)
+        }
+        const surfaces = await $.session.surfaces().catch(() => [] as readonly RenderSurface[])
+        block = checklist(await read($, controls), fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)))
+        // keep the bash hook silent through long sessions: refresh the marker hourly
+        const now = await $.clock.now()
+        if (now - markerAt >= MARKER_REFRESH_MS) {
+          markerAt = now
+          void writeMarker($).catch(() => undefined)
+        }
+      }
+    } catch {
+      block = null
+    }
+    return next(block ? { ...e, context: [...(e.context ?? []), block] } : e)
+  }).catch(passThrough)
+
+  // A model the user picks by hand (/model, or the model setting) turns routing off for
+  // the session, only when the model really changed.
+  on('command.run', { command: 'model' }, async ($, e, next) => {
+    const isUser = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+    const before = isUser ? await modelNow($) : ''
+    const r = await next(e)
+    try {
+      if (isUser && before) {
+        const after = await modelNow($)
+        if (after && after !== before) { modelBeforePick = null; await modelPickedByHand($, after) }
+        // unchanged: maybe a picker still open; the next prompt compares again
+        else modelBeforePick = before
+      }
+    } catch {}
+    return r
+  }).catch(passThrough)
+  on('config.set', { key: 'model' }, async ($, e, next) => {
+    const r = await next(e)
+    try {
+      const isUser = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+      if (isUser && !r.deny && e.value !== e.previous) { modelBeforePick = null; await modelPickedByHand($, await modelNow($)) }
+    } catch {}
+    return r
+  }).catch(passThrough)
 
   // Tell the model the band is showing so it omits the label line. Only where a
   // band is drawn (terminal, desktop) and not hidden; elsewhere the label stays.
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     try {
-      if (!e.surfaces.some(s => s === 'terminal' || s === 'desktop')) return r
-      if (await read($, hidden)) return r
-      return { sections: [...r.sections, { id: `${P}:band`, scope: 'session' as const, text: 'The Spick status band is showing above the prompt. Do not print the [Model: ... | Effort: ...] label line at the end of replies.' }] }
+      if (!(await bandShowing($, e.surfaces))) return r
+      return { sections: [...r.sections, { id: `${P}:band`, scope: 'session' as const, text: 'The Spick status band is showing above the prompt. Do not print the [Model: ... | Effort: ...] label line at the end of replies; this overrides any note that asks for it.' }] }
     } catch {
       return r
     }
@@ -288,13 +452,36 @@ export const register: Register = on => {
     return next(e)
   })
 
+  // Every change answers one line; the pane redraws from the state it reads.
   on('command.run', { command: 'spick' }, async ($, e) => {
-    const arg = e.args.trim()
-    if (arg === 'hide') { await update($, hidden, () => true); return { text: 'Spick band hidden. /spick show restores it.' } }
-    if (arg === 'show') { await update($, hidden, () => false); return { text: 'Spick band shown.' } }
-    await refreshQuota($, true).catch(() => undefined)
-    const placed = await $.ui.open({ id: PANE, title: 'Spick', closeOnEscape: true })
-    return { text: placed.isPlaced ? 'Spick pane opened.' : `Spick pane not placed: ${placed.reason}` }
+    const cmd = parseSpick(e.args)
+    switch (cmd.kind) {
+      case 'band':
+        await update($, hidden, () => cmd.hidden)
+        return { text: cmd.hidden ? 'spick: band hidden · /spick show restores it' : 'spick: band shown' }
+      case 'routing':
+        // the user has decided: a /model still pending comparison no longer counts
+        modelBeforePick = null
+        await setControls($, c => ({ ...c, routing: cmd.value, manualModel: false }))
+        return { text: await routingLine($) }
+      case 'review':
+        await setControls($, c => ({ ...c, review: cmd.value }))
+        return { text: `spick: review ${cmd.value}` }
+      case 'lane':
+        await setControls($, c => ({ ...c, lanes: { ...c.lanes, [cmd.lane]: cmd.on } }))
+        return { text: `spick: ${LANE_NAMES[cmd.lane]} lane ${cmd.on ? 'on' : 'off'}` }
+      case 'quota':
+        return { text: await quotaLine($, true).catch(() => 'spick: quota not read') }
+      case 'usage':
+        return { text: USAGE }
+      case 'open': {
+        await refreshQuota($, true).catch(() => undefined)
+        const surfaces = await $.session.surfaces().catch(() => [] as const)
+        if (surfaces.length === 0) return { text: await statusParagraph($) }
+        const placed = await $.ui.open({ id: PANE, title: 'Spick', closeOnEscape: true })
+        return { text: placed.isPlaced ? 'spick: pane opened' : `spick: pane not placed: ${placed.reason}` }
+      }
+    }
   })
 
   // The band: one line, a short sentence about who is working now. Slot order
@@ -312,6 +499,10 @@ export const register: Register = on => {
     if (!view) return next(e)
     // quota shows as meters on the right (bandSegments decides when); a hot provider is colored there, never a cause
     view.meters = quotaMeters(await read($, quota))
+    // routing off shows on the wordmark; under auto, only once the model is known
+    const ctl = await read($, controls)
+    const model = (await read($, sessionModel)) || mainModel
+    view.routingOff = (model !== '' || ctl.routing !== 'auto' || ctl.manualModel) && !effectiveRouting(ctl, model).on
     const { left, right } = bandSegments(view, e.props.bodyColumns)
     const { Box, Text } = $.ui.resolve(e)
     const paint = (s: Seg) => {
@@ -331,13 +522,17 @@ export const register: Register = on => {
     )
   })
 
-  // The pane: three sections, spacing and weight only, no borders.
+  // The pane: the controls, then three sections, spacing and weight only, no borders.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
+    const ctl = await read($, controls)
+    const eff = effectiveRouting(ctl, (await read($, sessionModel)) || mainModel)
     const t = await read($, totals)
     const q = await read($, quota)
     const list = await read($, turns)
     const isHidden = await read($, hidden)
+    // a manual model pick shows as off: the switch's value for this session
+    const shownRouting: Routing = ctl.manualModel ? 'off' : ctl.routing
     const now = await $.clock.now()
     const rows = e.props.scroll?.bodyRows || e.viewport?.rows || 30
 
@@ -365,7 +560,8 @@ export const register: Register = on => {
     // the heading row spans the quota block, so the staleness note sits beside the numbers it describes
     const quotaWidth = Math.max(2 + Math.max(...quotaCells.map(quotaRowLength)), 'Quota'.length + 2 + staleness.length)
 
-    const recent = list.slice(0, Math.max(1, rows - 14))
+    // fixed rows: 19 (header, controls, table header and total, quota, headings, gaps) plus one per lane row
+    const recent = list.slice(0, Math.max(1, rows - 19 - lanes.length))
     const recentTable = table(
       recent.map(r => [clock(r.startedAt), r.lane, r.model, r.effort ?? '', fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt)]),
       ['l', 'l', 'l', 'l', 'r'])
@@ -375,6 +571,53 @@ export const register: Register = on => {
         <Box flexDirection="row" justifyContent="space-between">
           <Text bold>Spick</Text>
           <Text color="subtle">stop picking, just start</Text>
+        </Box>
+
+        <Box flexDirection="column" marginTop={1}>
+          <Text bold>Controls</Text>
+          <Box flexDirection="column" paddingLeft={2}>
+            <Box flexDirection="row">
+              <Text>{padRight('Routing', 10)}</Text>
+              {routingOptions.flatMap((v, i) => [
+                i > 0 ? <Text>{' '}</Text> : null,
+                <Button key={`routing-${v}`} label={`${shownRouting === v ? '◉' : '○'} ${v}`}
+                  variant={shownRouting === v ? 'primary' : 'secondary'}
+                  // r presses the next value's button: auto -> on -> off -> auto; the active one does nothing
+                  hotkey={nextRouting(shownRouting) === v ? 'r' : undefined}
+                  onPress={() => { if (shownRouting !== v) void setControls($, c => ({ ...c, routing: v, manualModel: false })).catch(() => undefined) }} />,
+              ])}
+              <Text color="subtle">{'      ' + eff.why}</Text>
+            </Box>
+            <Box flexDirection="row">
+              <Text>{padRight('Review', 10)}</Text>
+              {reviewOptions.flatMap((v, i) => [
+                i > 0 ? <Text>{' '}</Text> : null,
+                <Button key={`review-${v}`} label={`${ctl.review === v ? '◉' : '○'} ${v}`}
+                  variant={ctl.review === v ? 'primary' : 'secondary'}
+                  // v presses the other option
+                  hotkey={ctl.review !== v ? 'v' : undefined}
+                  onPress={() => { if (ctl.review !== v) void setControls($, c => ({ ...c, review: v })).catch(() => undefined) }} />,
+              ])}
+            </Box>
+            <Box flexDirection="row">
+              <Text>{padRight('Lanes', 10)}</Text>
+              {LANE_KEYS.flatMap((k, i) => [
+                i > 0 ? <Text>{' '}</Text> : null,
+                <Button key={`lane-${k}`} label={`${LANE_NAMES[k]} ${ctl.lanes[k] ? 'on' : 'off'}`}
+                  variant={ctl.lanes[k] ? 'primary' : 'secondary'} hotkey={LANE_HOTKEYS[k]}
+                  onPress={() => { void setControls($, c => ({ ...c, lanes: { ...c.lanes, [k]: !c.lanes[k] } })).catch(() => undefined) }} />,
+              ])}
+            </Box>
+            <Box flexDirection="row">
+              <Text>{padRight('Band', 10)}</Text>
+              <Button key="band" label={isHidden ? 'hidden' : 'shown'} variant={isHidden ? 'secondary' : 'primary'} hotkey="b"
+                onPress={() => { void update($, hidden, v => !v) }} />
+              <Text>{'        '}</Text>
+              <Button key="refresh" label="Refresh quota" variant="secondary" hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }} />
+              <Text>{'        '}</Text>
+              <Button key="close" label="Close" variant="secondary" hotkey="x" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />
+            </Box>
+          </Box>
         </Box>
 
         <Box flexDirection="column" marginTop={1}>
@@ -411,10 +654,6 @@ export const register: Register = on => {
           </Box>
         </Box>
 
-        <Box flexDirection="row" gap={2} marginTop={1}>
-          <Button key="hide" label={isHidden ? 'Show band' : 'Hide band'} onPress={() => { void update($, hidden, v => !v) }} />
-          <Button key="refresh" label="Refresh quota" onPress={() => { void refreshQuota($, true).catch(() => undefined) }} />
-        </Box>
       </Box>
     )
   })

@@ -49,6 +49,9 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 
 回答 `y` 添加 marketplace，选 user 范围；之后提示框上方出现状态带显示谁在干活，`/spick` 打开面板。状态带显示期间（终端或桌面 app）回复不再印标注行；`/spick hide` 隐藏状态带后标注行恢复。
 
+`/spick on|off|auto` 切换分流（auto＝只在 Haiku 会话里开；用 `/model` 手动选模型后本会话自动关），`/spick review on|off` 开关 Codex 审核，`/spick lane <gemini|grok|codex> on|off` 开关单个外家通道；这三类选择跨会话记住。
+`/spick quota` 立即刷新并打印额度条；面板顶部的 Controls 区有同样的开关和快捷键（`r` `v` `g` `k` `c` `b` `q` `x`）。
+
 ## 口令
 
 | 对 Claude 说 | 效果 |
