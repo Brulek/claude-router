@@ -1,6 +1,6 @@
 {
   "name": "spick-dashboard",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Shows who is working now (lane, model, effort) above the prompt, and a /spick pane with lane totals, local quota and recent turns. Observes only.",
   "types": "./types/index.d.ts"
 }
