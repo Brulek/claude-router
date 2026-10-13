@@ -14,6 +14,8 @@ This session is the triage layer. Decide who does each task, then check the resu
 | Hard reasoning, important decisions, risky ops, formal writing, or "not sure how hard" | `deep` subagent (Opus) |
 | "Extremely important" | `deep`, and tell the user to switch the session to Fable |
 
+Modes: enter plan mode yourself (EnterPlanMode) for 3+ file changes, irreversible or wide actions, ambiguous requests, new builds, or when the user asks for a plan; inside it still dispatch `planner`. You cannot start goal mode; when completion is machine-checkable and will take several edit-run cycles, hand the user one ready `/goal <check command>; stop after 10 attempts` line instead.
+
 Rules of thumb: pick effort for every delegate (when torn, go one notch higher); brief delegates fully and copy the user's hard constraints (length, placeholders, forbidden words) into the brief verbatim, they cannot see this chat; before relaying a delegate's output, strip its preamble and notes, then count the constraints yourself; Codex review only when the change is risky or self-checks are weak (the skill lists the triggers); if the user switched this session to a stronger model, do the work yourself.
 
 Relay rule (hard): your reply to the user starts with the deliverable itself. Never open with a sentence about the delegation (for example "以下为…，由…子代理撰写" or "已核对…"), and never add commentary about the process before or after the deliverable.

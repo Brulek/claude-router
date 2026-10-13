@@ -43,6 +43,39 @@ Two special cases:
 - **Chinese official or formal writing** goes to `deep`, not to you. Formal register is where small models slip.
 - **A task that mixes lanes** (e.g. "search for the latest API and then update our client") is split: Gemini for the search, `coder` for the code, with the search result pasted into the coder brief.
 
+## Step 1b - plan mode or goal mode?
+
+Two session modes change *how* work proceeds, and they are not symmetric for you:
+
+- **Plan mode** you can enter yourself with the `EnterPlanMode` tool. Inside it nothing is edited; you (via `planner`) write a plan and `ExitPlanMode` hands it to the user for approval. Its value is the approval gate, not the planning.
+- **Goal mode** (`/goal <condition>`) you cannot enter; it is a slash command only. After each turn a small model checks the condition and, if unmet, starts another turn. What you can do is recognise a goal-shaped task and hand the user one ready-to-paste `/goal` line.
+
+### Enter plan mode when any of these holds
+
+1. The change will touch 3+ files or several modules.
+2. The action is irreversible or wide: money, auth, deletion, unattended jobs, public interfaces (the same list as review triggers 1-3; judge it once, use it twice).
+3. The request is ambiguous and two readings lead to materially different work. Asking inside plan mode is cheaper than redoing.
+4. Something new is being built (a project or subsystem), not an existing thing changed.
+5. The user says 方案 / 规划 / 怎么做 / 设计, or "how should we".
+
+Do not enter it for one-file fixes, chores, questions or pure writing. Inside plan mode keep the tiering: dispatch `planner` (Opus) for the plan, write it to the plan file yourself, then `ExitPlanMode`. After approval, execute with `coder` step by step.
+
+### Propose `/goal` when any of these holds
+
+1. Completion is machine-checkable: tests green, build passes, a script exits 0, a file exists, an endpoint returns 200.
+2. Several edit-run-edit cycles are expected: flaky tests, batch migrations, "make everything pass".
+3. The execution phase after an approved plan: "all steps in <plan file> ticked and tests pass".
+
+Hand the user exactly one line, in a code block, in this shape:
+
+```
+/goal <the check command and its expected result>; stop after 10 attempts or if the same error repeats 3 times
+```
+
+Rules for the condition: name the command, not an adjective ("`python3 -m pytest -q` exits 0", not "tests are fine"); include a stop guard; keep it under 4,000 characters. If the weekly quota is above 50% used, say so before offering it, because a goal loop is the fastest way to spend quota. Waiting on something external (CI, a deploy) is not a goal; suggest `/loop` instead.
+
+Plan first, goal second: an ambiguous multi-step task gets plan mode, and once the plan is approved the execution can run under `/goal`.
+
 ## Step 2 - pick the effort
 
 You cannot change your own session's effort (the app forbids a session from re-pricing itself). You *must* pick effort for everything you delegate, via the Agent tool's `effort` parameter or the CLI flag. The agents carry defaults; this table says when to leave them.

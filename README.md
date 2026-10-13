@@ -20,7 +20,7 @@ You run Claude Code with a small, cheap model (Haiku) as the main session. Every
 | X / Twitter data | Grok (`grok`, Grok Build) |
 | Independent code review, image generation | Codex (`codex`, ChatGPT subscription) |
 
-Each delegate also gets an effort level chosen per task. A quota gate reads the usage the CLIs already cache on disk (no third-party tools) and moves work down a fallback chain when a subscription is 80% used. Codex review is triggered by a short checklist (money/auth/unattended code, big diffs, no tests, hedged reports), not on every change. Every reply ends with a label line such as `[Model: Haiku 5.5 → coder Sonnet 5.5 | Effort: High | Review: skipped]` so you can see what ran.
+Each delegate also gets an effort level chosen per task. The triage layer enters plan mode itself for wide, risky, ambiguous or greenfield work, and hands you a ready-made `/goal` line when a task has a machine-checkable finish. A quota gate reads the usage the CLIs already cache on disk (no third-party tools) and moves work down a fallback chain when a subscription is 80% used. Codex review is triggered by a short checklist (money/auth/unattended code, big diffs, no tests, hedged reports), not on every change. Every reply ends with a label line such as `[Model: Haiku 5.5 → coder Sonnet 5.5 | Effort: High | Review: skipped]` so you can see what ran.
 
 Claude is the default for work; the outside lanes are used only where they are genuinely better or cheaper. If a CLI is not installed, its lane is skipped. With nothing but Claude installed you still get the internal tiering.
 
