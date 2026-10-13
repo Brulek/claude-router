@@ -69,7 +69,7 @@ High blast radius (review at `high` effort):
 
 Weak self-check (review at `medium` effort):
 4. More than 3 files or roughly 150+ lines changed.
-5. No tests cover the change, or tests failed and were fixed over several rounds.
+5. The change was never exercised: no test covers it **and** nobody ran it to show the new behaviour working. (A script that was run and produced the expected output counts as exercised; most scripts have no test suite and that alone is not a reason to review.) Also when tests failed and were fixed over several rounds.
 6. `coder`'s own report contains hedges: "not sure", "might", "please verify".
 
 Always:
