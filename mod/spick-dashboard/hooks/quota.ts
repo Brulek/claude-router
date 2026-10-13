@@ -1,4 +1,4 @@
-import type { EngineInterface } from 'claude-code'
+import type { FsEntry } from 'claude-code'
 import type { Quota, QuotaWindows } from '../types'
 
 export function parseClaudeUsage(jsonText: string): QuotaWindows | null {
@@ -46,14 +46,25 @@ export function parseCodexRateLimits(text: string): QuotaWindows | null {
   }
 }
 
-async function newestCodexWindows($: EngineInterface, root: string): Promise<QuotaWindows | null> {
+/**
+ * The reads readQuota needs, as plain functions. `$` never crosses an import
+ * (claude plugin validate refuses it), so register.tsx builds this from
+ * $.env.get('HOME'), $.fs.read and $.fs.list.
+ */
+export type QuotaIO = {
+  home: () => Promise<string | undefined>
+  read: (path: string) => Promise<string>
+  list: (path: string) => Promise<readonly FsEntry[]>
+}
+
+async function newestCodexWindows(io: QuotaIO, root: string): Promise<QuotaWindows | null> {
   // sessions/YYYY/MM/DD/*.jsonl: walk the newest branch by name, then by mtime, reading at most 5 files
   const pick = async (dir: string, depth: number): Promise<string[]> => {
-    const entries = (await $.fs.list(dir)).filter(e => e.kind === 'dir').map(e => e.name).sort().reverse()
+    const entries = (await io.list(dir)).filter(e => e.kind === 'dir').map(e => e.name).sort().reverse()
     for (const name of entries) {
       const sub = `${dir}/${name}`
       if (depth === 0) {
-        const files = (await $.fs.list(sub)).filter(e => e.kind === 'file' && e.name.endsWith('.jsonl'))
+        const files = (await io.list(sub)).filter(e => e.kind === 'file' && e.name.endsWith('.jsonl'))
           .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 5).map(e => `${sub}/${e.name}`)
         if (files.length) return files
       } else {
@@ -65,7 +76,7 @@ async function newestCodexWindows($: EngineInterface, root: string): Promise<Quo
   }
   for (const file of await pick(root, 2)) {
     try {
-      const text = await $.fs.read(file)
+      const text = await io.read(file)
       const windows = parseCodexRateLimits(text)
       if (windows) return windows
     } catch { /* next file */ }
@@ -73,14 +84,14 @@ async function newestCodexWindows($: EngineInterface, root: string): Promise<Quo
   return null
 }
 
-export async function readQuota($: EngineInterface, nowMs: number): Promise<Quota> {
+export async function readQuota(io: QuotaIO, nowMs: number): Promise<Quota> {
   let home = ''
-  try { home = (await $.env.get('HOME')) ?? '' } catch { home = '' }
+  try { home = (await io.home()) ?? '' } catch { home = '' }
   let claude: QuotaWindows | null = null
   let codex: QuotaWindows | null = null
-  try { claude = parseClaudeUsage(await $.fs.read(`${home}/.claude.json`)) } catch { claude = null }
+  try { claude = parseClaudeUsage(await io.read(`${home}/.claude.json`)) } catch { claude = null }
   try {
-    codex = await newestCodexWindows($, `${home}/.codex/sessions`)
+    codex = await newestCodexWindows(io, `${home}/.codex/sessions`)
   } catch { codex = null }
   return { claude, codex, readAt: nowMs }
 }

@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
-import type { EngineInterface } from 'claude-code'
 import { parseClaudeUsage, parseCodexRateLimits, readQuota } from './quota'
+import type { QuotaIO } from './quota'
 
 test('parseClaudeUsage reads the cached utilization', () => {
   const json = JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: 1, utilization: { five_hour: { utilization: 5 }, seven_day: { utilization: 1 } } } })
@@ -33,18 +33,16 @@ type Entry = { name: string; kind: 'file' | 'dir'; size: number; mtimeMs: number
 const dir = (name: string): Entry => ({ name, kind: 'dir', size: 0, mtimeMs: 0, isLink: false })
 const file = (name: string, mtimeMs: number): Entry => ({ name, kind: 'file', size: 1, mtimeMs, isLink: false })
 
-function fakeEngine(opts: { home?: () => Promise<string | undefined>; files?: Record<string, string>; lists?: Record<string, Entry[]> }): EngineInterface {
+function fakeEngine(opts: { home?: () => Promise<string | undefined>; files?: Record<string, string>; lists?: Record<string, Entry[]> }): QuotaIO {
   return {
-    env: { get: opts.home ?? (async () => '/h') },
-    fs: {
-      read: async (path: string) => {
-        const text = opts.files?.[path]
-        if (text === undefined) throw new Error('ENOENT ' + path)
-        return text
-      },
-      list: async (path: string) => opts.lists?.[path] ?? [],
+    home: opts.home ?? (async () => '/h'),
+    read: async (path: string) => {
+      const text = opts.files?.[path]
+      if (text === undefined) throw new Error('ENOENT ' + path)
+      return text
     },
-  } as unknown as EngineInterface
+    list: async (path: string) => opts.lists?.[path] ?? [],
+  }
 }
 
 test('readQuota resolves with both sources null when env.get rejects', async () => {
