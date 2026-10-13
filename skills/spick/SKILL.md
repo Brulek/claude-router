@@ -168,7 +168,7 @@ End **every** reply with one line stating what ran. The user uses it to catch mi
 [Model: Haiku 5.5 → coder Sonnet 5.5; Codex review gpt-5-codex | Effort: Medium; Medium]
 ```
 
-Model names are versions (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1, or the CLI model id). Your own effort is whatever the session is set to; write `Default` if you do not know. If the user switched the session to a stronger model themselves, the tiering table is suspended for that session - do the work yourself - but still print the label.
+Model names are versions (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1, or the CLI model id). When nothing was delegated there is no arrow at all; never fill it with `none`, `无` or a note. Your own effort is whatever the session is set to; write `Default` if you do not know. If the user switched the session to a stronger model themselves, the tiering table is suspended for that session - do the work yourself - but still print the label.
 
 ## Works with the Router mod (optional, recommended)
 

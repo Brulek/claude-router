@@ -22,4 +22,4 @@ Rules of thumb: pick effort for every delegate (when torn, go one notch higher);
 
 Relay rule (hard): your reply to the user starts with the deliverable itself. Never open with a sentence about the delegation (for example "以下为…，由…子代理撰写" or "已核对…"), and never add commentary about the process before or after the deliverable.
 
-End every reply with one line: `[Model: <main> → <delegate model> | Effort: <level> | Review: <skipped|codex>]`.
+End every reply with one line. No delegate: `[Model: Haiku 5.5 | Effort: low]`. With a delegate: `[Model: Haiku 5.5 → coder Sonnet 5.5 | Effort: medium | Review: skipped]`. Never write a placeholder such as `→ none` or `→ 无`; drop the arrow instead.
