@@ -2,6 +2,7 @@ import { test, expect, mock } from 'claude-code/testing'
 
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 1, bodyColumns: 80, scroll: { offset: 0, bodyRows: 1 }, view: {} }
+const WIDE = { ...BAND, bodyColumns: 100 }
 const PANE = { title: 'Spick', isFocused: false, bodyColumns: 80, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} }
 
 for (const surface of ['terminal', 'desktop'] as const) {
@@ -16,22 +17,29 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: BAND })
     const texts = await ui.findAll({ type: 'Text' })
     const line = texts.map(t => t.text).join('')
-    expect(line).toContain('spick')
-    expect(line).toContain('last: you')
-    expect(line).toBe('spick · last: you · 3s')
+    expect(line.startsWith('spick')).toBe(true)
+    expect(line).toContain('Idle')
+    expect(line).toContain('last turn:')
+    expect(line).toBe('spick   Idle · last turn: main session · took 3s')
     expect(texts[0]?.props).toMatchObject({ bold: true, color: 'claude' })
+    expect(texts.slice(1).every(t => t.props.wrap === 'truncate-end')).toBe(true)
     expect(line).not.toContain('/spick for details')
+    expect(line).not.toContain('you')
   })
 
-  test(`band shows the active lane and the hint on ${surface}`, async ($, on) => {
+  test(`band reads Working and the hint while the main session works on ${surface}`, async ($, on) => {
     mock.clock(on, { now: 1000 })
     on('turn.start', async ($, e) => ({ turnId: e.turnId }))
     await $.turn.start({ text: 'hi', turnId: 't1' })
 
-    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: BAND })
+    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: WIDE })
     const texts = await ui.findAll({ type: 'Text' })
-    expect(texts.map(t => t.text).join('')).toBe('spick · you/spick for details')
-    expect((await ui.find({ type: 'Text', text: 'you' }))?.props).toMatchObject({ bold: true })
+    const line = texts.map(t => t.text).join('')
+    expect(line.startsWith('spick')).toBe(true)
+    expect(line).toContain('Working')
+    expect(line).toContain('/spick for details')
+    expect(line).toBe('spick   Working · 0s/spick for details')
+    expect((await ui.find({ type: 'Text', text: 'Working' }))?.props).toMatchObject({ bold: true, wrap: 'truncate-end' })
     expect((await ui.find({ type: 'Text', text: '/spick for details' }))?.props).toMatchObject({ color: 'subtle' })
   })
 
@@ -53,7 +61,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(line).toContain('src/lru.py')
     expect(line).not.toContain('/spick for details')
     expect((await ui.findAll({ type: 'Text' })).find(t => t.text === 'src/lru.py')?.props).toMatchObject({ color: 'error', wrap: 'truncate-end' })
-    expect((await ui.find({ type: 'Text', text: 'you' }))?.props).toMatchObject({ bold: true })
+    expect((await ui.find({ type: 'Text', text: 'Working' }))?.props).toMatchObject({ bold: true })
+    const lead = await ui.find({ type: 'Text', text: 'edited ' })
+    expect(lead).toBeDefined()
+    expect(lead?.props.color).toBeUndefined()
   })
 
   test(`pane draws the three sections and toggles the band on ${surface}`, async ($, on) => {
@@ -67,7 +78,10 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
     // turn.start refreshed the quota (nothing readable in the test, so every source is unknown)
     for (const want of ['Spick', 'stop picking, just start', 'This session', 'Quota', 'refreshed 0m ago', 'Recent turns']) expect(all).toContain(want)
-    expect(all).toContain('total      1      $3.00     list price, not a bill')
+    expect(all).toContain('total             1      $3.00     list price, not a bill')
+    expect(all.some(t => t.startsWith('main session'))).toBe(true)
+    expect(all.some(t => /^\d\d:\d\d  main session/.test(t))).toBe(true)
+    expect(all.some(t => /\byou\b/.test(t))).toBe(false)
     expect(all.some(t => t.startsWith('grok') && t.endsWith('unknown'))).toBe(true)
     // the Quota heading row spans the quota block, not the pane: here its own text, 'Quota' + 2 + 'refreshed 0m ago'
     expect((await ui.findAll({ type: 'Box' })).find(b => b.props.justifyContent === 'space-between' && b.text.startsWith('Quota'))?.props.width).toBe(23)
