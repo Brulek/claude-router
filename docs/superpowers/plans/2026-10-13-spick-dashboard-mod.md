@@ -1,5 +1,7 @@
 # Spick Dashboard Mod Implementation Plan
 
+> **Status (2026-10-13):** Code and docs are done and on `main` (mod up to 0.3.1, controls merged). `claude plugin validate` passes on the mod and the marketplace; `claude plugin test mod/spick-dashboard` passes 101/101. The plugin is installed at user scope from the local marketplace. Still open: the visual acceptance in a live session (Step 4 of Task 6), and pushing the metadata commit. The checkboxes below were not ticked as the work landed; treat the commits as the record.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** A Claude Code Mod that shows, above the prompt, who is working right now (lane, model, effort) and, in a `/spick` pane, this session's lane totals, local quota and recent turns. It observes; it never changes a model, effort or tool call.
