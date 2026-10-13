@@ -131,6 +131,69 @@ Rules:
 - Recent turns shows the newest first, at most `rows - 14` entries; the trailing note column carries attention causes in their colors.
 - No borders inside the pane. Structure comes from spacing and weight, as in Claude Code's own panes.
 
+## Controls (added 2026-10-13)
+
+The mod gains switches. They are the one place the mod *does* act: by changing what the model is told at each prompt. Three preferences are remembered across sessions in `$.store` (the "three choices"): routing, review, and the per-lane switches. The band's hidden state stays per session.
+
+### Switches
+
+| Switch | Values | Default | Effect on the prompt context |
+|---|---|---|---|
+| routing | `auto` · `on` · `off` | `auto` | `auto` = on while the session model is Haiku, off otherwise (a user who picked a stronger model wants it to work itself). `on` forces the triage checklist regardless of model. `off` injects: "Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; still end with the label line." |
+| review | `auto` · `off` | `auto` | `off` injects "Codex review is off: skip the review step and write `Review: off` in the label line." |
+| lane gemini / grok / codex | `on` · `off` | `on` | an off lane injects "<Lane> lane is off: use the fallback chain" and the checklist omits it |
+| band | `shown` · `hidden` | `shown` | band render yields; label line returns (existing behaviour) |
+
+A manual `/model` (or a model change through settings) by the user sets routing to `off` for the session only, like the router mod does, with a toast `spick: routing off (model selected manually) · /spick on to resume`. `/spick on` or `/spick auto` resumes.
+
+### Who injects the checklist
+
+When the mod is loaded, it owns the per-prompt checklist: a `prompt.submit` hook attaches one context block built from the switches (the three questions when routing is on; the off sentence when off; lane and review notes appended). On `session.start` the mod writes an empty marker file `~/.claude/.spick-mod-active` (via `$.fs.write`) and removes… no: it writes the marker with the session start time; `scripts/triage-hook.sh` prints nothing when the marker exists and is younger than 24 hours, so a machine without the mod keeps the bash hook, and a stale marker (mod uninstalled) expires on its own. The checklist text lives in one place in the mod (`hooks/checklist.ts`, pure) and the bash hook keeps its own copy for mod-less machines.
+
+### Commands
+
+`/spick` is registered with `immediate: true` and `argumentHint: '[on|off|auto|review on|off|lane <gemini|grok|codex> on|off|hide|show|quota]'`.
+
+| Command | Result |
+|---|---|
+| `/spick` | opens the pane; with no UI surface prints a one-paragraph status |
+| `/spick on` / `off` / `auto` | routing switch; remembered |
+| `/spick review on` / `off` | review switch; remembered |
+| `/spick lane <gemini\|grok\|codex> on\|off` | lane switch; remembered |
+| `/spick hide` / `show` | band visibility; session only |
+| `/spick quota` | refresh quota now and show the meters in the reply |
+
+Every change answers with one line of text and, when a pane is open, redraws it.
+
+### Pane: Controls section
+
+The pane gains a first section above "This session":
+
+```
+Controls
+  Routing   [ ◉ auto ] [ ○ on ] [ ○ off ]      on for this session (Haiku 5.5)
+  Review    [ ◉ auto ] [ ○ off ]
+  Lanes     [ Gemini on ] [ Grok on ] [ Codex off ]
+  Band      [ shown ]        [ Refresh quota ]        [ Close ]
+```
+
+Buttons carry hotkeys: `r` cycles routing, `v` toggles review, `g` / `k` / `c` toggle the lanes, `b` the band, `q` refreshes quota, `Esc`/`x` closes. The active value of a button group uses `variant: 'primary'`, the others `secondary`. The line after the routing group states the effective value for this session and why (`on for this session (Haiku 5.5)`, `off: model selected manually`, `off: Fable 5.1 is not Haiku`). No borders; same spacing rules as the other sections.
+
+### Band
+
+While routing is effectively off, the wordmark reads `spick off` with `off` in `warning`; everything else is unchanged. No buttons on the band.
+
+### State
+
+`$.state['spick-dashboard']` gains `controls: { routing: 'auto'|'on'|'off'; review: 'auto'|'off'; lanes: { gemini: boolean; grok: boolean; codex: boolean }; manualModel: boolean }`. `$.store` keys: `spick:routing`, `spick:review`, `spick:lanes` (JSON), read at `session.start` and written on every change.
+
+### Verification additions
+
+8. `/spick off` then a code request: the model does the work itself and the band reads `spick off`; `/spick on` restores the checklist.
+9. `/model opus` in a Haiku session: toast appears, pane says `off: model selected manually`, `/spick auto` returns to on.
+10. `/spick lane gemini off`, then a web lookup: the checklist names Grok as the search lane; the preference survives a new session.
+11. With the mod loaded, the bash hook prints nothing (marker fresh); after uninstalling the mod, the hook resumes within 24 hours.
+
 ## Behaviour
 
 What the Mod observes and how it turns it into state:
