@@ -58,7 +58,9 @@ Two session modes change *how* work proceeds, and they are not symmetric for you
 4. Something new is being built (a project or subsystem), not an existing thing changed.
 5. The user says 方案 / 规划 / 怎么做 / 设计, or "how should we".
 
-Do not enter it for one-file fixes, chores, questions or pure writing. Inside plan mode keep the tiering: dispatch `planner` (Opus) for the plan, write it to the plan file yourself, then `ExitPlanMode`. After approval, execute with `coder` step by step.
+Do not enter it for one-file fixes, chores, questions or pure writing.
+Headless sessions (`claude -p`) have no `EnterPlanMode` tool. If the tool is absent, write the plan inline, state the assumptions you would have asked about, and stop before editing unless the user already said to proceed.
+ Inside plan mode keep the tiering: dispatch `planner` (Opus) for the plan, write it to the plan file yourself, then `ExitPlanMode`. After approval, execute with `coder` step by step.
 
 ### Propose `/goal` when any of these holds
 
