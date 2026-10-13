@@ -249,3 +249,148 @@ test('the label-line section is left out while the band is hidden', async ($, on
   await $.command.run({ command: 'spick', args: 'hide', origin: { kind: 'composer' }, presentation: { isFullscreen: false, columns: 80 } })
   expect((await $.prompt.compose({ ...COMPOSE, surfaces: ['terminal'] })).sections.map(s => s.id)).toEqual(['intro'])
 })
+
+// --- controls ---------------------------------------------------------------
+
+const RUN = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 80 } }
+const START = { cwd: '/repo', surface: 'terminal' as const, isInteractive: true }
+const OFF = 'Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; still end with the label line.'
+
+/** The session world the controls read: a model, a marker write recorded (never the real file), a prompt that enters. */
+function session(on: Parameters<TestBody>[1], model = 'claude-haiku-5-5') {
+  const world = { model, writes: [] as { path: string; text: string }[], toasts: [] as string[] }
+  on('session.model', async () => ({ value: world.model }))
+  on('session.surfaces', async () => ({ value: ['terminal' as const] }))
+  on('fs.write', async ($, e) => { world.writes.push({ path: e.path, text: e.text }); return { value: undefined } })
+  on('ui.toast', async ($, e) => { world.toasts.push(e.text); return { value: undefined } })
+  on('prompt.submit', async ($, e) => ({ text: e.text, context: e.context }))
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  return world
+}
+
+const contextOf = async ($: Engine) => (await $.prompt.submit({ text: 'fix the bug', wait: false, origin: { kind: 'composer' } })).context ?? []
+
+test('a Haiku session gets the checklist, one block per prompt; /spick off swaps in the off sentence', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const world = session(on)
+  await $.session.start(START)
+  expect(world.writes).toEqual([{ path: '/h/.claude/.spick-mod-active', text: new Date(1000).toISOString() }])
+
+  const ctx = await contextOf($)
+  expect(ctx).toHaveLength(1)
+  expect(ctx[0]?.startsWith('[spick triage')).toBe(true)
+
+  const r = await $.command.run({ command: 'spick', args: 'off', ...RUN })
+  expect(r.text).toBe('spick: routing off · off (forced)')
+  expect(await contextOf($)).toEqual([OFF])
+
+  expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on · on (forced)')
+  expect((await contextOf($))[0]?.startsWith('[spick triage')).toBe(true)
+})
+
+test('auto on a model that is not Haiku is off', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  session(on, 'claude-fable-5-1')
+  await $.session.start(START)
+  expect(await contextOf($)).toEqual([OFF])
+  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · off: Fable 5.1 is not Haiku')
+})
+
+test('/spick lane gemini off persists to the store and the next session.start reads it back', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  session(on)
+  await $.session.start(START)
+  expect((await $.command.run({ command: 'spick', args: 'lane gemini off', ...RUN })).text).toBe('spick: Gemini lane off')
+  expect((await $.command.run({ command: 'spick', args: 'review off', ...RUN })).text).toBe('spick: review off')
+
+  // a new session: the state starts from the store, so only what was written comes back
+  await $.session.start(START)
+  const block = (await contextOf($))[0] ?? ''
+  expect(block).toContain('Gemini lane is off: use the fallback chain.')
+  expect(block).toContain('web lookup -> Grok')
+  expect(block).toContain('Codex review is off: skip the review step and write `Review: off` in the label line.')
+})
+
+test('session.start reads the three stored choices', async ($, on) => {
+  mock.clock(on)
+  mock.store(on, { 'spick:routing': 'off', 'spick:review': 'auto', 'spick:lanes': JSON.stringify({ gemini: true, grok: false, codex: true }) })
+  session(on)
+  await $.session.start(START)
+  expect(await contextOf($)).toEqual([OFF])
+  await $.command.run({ command: 'spick', args: 'on', ...RUN })
+  expect((await contextOf($))[0]).toContain('Grok lane is off: use the fallback chain.')
+})
+
+test('/model by the user turns routing off for the session with a toast; /spick auto restores', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const world = session(on)
+  on('command.run', { command: 'model' }, async () => ({ text: 'model set' }))
+  await $.session.start(START)
+  expect((await contextOf($))[0]?.startsWith('[spick triage')).toBe(true)
+
+  world.model = 'claude-opus-5-5'
+  expect((await $.command.run({ command: 'model', args: 'opus', ...RUN })).text).toBe('model set')
+  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on to resume'])
+  expect(await contextOf($)).toEqual([OFF])
+
+  world.model = 'claude-haiku-5-5'
+  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · on for this session (Haiku 5.5)')
+  expect((await contextOf($))[0]?.startsWith('[spick triage')).toBe(true)
+})
+
+test('a plugin-issued /model leaves routing alone', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const world = session(on)
+  on('command.run', { command: 'model' }, async () => ({ text: 'model set' }))
+  await $.session.start(START)
+  await $.command.run({ command: 'model', args: 'haiku', origin: { kind: 'plugin', name: 'other' }, presentation: RUN.presentation })
+  expect(world.toasts).toEqual([])
+  expect((await contextOf($))[0]?.startsWith('[spick triage')).toBe(true)
+})
+
+test('a model change through settings by the user turns routing off', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  const world = session(on)
+  on('config.set', { key: 'model' }, async ($, e) => ({ value: e.value }))
+  await $.session.start(START)
+  await $.config.set({ key: 'model', value: 'opus', previous: 'haiku', provider: { plugin: 'engine', tier: 'core' }, origin: { kind: 'composer' } })
+  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on to resume'])
+  expect(await contextOf($)).toEqual([OFF])
+})
+
+test('/spick quota answers with the meters text', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.env(on, { HOME: '/h' })
+  const claudeJson = JSON.stringify({ cachedUsageUtilization: { utilization: { five_hour: { utilization: 5 }, seven_day: { utilization: 8 } } } })
+  on('fs.read', async ($, e) => (e.path === '/h/.claude.json' ? { value: claudeJson } : { deny: 'missing' }))
+  on('fs.list', async () => ({ value: [] }))
+  expect((await $.command.run({ command: 'spick', args: 'quota', ...RUN })).text).toBe('spick quota: claude ▰▱▱▱▱▱▱▱▱▱ 8%')
+})
+
+test('unknown /spick arguments answer one line of usage', async ($, on) => {
+  const r = await $.command.run({ command: 'spick', args: 'lane claude off', ...RUN })
+  expect(r.text).toBe('usage: /spick [on|off|auto|review on|off|lane <gemini|grok|codex> on|off|hide|show|quota]')
+})
+
+test('/spick with no UI surface prints a one-paragraph status', async ($, on) => {
+  mock.clock(on)
+  mock.store(on)
+  on('session.model', async () => ({ value: 'claude-haiku-5-5' }))
+  on('session.surfaces', async () => ({ value: [] }))
+  on('fs.write', async () => ({ value: undefined }))
+  on('fs.read', async () => ({ deny: 'missing' }))
+  on('fs.list', async () => ({ value: [] }))
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
+  await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
+  const text = (await $.command.run({ command: 'spick', args: '', ...RUN })).text ?? ''
+  expect(text).toBe('Spick routing is auto (on for this session (Haiku 5.5)); review auto; lanes: Gemini on, Grok on, Codex off; band shown. Quota: no provider known (grok and gemini report unknown).')
+  expect(text).not.toContain('\n')
+})

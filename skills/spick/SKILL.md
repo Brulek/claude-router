@@ -196,6 +196,12 @@ If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haik
 | `spick setup` | Follow `references/onboarding.md` from the top |
 | `spick doctor` | `bash scripts/setup.sh --check` and report the table |
 | `spick quota` | `bash scripts/quota.sh` and report |
+| `/spick` | (dashboard mod) opens the pane; with no UI it prints a one-paragraph status |
+| `/spick on` / `off` / `auto` | (dashboard mod) routing switch, remembered; `off` means do the work yourself, no Spick dispatch; `auto` = on only in a Haiku session. A manual `/model` turns it off for the session |
+| `/spick review on` / `off` | (dashboard mod) Codex review step, remembered; when off write `Review: off` in the label line |
+| `/spick lane <gemini\|grok\|codex> on` / `off` | (dashboard mod) one outside lane, remembered; an off lane uses its fallback chain |
+| `/spick hide` / `show` | (dashboard mod) band visibility, this session only |
+| `/spick quota` | (dashboard mod) refreshes quota now and prints the meters |
 
 ## Files in this skill
 

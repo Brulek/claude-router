@@ -303,3 +303,12 @@ test('formatters', () => {
   expect(near(mixed, 2 + 1 + 0.2 + 1)).toBe(true)
   expect(estimateCost('gemini-3.8-flash', { input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })).toBeNull()
 })
+
+test('bandSegments: routing off puts a warning ` off` after the wordmark at every width', () => {
+  const v = { lane: MAIN_LANE, model: 'Fable 5.1', effort: 'high', agents: 0, isIdle: true, durationMs: 36_000, routingOff: true }
+  const wide = bandSegments(v, 120)
+  expect(wide.left.slice(0, 2)).toEqual([{ text: 'spick', style: 'brand' }, { text: ' off', style: 'warning' }])
+  expect(wide.left.map(s => s.text).join('')).toBe('spick off   Idle · last turn: Fable 5.1 · high effort · took 36s')
+  expect(bandSegments(v, 35).left.map(s => s.text).join('')).toBe('spick off · Idle · Fable 5.1')
+  expect(bandSegments({ ...v, routingOff: false }, 120).left[1]).toEqual({ text: '   ', style: 'plain' })
+})

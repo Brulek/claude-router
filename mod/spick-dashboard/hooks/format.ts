@@ -100,6 +100,8 @@ export type BandView = {
   mainModel?: string
   /** active main session or idle: one quota meter per known provider */
   meters?: QuotaMeter[]
+  /** routing is effectively off this session: the wordmark reads `spick off`, `off` in warning */
+  routingOff?: boolean
 }
 /** one provider's quota for the band: the weekly window, else the five-hour one */
 export type QuotaMeter = { name: string; pct: number }
@@ -159,7 +161,7 @@ const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'effort', 'wording', 'mod
  * then left segments in DROP_ORDER, until it fits. A cause is kept even when nothing else fits.
  */
 export function bandSegments(v: BandView, columns: number): Band {
-  const brand: Seg = { text: 'spick', style: 'brand' }
+  const wordmark: Seg[] = v.routingOff ? [{ text: 'spick', style: 'brand' }, { text: ' off', style: 'warning' }] : [{ text: 'spick', style: 'brand' }]
   const isMain = v.lane === MAIN_LANE
   const style = (s: Seg['style']): Seg['style'] => (v.isIdle ? 'dim' : s)
   const show: Record<Droppable, boolean> = {
@@ -172,7 +174,7 @@ export function bandSegments(v: BandView, columns: number): Band {
 
   const buildLeft = (): Seg[] => {
     if (columns < 40) {
-      const left: Seg[] = [brand, SEP, { text: v.isIdle ? 'Idle' : isMain ? 'Working' : v.lane, style: style('lane') }]
+      const left: Seg[] = [...wordmark, SEP, { text: v.isIdle ? 'Idle' : isMain ? 'Working' : v.lane, style: style('lane') }]
       if (show.model) left.push(SEP, { text: v.model, style: style('plain') })
       return left
     }
@@ -195,7 +197,7 @@ export function bandSegments(v: BandView, columns: number): Band {
     if (show.effort) parts.push([{ text: `${v.effort} effort`, style: style('plain') }])
     if (show.ordinal) parts.push([{ text: `agent ${v.agentIndex} of ${v.agents}`, style: 'dim' }])
     if (show.elapsed && v.durationMs !== undefined) parts.push([{ text: v.isIdle ? `took ${fmtDuration(v.durationMs)}` : fmtDuration(v.durationMs), style: 'dim' }])
-    return [brand, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
+    return [...wordmark, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
   }
 
   // right group: an attention cause from 40 columns; from 90, the main model for a delegate,

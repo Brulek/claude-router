@@ -33,6 +33,20 @@ export type LaneTotals = {
   costUsd: number | null
 }
 
+/** routing: `auto` follows the session model (on for Haiku), `on` / `off` force it */
+export type Routing = 'auto' | 'on' | 'off'
+/** review: `auto` follows the skill's review triggers, `off` skips Codex review */
+export type Review = 'auto' | 'off'
+export type LaneKey = 'gemini' | 'grok' | 'codex'
+export type Controls = {
+  routing: Routing
+  review: Review
+  /** true = the outside lane may be used */
+  lanes: { gemini: boolean; grok: boolean; codex: boolean }
+  /** the user picked a model by hand this session: routing is off until /spick on or /spick auto */
+  manualModel: boolean
+}
+
 export type QuotaWindows = { fiveHour?: number; sevenDay?: number }
 export type Quota = { claude: QuotaWindows | null; codex: QuotaWindows | null; readAt: number }
 
@@ -45,6 +59,10 @@ declare module 'claude-code' {
       totals: Record<string, LaneTotals>
       quota: Quota | null
       hidden: boolean
+      /** the switches; routing, review and lanes are also kept in $.store */
+      controls: Controls
+      /** the session model id from $.session.model(), '' until read */
+      sessionModel: string
     }
   }
 }

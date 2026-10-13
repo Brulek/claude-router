@@ -49,6 +49,9 @@ In a terminal session:
 
 Answer `y` to add the marketplace, pick the user scope. The band above the prompt then shows who is working; `/spick` opens the pane. While the band shows (terminal or desktop app), replies carry no label line; hide it with `/spick hide` and the label line returns.
 
+`/spick on|off|auto` switches routing (auto = on only in a Haiku session; picking a model with `/model` turns it off for the session), `/spick review on|off` the Codex review step, `/spick lane <gemini|grok|codex> on|off` one outside lane; these three choices are remembered across sessions.
+`/spick quota` refreshes and prints the quota meters; the pane's Controls section has the same switches with hotkeys (`r` `v` `g` `k` `c` `b` `q` `x`).
+
 ## Commands
 
 | Say | Effect |
