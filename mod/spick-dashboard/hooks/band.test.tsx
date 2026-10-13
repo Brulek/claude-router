@@ -181,7 +181,6 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(all.some(t => t.startsWith('codex'))).toBe(false)
     expect(all).not.toContain('unknown')
     expect(all.some(t => t.startsWith('claude') && t.includes('5h  ▰▱▱▱▱▱▱▱▱▱   5%') && t.includes('7d  ▰▰▰▰▰▰▰▰▰▱  85%'))).toBe(true)
-    expect(texts.find(t => t.text === '▰▰▰▰▰▰▰▰▰▱  85%')?.props).toMatchObject({ color: 'warning' })
     // narrow: five-cell bars
     const narrow = (await pane(60)).map(t => t.text)
     expect(narrow.some(t => t.startsWith('claude') && t.includes('5h  ▱▱▱▱▱   5%') && t.includes('7d  ▰▰▰▰▱  85%'))).toBe(true)

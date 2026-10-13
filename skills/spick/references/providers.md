@@ -101,7 +101,7 @@ planning                : planner → deep
 hard reasoning          : deep → gemini(claude-opus-5-5-high)
 ```
 
-When Claude's own quota is tight (≥80% weekly), coding flips to `codex → coder`.
+When Claude's own quota looks short to you, judge from the facts whether coding should flip to `codex → coder`.
 
 ## Subscriptions and the quota cache
 

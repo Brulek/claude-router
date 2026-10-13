@@ -562,10 +562,10 @@ export const register: Register = on => {
 
     // only claude and codex; a provider with no window data gets no row
     const quotaRows = ([['claude', q?.claude], ['codex', q?.codex]] as [string, QuotaWindows | null | undefined][]).map(([name, w]) => {
-      const cells: { lead: string; meter: string; isTight: boolean }[] = []
+      const cells: { lead: string; meter: string }[] = []
       for (const [label, pct] of [['5h', w?.fiveHour], ['7d', w?.sevenDay]] as const) {
         if (pct === undefined) continue
-        cells.push({ lead: `${cells.length > 0 ? '     ' : ''}${label}  `, meter: `${quotaBar(pct, barCells)} ${String(Math.round(pct)).padStart(3)}%`, isTight: pct >= 80 })
+        cells.push({ lead: `${cells.length > 0 ? '     ' : ''}${label}  `, meter: `${quotaBar(pct, barCells)} ${String(Math.round(pct)).padStart(3)}%` })
       }
       return { name: padRight(name, 8), cells }
     }).filter(r => r.cells.length > 0)
@@ -645,7 +645,7 @@ export const register: Register = on => {
           </Box>
           <Box flexDirection="column" paddingLeft={2}>
             {quotaNote ? <Text color="subtle">{quotaNote}</Text> : null}
-            {quotaRows.map(r => <Text>{r.name}{r.cells.flatMap(c => [c.lead, c.isTight ? <Text color="warning">{c.meter}</Text> : c.meter])}</Text>)}
+            {quotaRows.map(r => <Text>{r.name}{r.cells.flatMap(c => [c.lead, c.meter])}</Text>)}
           </Box>
         </Box>
 

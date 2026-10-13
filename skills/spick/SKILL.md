@@ -32,7 +32,7 @@ Go down this table top to bottom; the first matching row wins. "Primary" is the 
 | Generate video | none | Tell the user: Grok Imagine, Sora and Veo are web/app only | No CLI can do this today; say so instead of trying |
 | Understand a long video / audio file, or a document far beyond ~200 pages | **Gemini** | Claude `deep` (documents only) | Gemini takes media files natively and has the largest context |
 | Daily chores: Q&A, find/read files, summarise, tidy, run an existing script, send an email with an existing tool | **You (Haiku)** | - | Cheapest; no handoff overhead |
-| Write, change, debug, refactor or test code (except a one-line or config-only change) | **`coder`** (Sonnet) | Codex `exec` with workspace-write | Sonnet is strong at code and keeps context in-house; Codex is a second implementer when Sonnet is stuck or Claude quota is tight |
+| Write, change, debug, refactor or test code (except a one-line or config-only change) | **`coder`** (Sonnet) | Codex `exec` with workspace-write | Sonnet is strong at code and keeps context in-house; Codex is a second implementer when Sonnet is stuck or you judge Claude quota to be short |
 | Plan, design, break a multi-step task down, "how should we do X" | **`planner`** (Opus) | `deep` | Planning quality compounds; pay for Opus once, then execute on Sonnet |
 | Hard reasoning, important decisions, risky operations, complex debugging, formal long-form writing | **`deep`** (Opus) | Gemini on `claude-opus-5-5-high` (uses Google quota) | Opus for judgment; the Gemini lane can run Opus on another subscription when Claude's is drained |
 | You cannot tell how hard it is | **`deep`** | - | Misjudging downward is the expensive mistake; a wasted Opus call is cheap by comparison |

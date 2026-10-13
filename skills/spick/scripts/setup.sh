@@ -91,16 +91,27 @@ PY
   echo "== config =="
   if [ -n "$PY" ]; then
     "$PY" - "$CONFIG" "$lanes" "$model" "$effort" <<'PY'
-import sys, json, os, datetime
+import sys, json, os, datetime, shutil
 cfg, lanes, model, effort = sys.argv[1:5]
-d = {
+old = {}
+if os.path.exists(cfg):
+    try:
+        old = json.load(open(cfg))
+        if not isinstance(old, dict): old = {}
+    except Exception:
+        old = {}
+    shutil.copy2(cfg, cfg + ".bak")
+    print(f"  backup {cfg}.bak")
+owned = {
   "version": 1,
   "installed_at": datetime.date.today().isoformat(),
   "lanes": {k: (k in lanes.split(",")) for k in ("gemini", "grok", "codex")},
   "main_session": {"model": model or "haiku", "effort": effort or "medium"},
-  "quota": {"tight_percent": 80, "prefer_weekly_window": True},
   "review_triggers": {"files": 3, "lines": 150},
 }
+# keep every key setup does not own (subscriptions etc.); drop retired quota threshold block
+d = {k: v for k, v in old.items() if k not in owned and k != "quota"}
+d.update(owned)
 json.dump(d, open(cfg, "w"), indent=2, ensure_ascii=False)
 print(f"  wrote  {cfg}")
 PY

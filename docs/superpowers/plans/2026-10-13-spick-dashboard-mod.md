@@ -733,12 +733,6 @@ rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && 
         ? { lane: l.lane, model: l.model, effort: l.effort, agents: 0, isIdle: true, durationMs: (l.endedAt ?? l.startedAt) - l.startedAt, note: undefined }
         : null
     if (!view) return next(e)
-    // quota attention wins over nothing; a breach or review note already on the turn wins over quota
-    if (!view.note && q) {
-      const tight = [['claude 5h', q.claude?.fiveHour], ['claude 7d', q.claude?.sevenDay], ['codex 7d', q.codex?.sevenDay]]
-        .find(([, pct]) => typeof pct === 'number' && pct >= 80) as [string, number] | undefined
-      if (tight && !view.isIdle) view.note = { kind: 'warning', text: `${tight[0]} ${tight[1]}%` }
-    }
     const segs = bandSegments(view, e.props.bodyColumns)
     const { Box, Text } = $.ui.resolve(e)
     const left = segs.filter(s => s.text !== HINT && s !== segs[segs.length - 1] || (s.style !== 'warning' && s.style !== 'error' && s.text !== HINT))
@@ -784,7 +778,7 @@ Note for the implementer: the `left` line above is scaffolding to delete; the tw
     const qLine = (name: string, w?: { fiveHour?: number; sevenDay?: number } | null) => {
       if (!w) return <Text><Text>{padRightText(name, 7)}</Text><Text color="subtle">unknown</Text></Text>
       const cell = (label: string, pct?: number) => pct === undefined ? null : (
-        <Text color={pct >= 80 ? 'warning' : undefined}>{`${label}  ${quotaBar(pct)}  ${String(Math.round(pct)).padStart(3)}%   `}</Text>)
+        <Text>{`${label}  ${quotaBar(pct)}  ${String(Math.round(pct)).padStart(3)}%   `}</Text>)
       return <Text>{padRightText(name, 7)}{cell('5h', w.fiveHour)}{cell('7d', w.sevenDay)}</Text>
     }
     const padRightText = (s: string, w: number) => s + ' '.repeat(Math.max(0, w - s.length)) + ' '
