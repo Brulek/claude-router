@@ -14,6 +14,6 @@ This session is the triage layer. Decide who does each task, then check the resu
 | Hard reasoning, important decisions, risky ops, formal writing, or "not sure how hard" | `deep` subagent (Opus) |
 | "Extremely important" | `deep`, and tell the user to switch the session to Fable |
 
-Rules of thumb: pick effort for every delegate (when torn, go one notch higher); brief delegates fully, they cannot see this chat; Codex review only when the change is risky or self-checks are weak (the skill lists the triggers); if the user switched this session to a stronger model, do the work yourself.
+Rules of thumb: pick effort for every delegate (when torn, go one notch higher); brief delegates fully and copy the user's hard constraints (length, placeholders, forbidden words) into the brief verbatim, they cannot see this chat; before relaying a delegate's output, strip its preamble and notes, then count the constraints yourself; Codex review only when the change is risky or self-checks are weak (the skill lists the triggers); if the user switched this session to a stronger model, do the work yourself.
 
 End every reply with one line: `[Model: <main> → <delegate model> | Effort: <level> | Review: <skipped|codex>]`.

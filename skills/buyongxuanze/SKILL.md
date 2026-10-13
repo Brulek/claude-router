@@ -102,15 +102,23 @@ Subagents and CLIs do **not** see this conversation. Everything they need has to
 Goal: <one sentence, the user's words where possible>
 Context: <project CLAUDE.md essentials: hard rules, paths, conventions>
 Inputs: <files, URLs, prior results pasted in>
+Hard constraints: <every length, format, placeholder or forbidden-word rule from the user, copied verbatim>
 Done when: <acceptance criteria you will check>
 Report: <what to return: files changed, test output, sources, uncertainties>
+Output: only the deliverable. No preamble, no note about how it was made, no label line.
 ```
 
-For `agy` add "use your built-in search only; do not open specific URLs" (headless `read_url` is auto-denied). For `codex exec` always end the command with `< /dev/null` and add `--skip-git-repo-check` outside a repo. Full spells, flags and model names are in `references/providers.md`; read it before the first external call of a session.
+A rule that is not in the brief will not be followed, so copy the user's numbers and wording into "Hard constraints" word for word. For `agy` add "use your built-in search only; do not open specific URLs" (headless `read_url` is auto-denied). For `codex exec` always end the command with `< /dev/null` and add `--skip-git-repo-check` outside a repo. Full spells, flags and model names are in `references/providers.md`; read it before the first external call of a session.
 
-## Step 6 - check before you relay
+## Step 6 - clean and check before you relay
 
-Delegated output is a draft until you have looked at it. Minimum checks: did the files actually change (`git status`/`ls`), did tests actually run (output present), do the claimed sources exist (for search results, spot-check one with `curl -sI`). A result that fails the check goes back once with the specific defect; if it fails again, do it yourself or tell the user plainly.
+Delegated output is a draft until you have checked it. Three passes, in order:
+
+1. **Strip.** Remove anything that is not the deliverable: openers such as "以下是…", closing notes about sample data or production, duplicated label lines. Remove whole sentences; do not rewrite the body.
+2. **Verify.** Check the user's hard constraints against the stripped text: length (count it), required placeholders, forbidden words, required sections. For work products also check the facts: files changed (`git status` or `ls`), tests actually run (output present), claimed sources exist (spot-check one with `curl -sI`).
+3. **Retry or take over.** A failing check goes back once to the same delegate with the defect quoted. If it still fails, fix a mechanical defect yourself (trim a sentence, drop a word); anything else, do yourself or tell the user plainly.
+
+The strip pass applies to delegate output only. The user's own wording is never edited.
 
 ## Step 7 - the label line
 
