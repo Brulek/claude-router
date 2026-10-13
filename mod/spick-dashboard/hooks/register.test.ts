@@ -212,17 +212,22 @@ test('tool calls tick the elapsed time, at most one write per second', { plugins
 test('turn.step chunks tick the elapsed time', { plugins: [probePlugin] }, async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
-  on('turn.step', async function* ($, e) {
+  const RESULT = { turnId: 't1', index: 0, answer: 'hi there', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+  on('turn.step', async function* () {
     yield { kind: 'text' as const, index: 0, text: 'hi' }
-    return { turnId: e.turnId, index: e.index, answer: 'hi', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+    yield { kind: 'text' as const, index: 0, text: ' there' }
+    return RESULT
   })
   await $.turn.start({ text: 'go', turnId: 't1' })
   await clock.advance(2000)
   const chunks: unknown[] = []
   const step = $.turn.step({ turnId: 't1', index: 0, model: 'claude-fable-5-1', effort: 'high', messageCount: 1 })
-  for await (const c of step) chunks.push(c)
-  // the chunk passes up unchanged, and its arrival stamped the turn
-  expect(chunks).toEqual([{ kind: 'text', index: 0, text: 'hi' }])
+  // read by hand so the generator's own return value is caught
+  let r = await step.next()
+  while (!r.done) { chunks.push(r.value); r = await step.next() }
+  // both chunks pass up in order and unchanged, the engine's result comes back as returned, and the stream stamped the turn
+  expect(chunks).toEqual([{ kind: 'text', index: 0, text: 'hi' }, { kind: 'text', index: 0, text: ' there' }])
+  expect(r.value).toEqual(RESULT)
   expect((await probe($)).current).toMatchObject({ nowMs: 3000, model: 'Fable 5.1', effort: 'high' })
 })
 

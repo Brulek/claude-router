@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { LaneTotals, Quota, QuotaWindows, TurnRecord } from '../types'
-import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaSummary, table } from './format'
+import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaSummary, quotaWarning, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
 
@@ -57,7 +57,8 @@ async function tick($: EngineInterface, lastMs: number): Promise<number> {
   const now = await $.clock.now()
   if (now - lastMs < TICK_MS) return lastMs
   if (!(await read($, current))) return lastMs
-  await update($, current, c => (c ? { ...c, nowMs: now } : c))
+  // parallel streams may tick from the same old stamp: never move the clock back
+  await update($, current, c => (c ? { ...c, nowMs: Math.max(c.nowMs ?? 0, now) } : c))
   return now
 }
 
@@ -154,14 +155,14 @@ export const register: Register = on => {
     const stream = next(e)
     for await (const chunk of stream) {
       yield chunk
-      try { lastTickMs = await tick($, lastTickMs) } catch {}
+      try { lastTickMs = Math.max(lastTickMs, await tick($, lastTickMs)) } catch {}
     }
     return await stream.result
   })
 
   // any tool call, from any loop, ticks the elapsed time
   on('tool.call', async ($, e, next) => {
-    try { lastTickMs = await tick($, lastTickMs) } catch {}
+    try { lastTickMs = Math.max(lastTickMs, await tick($, lastTickMs)) } catch {}
     return next(e)
   }).catch(passThrough)
 
@@ -310,14 +311,9 @@ export const register: Register = on => {
         : null
     if (!view) return next(e)
     const q = await read($, quota)
+    // a breach or review note already on the turn wins over a hot quota window; a hot window, active or idle, wins over context
+    view.note ??= quotaWarning(q)
     if (view.isIdle) view.quota = quotaSummary(q)
-    // a breach or review note already on the turn wins over a quota warning; a warning wins over context
-    else if (!view.note) {
-      const windows: [string, number | undefined][] = [['claude 5h', q?.claude?.fiveHour], ['claude 7d', q?.claude?.sevenDay], ['codex 7d', q?.codex?.sevenDay]]
-      for (const [name, pct] of windows) {
-        if (pct !== undefined && pct >= 80) { view.note = { kind: 'warning', text: `${name} ${Math.round(pct)}%` }; break }
-      }
-    }
     const { left, right } = bandSegments(view, e.props.bodyColumns)
     const { Box, Text } = $.ui.resolve(e)
     const paint = (s: Seg) => {

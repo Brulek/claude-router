@@ -62,7 +62,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(line).not.toContain('/spick for details')
     expect((await ui.findAll({ type: 'Text' })).find(t => t.text === 'src/lru.py')?.props).toMatchObject({ color: 'error', wrap: 'truncate-end' })
     expect((await ui.find({ type: 'Text', text: 'Working' }))?.props).toMatchObject({ bold: true })
-    expect((await ui.find({ type: 'Text', text: 'edited ' }))?.props.color).toBeUndefined()
+    const lead = await ui.find({ type: 'Text', text: 'edited ' })
+    expect(lead).toBeDefined()
+    expect(lead?.props.color).toBeUndefined()
   })
 
   test(`pane draws the three sections and toggles the band on ${surface}`, async ($, on) => {

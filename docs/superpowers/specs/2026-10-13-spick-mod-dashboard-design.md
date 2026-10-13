@@ -81,6 +81,8 @@ Width tiers (from `e.props.bodyColumns`):
 | 40–49 | also no effort; attention cause and idle duration still show |
 | < 40 | `spick · <lane or Working> · <model>` only |
 
+"Elapsed" in the 50–69 row means the active timer only; the idle `took <duration>` keeps showing from 40 columns up. Below 40 the idle band reads `spick · Idle · <model>` (the last turn's model), all `subtle` after the wordmark.
+
 The band never wraps: every `Text` in it has `wrap="truncate-end"`.
 
 ## The pane
@@ -138,7 +140,7 @@ What the Mod observes and how it turns it into state:
 
 Lane on the band: every Agent or CLI call in flight is held in a map keyed by `tool_use_id`, in start order. The band shows the most recent entry still in the map and falls back to `main session` only when the map is empty, so parallel agents never show the wrong lane and one finishing early does not drop the band to `main session` while another still works.
 
-Delegate record: alongside the map, each turn keeps one `delegate` (lane, model, effort), set whenever an Agent or CLI call starts and never cleared when the call ends. At `turn.complete` the closed record in `last` and `turns` takes its lane, model and effort from the delegate, `main session` when the turn had none, so the idle band reads `last: planner · Opus 5.5 · high · 2m 14s` and recent turns list delegates.
+Delegate record: alongside the map, each turn keeps one `delegate` (lane, model, effort), set whenever an Agent or CLI call starts and never cleared when the call ends. At `turn.complete` the closed record in `last` and `turns` takes its lane, model and effort from the delegate, `main session` when the turn had none, so the idle band reads `Idle · last turn: planner on Opus 5.5 · high effort · took 2m 14s` and recent turns list delegates.
 
 Cost estimate: tokens per model from the engine's usage events when available (input, output, cache read, cache write; cache write is priced at 1.25 × input), multiplied by the list prices held in a small table in the Mod; otherwise the cell shows `—`. Outside CLIs report no usage, so their rows count turns and show `—`. The pane says "list price, not a bill" next to the total.
 
@@ -182,7 +184,7 @@ Shipped inside the Spick repository under `mod/`, installed with `claude plugin 
 ## Verification
 
 1. `claude plugin validate mod/spick-dashboard` passes; `tsc -p` passes; `claude plugin test` runs all four test files green.
-2. Interactive, terminal, width ≥ 70: idle band shows `last:` dim; a chore shows `you · Haiku 5.5`; a code task shows `coder · Sonnet 5.5 · <effort>` while the agent runs; an `agy -p` call shows `Gemini`.
+2. Interactive, terminal, width ≥ 70: idle band shows `Idle · last turn:` dim; a chore shows `Working · Haiku 5.5`; a code task shows `coder · Sonnet 5.5 · <effort>` while the agent runs; an `agy -p` call shows `Gemini`.
 3. Resize the terminal to 60, 45, 35 columns: the band drops segments in the documented order and never wraps.
 4. Edit a `.py` file from the Haiku main session: the band shows `edited <file>` in error color for that turn only.
 5. `/spick` opens the pane; columns align; quota bars match `scripts/quota.sh`; `Hide` hides the band and `/spick show` restores it.

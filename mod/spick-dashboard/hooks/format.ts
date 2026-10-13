@@ -129,6 +129,13 @@ export function quotaSummary(q: Quota | null | undefined): string | undefined {
   return parts.length > 0 ? parts.join(' · ') : undefined
 }
 
+/** The first quota window at 80% or more, as an attention cause; none when nothing is hot. */
+export function quotaWarning(q: Quota | null | undefined): Note | undefined {
+  const windows: [string, number | undefined][] = [['claude 5h', q?.claude?.fiveHour], ['claude 7d', q?.claude?.sevenDay], ['codex 7d', q?.codex?.sevenDay]]
+  for (const [name, pct] of windows) if (pct !== undefined && pct >= 80) return { kind: 'warning', text: `${name} ${Math.round(pct)}%` }
+  return undefined
+}
+
 export function bandSegments(v: BandView, columns: number): Band {
   const brand: Seg = { text: 'spick', style: 'brand' }
   const isMain = v.lane === MAIN_LANE

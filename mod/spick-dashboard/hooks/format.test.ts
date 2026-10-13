@@ -1,7 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
-  fmtDuration, fmtCost, estimateCost, quotaSummary, verbOf, MAIN_LANE,
+  fmtDuration, fmtCost, estimateCost, quotaSummary, quotaWarning, verbOf, MAIN_LANE,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -154,6 +154,22 @@ test('bandSegments width tiers: 90+, 70-89, 50-69, 40-49, under 40', () => {
 test('bandSegments idle: quota summary when known, nothing on the right when not', () => {
   expect(R(bandSegments({ ...coderIdle, quota: undefined }, 100))).toBe('')
   expect(L(bandSegments({ ...mainIdle, model: '' }, 100))).toBe('spick   Idle · last turn: main session · high effort · took 36s')
+})
+
+test('bandSegments idle with a hot quota window shows it as the cause, in warning', () => {
+  const hot = { ...coderIdle, quota: 'claude 7d 1% · codex 7d 83%', note: quotaWarning({ claude: { sevenDay: 1 }, codex: { sevenDay: 83 }, readAt: 0 }) }
+  const b = bandSegments(hot, 100)
+  expect(b.right).toEqual([{ text: 'codex 7d 83%', style: 'warning' }])
+  expect(L(b)).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s')
+  // the cause still shows at 40-89 columns
+  expect(bandSegments(hot, 45).right).toEqual([{ text: 'codex 7d 83%', style: 'warning' }])
+})
+
+test('quotaWarning names the first window at 80% or more, none otherwise', () => {
+  expect(quotaWarning({ claude: { fiveHour: 5, sevenDay: 1 }, codex: { sevenDay: 83 }, readAt: 0 })).toEqual({ kind: 'warning', text: 'codex 7d 83%' })
+  expect(quotaWarning({ claude: { fiveHour: 80 }, codex: { sevenDay: 90 }, readAt: 0 })).toEqual({ kind: 'warning', text: 'claude 5h 80%' })
+  expect(quotaWarning({ claude: { sevenDay: 79 }, codex: null, readAt: 0 })).toBeUndefined()
+  expect(quotaWarning(null)).toBeUndefined()
 })
 
 test('quotaSummary picks the weekly window per known provider', () => {
