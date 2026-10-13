@@ -125,7 +125,8 @@ export function noteParts(note: Note): Seg[] {
 export function quotaMeters(q: Quota | null | undefined): QuotaMeter[] {
   const out: QuotaMeter[] = []
   for (const [name, w] of [['claude', q?.claude], ['codex', q?.codex]] as const) {
-    const pct = w?.sevenDay ?? w?.fiveHour
+    // only a finite number counts as known: a NaN weekly value must not hide a good five-hour one
+    const pct = [w?.sevenDay, w?.fiveHour].find((p): p is number => typeof p === 'number' && Number.isFinite(p))
     if (pct !== undefined) out.push({ name, pct })
   }
   return out
@@ -171,7 +172,7 @@ export function bandSegments(v: BandView, columns: number): Band {
   if (v.note) right = noteParts(v.note)
   else if (columns >= 90) {
     const meters = v.meters ?? []
-    if (!v.isIdle && !isMain) right = [{ text: v.mainModel ? `main: ${v.mainModel}` : HINT, style: 'dim' }]
+    if (!v.isIdle && !isMain && v.mainModel) right = [{ text: `main: ${v.mainModel}`, style: 'dim' }]
     else if (meters.length > 0) right = meterSegs(meters, columns >= 110 ? 10 : 5)
     else if (!v.isIdle) right = [{ text: HINT, style: 'dim' }]
   }
@@ -189,7 +190,8 @@ export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
 
 /** `cells` cells of used (▰) and free (▱): ten in the pane and the wide band, five on a narrower band. */
 export function quotaBar(pct: number, cells = 10): string {
-  const used = Math.min(cells, Math.max(0, Math.round(pct / (100 / cells))))
+  // a non-finite input draws all cells free
+  const used = Number.isFinite(pct) ? Math.min(cells, Math.max(0, Math.round(pct / (100 / cells)))) : 0
   return '▰'.repeat(used) + '▱'.repeat(cells - used)
 }
 

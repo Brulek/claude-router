@@ -177,6 +177,18 @@ test('bandSegments right group fallbacks: idle with no provider is empty, active
   expect(L(bandSegments({ ...mainIdle, model: '' }, 100))).toBe('spick   Idle · last turn: main session · high effort · took 36s')
 })
 
+test('bandSegments active delegate without a known main model falls through to the meters, then the hint', () => {
+  const noMain = { ...coderActive, mainModel: undefined }
+  expect(bandSegments({ ...noMain, meters: METERS }, 120).right).toEqual(bandSegments({ ...mainActive, meters: METERS }, 120).right)
+  expect(R(bandSegments({ ...noMain, meters: METERS }, 120))).toBe(WIDE_METERS)
+  expect(R(bandSegments({ ...noMain, meters: [] }, 120))).toBe('/spick for details')
+})
+
+test('quotaMeters counts only finite values: a NaN weekly falls back to a finite five-hour, none at all omits the provider', () => {
+  expect(quotaMeters({ claude: { sevenDay: NaN, fiveHour: 12 }, codex: { sevenDay: 37 }, readAt: 0 })).toEqual([{ name: 'claude', pct: 12 }, { name: 'codex', pct: 37 }])
+  expect(quotaMeters({ claude: { sevenDay: NaN }, codex: { sevenDay: Infinity, fiveHour: NaN }, readAt: 0 })).toEqual([])
+})
+
 test('quotaMeters takes the weekly window per known provider, five-hour when the weekly is unknown', () => {
   expect(quotaMeters({ claude: { fiveHour: 5, sevenDay: 8 }, codex: { sevenDay: 37 }, readAt: 0 })).toEqual(METERS)
   expect(quotaMeters({ claude: { fiveHour: 12 }, codex: null, readAt: 0 })).toEqual([{ name: 'claude', pct: 12 }])
@@ -194,6 +206,12 @@ test('table pads columns and right-aligns numbers, with em dash for unpriced', (
   expect(rows[1]).toBe('main session     11      $0.04')
   expect(rows[2]).toBe('Gemini            2          —')
   expect(new Set(rows.map(r => r.length)).size).toBe(1)
+})
+
+test('quotaBar draws a non-finite input as all cells free', () => {
+  expect(quotaBar(NaN)).toBe('▱▱▱▱▱▱▱▱▱▱')
+  expect(quotaBar(Infinity, 5)).toBe('▱▱▱▱▱')
+  expect(quotaBar(-Infinity)).toBe('▱▱▱▱▱▱▱▱▱▱')
 })
 
 test('quotaBar renders ten cells, or as many as asked', () => {
