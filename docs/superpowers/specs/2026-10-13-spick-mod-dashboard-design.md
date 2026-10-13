@@ -24,58 +24,64 @@ Appearance is a first-class requirement, not polish at the end. Every screen in 
 
 ## The band
 
-Rendered by a `ui.render` hook on `AbovePrompt`. Layout: a single row `Box` with `justifyContent="space-between"`; left group holds the status segments, right group holds the hint.
+Rendered by a `ui.render` hook on `AbovePrompt`. Layout: a single row `Box` with `justifyContent="space-between"`; the left group is the status sentence, the right group is context (hint, main-session model, quota summary, or the attention cause). The wordmark is followed by three spaces, then segments separated by ` · `.
 
-Active turn, Haiku working alone:
+Every state reads as a short sentence. No pronouns, no bare abbreviations: `high effort`, `took 36s`, `agent 2 of 2`.
 
-```
-spick · you · Haiku 5.5 · low                                     /spick for details
-```
-
-Active turn, a subagent working:
+Active, the main session itself working (elapsed time ticks on each model chunk or tool call):
 
 ```
-spick · coder · Sonnet 5.5 · medium · 1 of 2 agents              /spick for details
+spick   Working · Fable 5.1 · high effort · 12s                                    /spick for details
 ```
 
-Active turn, an outside lane:
+Active, a subagent working (right group names the main session's model):
 
 ```
-spick · Gemini · gemini-3.8-flash · low                           /spick for details
+spick   coder is working · Sonnet 5.5 · medium effort · agent 2 of 2 · 44s         main: Fable 5.1
 ```
 
-Idle, showing the last turn (all dim, hint dropped):
+Active, an outside CLI (verb by lane: Gemini `is searching`, Grok `is fetching X`, Codex `is reviewing` when the call is a review, else `is working`):
 
 ```
-spick · last: planner · Opus 5.5 · high · 2m 14s
+spick   Gemini is searching · gemini-3.8-flash · low effort · 31s                  main: Fable 5.1
 ```
 
-Attention states replace the hint with a short cause; the cause word is colored, nothing else is:
+Idle (all `subtle` after the wordmark; right group is a quota summary of the known providers, blank when none is known):
 
 ```
-spick · coder · Sonnet 5.5 · medium                         codex 7d 83%    ← warning color on "codex 7d 83%"
-spick · you · Haiku 5.5 · low                        edited src/lru.py    ← error color on the file name
-spick · coder · Sonnet 5.5 · medium                    review: codex    ← warning color on "review: codex"
+spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s        quota: claude 7d 1% · codex 7d 30%
+spick   Idle · last turn: Fable 5.1 · high effort · took 36s                       quota: claude 7d 1% · codex 7d 30%
+```
+
+Attention states replace the right group with the cause; only the cause word is colored:
+
+```
+spick   Working · Haiku 5.5 · low effort · 8s                                      edited src/lru.py      ← error color on the file name
+spick   coder is working · Sonnet 5.5 · medium effort · 44s                        review: codex          ← warning
+spick   Working · Haiku 5.5 · low effort · 8s                                      codex 7d 83%           ← warning
 ```
 
 Segment rules:
 
-- `spick` is bold in `claude` color, always first. It is the only branded element.
-- Lane: `you` for the main session, the subagent type (`coder`, `planner`, `deep`, `Explore`, …), or the CLI (`Gemini`, `Grok`, `Codex`). Bold.
-- Model: a display name. Claude ids map to `Haiku 5.5` / `Sonnet 5.5` / `Opus 5.5` / `Fable 5.1`; CLI models show the id the command named, or nothing if it named none.
-- Effort: the level as a word (`low` … `max`). Absent for CLIs that did not name one.
-- Agent count appears only when more than one agent ran in this turn and an agent is the lane showing: `<ordinal> of <agents this turn> agents`, the ordinal being the showing agent's place in the order this turn started them (the second of two reads `2 of 2 agents`).
-- Idle state prefixes `last:` and appends the turn's wall time, all in `subtle`.
-- The hint `/spick for details` is `subtle`; it is dropped first when width is short and whenever an attention state is showing.
+- `spick` is bold in `claude` color, always first, followed by three spaces (not a separator).
+- Subject: `Working` for the main session; `<lane> is working` for a subagent (bold lane name); `<CLI> is <verb>` for an outside lane. Idle: `Idle`, then `last turn: <subject-in-past-form>` where a delegate reads `coder on Sonnet 5.5` and the main session reads just the model.
+- Model: display name (`Haiku 5.5` / `Sonnet 5.5` / `Opus 5.5` / `Fable 5.1`, or the CLI model id). Absent for a CLI call that named none.
+- Effort: `<level> effort`. Absent when unknown.
+- Agent ordinal: `agent <n> of <m>` only while a subagent is active and more than one agent ran this turn.
+- Elapsed: `<duration>` while active (refreshed on every `turn.step` chunk and `tool.call`), `took <duration>` when idle.
+- Right group precedence: attention cause > (active delegate: `main: <model>`) > (active main: `/spick for details`) > (idle: `quota: …` summary, omitted when nothing is known).
 
-Width tiers (columns from `e.props.bodyColumns`, the band's own body width on every surface):
+Width tiers (from `e.props.bodyColumns`):
 
 | Columns | Shown |
 |---|---|
-| ≥ 70 | everything |
-| 50–69 | no hint, no agent count |
-| 40–49 | no effort |
-| < 40 | `spick · <lane> · <model>` only |
+| ≥ 90 | everything |
+| 70–89 | no right group except an attention cause |
+| 50–69 | also no agent ordinal, no elapsed; `effort` keeps its word |
+| 40–49 | also no effort; attention cause and idle duration still show |
+| < 40 | `spick · <lane or Working> · <model>` only |
+
+The band never wraps: every `Text` in it has `wrap="truncate-end"`.
 
 ## The pane
 
@@ -86,7 +92,7 @@ Spick                                                         stop picking, just
 
 This session
   lane      turns   est. cost
-  you          11      $0.04
+  main session 11      $0.04
   coder         3      $0.21
   planner       1      $0.13
   Gemini        2       —
