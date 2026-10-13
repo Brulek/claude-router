@@ -63,8 +63,8 @@ const view = { lane: 'coder', model: 'Sonnet 5.5', effort: 'medium', agents: 2, 
 test('bandSegments shows everything at 80 columns', () => {
   const texts = bandSegments(view, 80).map(s => s.text)
   expect(texts).toEqual(['spick', ' · ', 'coder', ' · ', 'Sonnet 5.5', ' · ', 'medium', ' · ', '1 of 2 agents', '/spick for details'])
-  expect(bandSegments(view, 80)[0].style).toBe('brand')
-  expect(bandSegments(view, 80)[2].style).toBe('lane')
+  expect(bandSegments(view, 80)[0]?.style).toBe('brand')
+  expect(bandSegments(view, 80)[2]?.style).toBe('lane')
 })
 
 test('bandSegments drops hint and agent count below 70, effort below 50, keeps lane+model below 40', () => {

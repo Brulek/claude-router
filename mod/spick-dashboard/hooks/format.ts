@@ -14,8 +14,9 @@ const PRICES: Record<string, [number, number, number]> = {
 }
 
 export function modelName(id: string): string {
-  if (CLAUDE_NAMES[id]) return CLAUDE_NAMES[id]
-  for (const key of Object.keys(CLAUDE_NAMES)) if (id.startsWith(key)) return CLAUDE_NAMES[key]
+  const exact = CLAUDE_NAMES[id]
+  if (exact) return exact
+  for (const [key, name] of Object.entries(CLAUDE_NAMES)) if (id.startsWith(key)) return name
   const alias: Record<string, string> = { haiku: 'Haiku 5.5', sonnet: 'Sonnet 5.5', opus: 'Opus 5.5', fable: 'Fable 5.1' }
   return alias[id] ?? id
 }
@@ -29,7 +30,7 @@ const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g
 function segmentLane(words: string[]): { lane: CliLane['lane']; rest: string[] } | null {
   let i = 0
   while (i < words.length) {
-    const w = words[i]
+    const w = words[i]!
     if (PREFIX_WORDS.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || (i > 0 && w.startsWith('-'))) i++
     else break
   }
@@ -53,15 +54,15 @@ export function parseCli(command: string): CliLane | null {
   for (const seg of masked.split(/[;&|(]+/)) {
     const hit = segmentLane(seg.trim().split(/\s+/).filter(Boolean))
     if (!hit) continue
-    const restored = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)])
+    const restored = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
     const text = hit.rest.join(' ')
     const out: CliLane = { lane: hit.lane, isReview: false }
     const model = text.match(/(?:--model|-m)[=\s]+(\S+)/)
-    if (model) out.model = model[1]
+    if (model?.[1]) out.model = model[1]
     const effort = text.match(/(?:--effort|--reasoning-effort)[=\s]+(\S+)/) ?? restored(text).match(/model_reasoning_effort="?(\w+)"?/)
-    if (effort) out.effort = effort[1]
+    if (effort?.[1]) out.effort = effort[1]
     if (hit.lane === 'Codex') {
-      const prompts = [...text.matchAll(/"(\d+)"/g)].map(m => quoted[Number(m[1])])
+      const prompts = [...text.matchAll(/"(\d+)"/g)].map(m => quoted[Number(m[1])] ?? '')
       out.isReview = prompts.some(p => /\breview\b/i.test(p))
     }
     return out
@@ -98,7 +99,7 @@ export function padLeft(s: string, w: number): string { return ' '.repeat(Math.m
 
 /** Fixed-width columns, two spaces between, aligned per column. Every row comes back the same length. */
 export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
-  const widths = rows[0].map((_, i) => Math.max(...rows.map(r => (r[i] ?? '').length)))
+  const widths = (rows[0] ?? []).map((_, i) => Math.max(...rows.map(r => (r[i] ?? '').length)))
   return rows.map(r => widths.map((w, i) => (align[i] === 'r' ? padLeft(r[i] ?? '', w) : padRight(r[i] ?? '', w))).join('  '))
 }
 
@@ -120,6 +121,6 @@ export function fmtCost(usd: number | null): string { return usd === null ? '—
 export function estimateCost(modelId: string, u: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number }): number | null {
   const key = Object.keys(PRICES).find(k => modelId === k || modelId.startsWith(k))
   if (!key) return null
-  const [i, o, c] = PRICES[key]
+  const [i, o, c] = PRICES[key]!
   return (u.input_tokens * i + u.output_tokens * o + u.cache_read_input_tokens * c) / 1_000_000
 }
