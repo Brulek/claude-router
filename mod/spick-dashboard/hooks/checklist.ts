@@ -5,9 +5,22 @@ export const DEFAULT_CONTROLS: Controls = { routing: 'auto', review: 'auto', lan
 export const LANE_KEYS: readonly LaneKey[] = ['gemini', 'grok', 'codex']
 export const LANE_NAMES: Record<LaneKey, string> = { gemini: 'Gemini', grok: 'Grok', codex: 'Codex' }
 
-export const OFF_SENTENCE = 'Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; still end with the label line.'
-export const REVIEW_OFF_NOTE = 'Codex review is off: skip the review step and write `Review: off` in the label line.'
-export const laneOffNote = (lane: LaneKey): string => `${LANE_NAMES[lane]} lane is off: use the fallback chain.`
+// `labelLine` is false while the status band shows (it records who worked): then no sentence asks for the label line.
+const OFF_HEAD = 'Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; '
+export const offSentence = (labelLine: boolean): string =>
+  OFF_HEAD + (labelLine ? 'still end with the label line.' : 'the status band shows who worked, so print no label line.')
+export const reviewOffNote = (labelLine: boolean): string =>
+  labelLine ? 'Codex review is off: skip the review step and write `Review: off` in the label line.' : 'Codex review is off: skip the review step.'
+export const laneOffNote = (lane: LaneKey): string =>
+  `${LANE_NAMES[lane]} lane is off: use the fallback chain.${lane === 'grok' ? ' X data has no fallback: say so.' : ''}`
+export const NO_LABEL_LINE = 'Reply starts with the deliverable; the status band shows model and effort, so print no label line.'
+
+/** True where an AbovePrompt band is drawn: terminal and desktop. */
+export const drawsBand = (surfaces: readonly string[]): boolean => surfaces.some(s => s === 'terminal' || s === 'desktop')
+
+/** prompt origins that are deliveries, not someone asking for work: no checklist */
+const DELIVERIES = new Set(['task-notification', 'peer', 'peer-send-message', 'projects-relay', 'observer', 'observer-activity'])
+export const isDelivery = (kind: string): boolean => DELIVERIES.has(kind)
 
 /** the toast a manual model pick raises */
 export const MANUAL_TOAST = 'spick: routing off (model selected manually) · /spick on to resume'
@@ -31,8 +44,10 @@ export function effectiveRouting(c: Controls, sessionModel: string): Effective {
  * (lanes that are off left out, their notes and the review note appended) while routing
  * is effectively on, the off sentence while it is off.
  */
-export function checklist(c: Controls, sessionModel: string): string {
-  if (!effectiveRouting(c, sessionModel).on) return OFF_SENTENCE
+export function checklist(c: Controls, sessionModel: string, labelLine: boolean): string {
+  if (!effectiveRouting(c, sessionModel).on) return offSentence(labelLine)
+  // the label example names the session's own model (forced on may run on any)
+  const main = sessionModel ? modelName(sessionModel) : 'Haiku 5.5'
   const { gemini, grok, codex } = c.lanes
   const search = gemini ? 'web lookup -> Gemini (agy)' : grok ? 'web lookup -> Grok' : 'web lookup -> Agent(deep) with WebSearch'
   const xData = grok ? '; X data -> Grok' : ''
@@ -43,10 +58,12 @@ export function checklist(c: Controls, sessionModel: string): string {
     '1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).',
     `2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); ${search}${xData}. Pick an effort for every delegate.`,
     '3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.',
-    `Reply starts with the deliverable; end with the label line: no delegate -> \`[Model: Haiku 5.5 | Effort: medium]\`; with delegates -> \`[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | ${review}]\` — ${who}. Never write \`→ none\` or \`→ 无\`.`,
+    labelLine
+      ? `Reply starts with the deliverable; end with the label line: no delegate -> \`[Model: ${main} | Effort: medium]\`; with delegates -> \`[Model: ${main} (medium) → coder Sonnet 5.5 (high) | ${review}]\` — ${who}. Never write \`→ none\` or \`→ 无\`.`
+      : NO_LABEL_LINE,
   ]
   for (const k of LANE_KEYS) if (!c.lanes[k]) lines.push(laneOffNote(k))
-  if (c.review === 'off') lines.push(REVIEW_OFF_NOTE)
+  if (c.review === 'off') lines.push(reviewOffNote(labelLine))
   return lines.join('\n')
 }
 
@@ -82,7 +99,7 @@ export type SpickCommand =
   | { kind: 'usage' }
 
 export const ARGUMENT_HINT = '[on|off|auto|review on|off|lane <gemini|grok|codex> on|off|hide|show|quota]'
-export const USAGE = `usage: /spick ${ARGUMENT_HINT}`
+export const USAGE = `spick: usage /spick ${ARGUMENT_HINT}`
 
 export function parseSpick(args: string): SpickCommand {
   const w = args.trim().toLowerCase().split(/\s+/).filter(Boolean)

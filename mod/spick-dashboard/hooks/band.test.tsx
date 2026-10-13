@@ -150,11 +150,13 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(all).toContain('      on for this session (Haiku 5.5)')
 
     const button = async (key: string) => (await ui.find({ type: 'Button', key }))?.props
-    expect(await button('routing-auto')).toMatchObject({ label: '◉ auto', variant: 'primary', hotkey: 'r' })
-    expect(await button('routing-on')).toMatchObject({ label: '○ on', variant: 'secondary' })
+    // r and v sit on the value they move to: auto -> on, auto -> off
+    expect(await button('routing-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
+    expect((await button('routing-auto'))?.hotkey).toBeUndefined()
+    expect(await button('routing-on')).toMatchObject({ label: '○ on', variant: 'secondary', hotkey: 'r' })
     expect(await button('routing-off')).toMatchObject({ label: '○ off', variant: 'secondary' })
-    expect(await button('review-auto')).toMatchObject({ label: '◉ auto', variant: 'primary', hotkey: 'v' })
-    expect(await button('review-off')).toMatchObject({ label: '○ off', variant: 'secondary' })
+    expect(await button('review-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
+    expect(await button('review-off')).toMatchObject({ label: '○ off', variant: 'secondary', hotkey: 'v' })
     expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini on', variant: 'primary', hotkey: 'g' })
     expect(await button('lane-grok')).toMatchObject({ label: 'Grok on', variant: 'primary', hotkey: 'k' })
     expect(await button('lane-codex')).toMatchObject({ label: 'Codex off', variant: 'secondary', hotkey: 'c' })
@@ -162,18 +164,29 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await button('refresh')).toMatchObject({ label: 'Refresh quota', hotkey: 'q' })
     expect(await button('close')).toMatchObject({ label: 'Close', hotkey: 'x', role: 'dismiss' })
 
-    // the active routing value, pressed (its hotkey r), cycles auto -> on -> off -> auto
+    // pressing the active value does nothing
     await ui.press({ key: 'routing-auto' })
-    expect(await button('routing-on')).toMatchObject({ label: '◉ on', variant: 'primary', hotkey: 'r' })
-    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('      on (forced)')
+    expect(await button('routing-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
+    // r's button sets on; r then moves to off, then back to auto
     await ui.press({ key: 'routing-on' })
+    expect(await button('routing-on')).toMatchObject({ label: '◉ on', variant: 'primary' })
+    expect((await button('routing-off'))?.hotkey).toBe('r')
+    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('      on (forced)')
+    await ui.press({ key: 'routing-off' })
     expect(await button('routing-off')).toMatchObject({ label: '◉ off', variant: 'primary' })
+    expect((await button('routing-auto'))?.hotkey).toBe('r')
+    // a button that is not the active one sets its own value directly
+    await ui.press({ key: 'routing-on' })
+    expect(await button('routing-on')).toMatchObject({ label: '◉ on', variant: 'primary' })
     // a lane toggles
     await ui.press({ key: 'lane-gemini' })
     expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini off', variant: 'secondary' })
-    // review toggles
+    // review: the active option does nothing, the other sets it and takes no hotkey
     await ui.press({ key: 'review-auto' })
+    expect(await button('review-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
+    await ui.press({ key: 'review-off' })
     expect(await button('review-off')).toMatchObject({ label: '◉ off', variant: 'primary' })
+    expect((await button('review-auto'))?.hotkey).toBe('v')
   })
 
   test(`band reads spick off while routing is off on ${surface}`, async ($, on) => {

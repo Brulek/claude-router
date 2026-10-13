@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, Register, RenderSurface } from 'claude-code'
 import type { Controls, LaneKey, LaneTotals, Quota, QuotaWindows, Review, Routing, TurnRecord } from '../types'
-import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, effectiveRouting, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
 import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
@@ -19,6 +19,7 @@ const sessionModel = atom({ plugin: 'spick-dashboard', key: 'sessionModel' } as 
 const QUOTA_TTL_MS = 600_000
 const TICK_MS = 1_000
 const PANE = 'spick'
+const MARKER_REFRESH_MS = 3_600_000
 
 // Helpers that take $ are top-level function declarations: the validator
 // follows $ only into functions declared at the top of this file.
@@ -72,18 +73,37 @@ async function writeMarker($: EngineInterface): Promise<void> {
   await $.fs.write(`${home}/.claude/.spick-mod-active`, new Date(await $.clock.now()).toISOString())
 }
 
-/** A user's own model pick turns routing off for the session. */
-async function modelPickedByHand($: EngineInterface): Promise<void> {
-  await readSessionModel($)
+/**
+ * Whether the band is on screen: a surface that draws AbovePrompt and the band not hidden.
+ * One test for both prompt.compose (its label-line section) and prompt.submit (the checklist's wording).
+ */
+async function bandShowing($: EngineInterface, surfaces: readonly RenderSurface[]): Promise<boolean> {
+  return drawsBand(surfaces) && !(await read($, hidden))
+}
+
+/** the model now, or '' when the engine cannot say */
+async function modelNow($: EngineInterface): Promise<string> {
+  try {
+    const m = await $.session.model()
+    return typeof m === 'string' ? m : ''
+  } catch {
+    return ''
+  }
+}
+
+/** A user's own model pick (a real change) turns routing off for the session; one toast. */
+async function modelPickedByHand($: EngineInterface, model: string): Promise<void> {
+  if (model) await update($, sessionModel, () => model)
   const before = await read($, controls)
   if (before.manualModel) return
   await update($, controls, c => ({ ...c, manualModel: true }))
   $.ui.toast(MANUAL_TOAST)
 }
 
-/** routing for the reply line and the pane: `routing auto · on for this session (Haiku 5.5)` */
+/** the reply to a routing change: the reason only where the value alone does not say it (auto, a manual pick) */
 async function routingLine($: EngineInterface): Promise<string> {
   const c = await read($, controls)
+  if (c.routing !== 'auto' && !c.manualModel) return `spick: routing ${c.routing}`
   return `spick: routing ${c.routing} · ${effectiveRouting(c, await readSessionModel($)).why}`
 }
 
@@ -91,7 +111,7 @@ async function routingLine($: EngineInterface): Promise<string> {
 async function quotaLine($: EngineInterface, force: boolean): Promise<string> {
   const q = await refreshQuota($, force)
   const meters = quotaMeters(q).map(m => `${m.name} ${quotaBar(m.pct)} ${Math.round(m.pct)}%`)
-  return meters.length > 0 ? `spick quota: ${meters.join('   ')}` : 'spick quota: no provider known (grok and gemini report unknown)'
+  return meters.length > 0 ? `spick: quota ${meters.join('   ')}` : 'spick: quota unknown (no provider known; grok and gemini report unknown)'
 }
 
 /** `/spick` where nothing can draw a pane: one paragraph of status. */
@@ -99,8 +119,8 @@ async function statusParagraph($: EngineInterface): Promise<string> {
   const c = await read($, controls)
   const eff = effectiveRouting(c, await readSessionModel($))
   const lanes = LANE_KEYS.map(k => `${LANE_NAMES[k]} ${c.lanes[k] ? 'on' : 'off'}`).join(', ')
-  const quotaText = await quotaLine($, false).catch(() => 'spick quota: not read')
-  return `Spick routing is ${c.routing} (${eff.why}); review ${c.review}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}. ${quotaText.replace(/^spick quota: /, 'Quota: ')}.`
+  const quotaText = await quotaLine($, false).catch(() => 'spick: quota not read')
+  return `spick: routing ${c.routing} (${eff.why}); review ${c.review}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
 }
 
 async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promise<void> {
@@ -177,6 +197,10 @@ export const register: Register = on => {
   let mainEffort: string | undefined
   /** the last elapsed-time stamp written to `current` */
   let lastTickMs = 0
+  /** when the mod-active marker was last written */
+  let markerAt = 0
+  /** the model before a user's /model that changed nothing yet (a picker may still be open) */
+  let modelBeforePick: string | null = null
 
   const mainLane = (): Lane => ({ lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort })
   /** the most recent call still in flight; the main session only when none is */
@@ -193,27 +217,66 @@ export const register: Register = on => {
     } catch {}
     try { await loadControls($) } catch {}
     try { await readSessionModel($) } catch {}
-    try { await writeMarker($) } catch {}
+    // unawaited: a slow write must not hold the session's start
+    try {
+      markerAt = await $.clock.now()
+      void writeMarker($).catch(() => undefined)
+    } catch {}
     return next(e)
   })
 
-  // The per-prompt checklist: exactly one block, built from the switches. Rewrites
-  // only the context it attaches; a failure attaches nothing.
+  // The per-prompt checklist: exactly one block, built from the switches, worded for
+  // whether the band shows. Rewrites only the context it attaches; any failure
+  // (the session model unreadable included) passes the prompt on unchanged.
   on('prompt.submit', async ($, e, next) => {
     let block: string | null = null
-    try { block = checklist(await read($, controls), await readSessionModel($)) } catch {}
+    try {
+      if (!isDelivery(e.origin.kind)) {
+        const fresh = await $.session.model()
+        if (fresh) await update($, sessionModel, () => fresh)
+        // a /model whose picker answered after the command returned: compare now
+        if (modelBeforePick !== null) {
+          const before = modelBeforePick
+          modelBeforePick = null
+          if (fresh && fresh !== before) await modelPickedByHand($, fresh)
+        }
+        const surfaces = await $.session.surfaces().catch(() => [] as readonly RenderSurface[])
+        block = checklist(await read($, controls), fresh || mainModel, !(await bandShowing($, surfaces)))
+        // keep the bash hook silent through long sessions: refresh the marker hourly
+        const now = await $.clock.now()
+        if (now - markerAt >= MARKER_REFRESH_MS) {
+          markerAt = now
+          void writeMarker($).catch(() => undefined)
+        }
+      }
+    } catch {
+      block = null
+    }
     return next(block ? { ...e, context: [...(e.context ?? []), block] } : e)
   }).catch(passThrough)
 
-  // A model the user picks by hand (/model, or the model setting) turns routing off for the session.
+  // A model the user picks by hand (/model, or the model setting) turns routing off for
+  // the session, only when the model really changed.
   on('command.run', { command: 'model' }, async ($, e, next) => {
+    const isUser = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+    const before = isUser ? await modelNow($) : ''
     const r = await next(e)
-    try { if (e.origin.kind !== 'plugin') await modelPickedByHand($) } catch {}
+    try {
+      if (isUser && before) {
+        const after = await modelNow($)
+        if (after && after !== before) await modelPickedByHand($, after)
+        // unchanged: maybe a picker still open; the next prompt compares again
+        else modelBeforePick = before
+      }
+    } catch {}
     return r
   }).catch(passThrough)
   on('config.set', { key: 'model' }, async ($, e, next) => {
     const r = await next(e)
-    try { if (!r.deny && e.origin.kind !== 'plugin') await modelPickedByHand($) } catch {}
+    try {
+      const isUser = e.origin.kind === 'composer' || e.origin.kind === 'bridge'
+      if (isUser && !r.deny && e.value !== e.previous) await modelPickedByHand($, await modelNow($))
+    } catch {}
     return r
   }).catch(passThrough)
 
@@ -222,9 +285,8 @@ export const register: Register = on => {
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     try {
-      if (!e.surfaces.some(s => s === 'terminal' || s === 'desktop')) return r
-      if (await read($, hidden)) return r
-      return { sections: [...r.sections, { id: `${P}:band`, scope: 'session' as const, text: 'The Spick status band is showing above the prompt. Do not print the [Model: ... | Effort: ...] label line at the end of replies.' }] }
+      if (!(await bandShowing($, e.surfaces))) return r
+      return { sections: [...r.sections, { id: `${P}:band`, scope: 'session' as const, text: 'The Spick status band is showing above the prompt. Do not print the [Model: ... | Effort: ...] label line at the end of replies; this overrides any note that asks for it.' }] }
     } catch {
       return r
     }
@@ -395,7 +457,7 @@ export const register: Register = on => {
     switch (cmd.kind) {
       case 'band':
         await update($, hidden, () => cmd.hidden)
-        return { text: cmd.hidden ? 'Spick band hidden. /spick show restores it.' : 'Spick band shown.' }
+        return { text: cmd.hidden ? 'spick: band hidden · /spick show restores it' : 'spick: band shown' }
       case 'routing':
         await setControls($, c => ({ ...c, routing: cmd.value, manualModel: false }))
         return { text: await routingLine($) }
@@ -406,7 +468,7 @@ export const register: Register = on => {
         await setControls($, c => ({ ...c, lanes: { ...c.lanes, [cmd.lane]: cmd.on } }))
         return { text: `spick: ${LANE_NAMES[cmd.lane]} lane ${cmd.on ? 'on' : 'off'}` }
       case 'quota':
-        return { text: await quotaLine($, true).catch(() => 'spick quota: not read') }
+        return { text: await quotaLine($, true).catch(() => 'spick: quota not read') }
       case 'usage':
         return { text: USAGE }
       case 'open': {
@@ -414,7 +476,7 @@ export const register: Register = on => {
         const surfaces = await $.session.surfaces().catch(() => [] as const)
         if (surfaces.length === 0) return { text: await statusParagraph($) }
         const placed = await $.ui.open({ id: PANE, title: 'Spick', closeOnEscape: true })
-        return { text: placed.isPlaced ? 'Spick pane opened.' : `Spick pane not placed: ${placed.reason}` }
+        return { text: placed.isPlaced ? 'spick: pane opened' : `spick: pane not placed: ${placed.reason}` }
       }
     }
   })
@@ -495,8 +557,8 @@ export const register: Register = on => {
     // the heading row spans the quota block, so the staleness note sits beside the numbers it describes
     const quotaWidth = Math.max(2 + Math.max(...quotaCells.map(quotaRowLength)), 'Quota'.length + 2 + staleness.length)
 
-    // fixed rows: header, the controls (4 + heading), the session table, quota, headings and gaps
-    const recent = list.slice(0, Math.max(1, rows - 18))
+    // fixed rows: 19 (header, controls, table header and total, quota, headings, gaps) plus one per lane row
+    const recent = list.slice(0, Math.max(1, rows - 19 - lanes.length))
     const recentTable = table(
       recent.map(r => [clock(r.startedAt), r.lane, r.model, r.effort ?? '', fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt)]),
       ['l', 'l', 'l', 'l', 'r'])
@@ -517,9 +579,9 @@ export const register: Register = on => {
                 i > 0 ? <Text>{' '}</Text> : null,
                 <Button key={`routing-${v}`} label={`${shownRouting === v ? '◉' : '○'} ${v}`}
                   variant={shownRouting === v ? 'primary' : 'secondary'}
-                  // the active value carries the hotkey and, pressed again, moves to the next
-                  hotkey={shownRouting === v ? 'r' : undefined}
-                  onPress={() => { void setControls($, c => ({ ...c, routing: shownRouting === v ? nextRouting(v) : v, manualModel: false })).catch(() => undefined) }} />,
+                  // r presses the next value's button: auto -> on -> off -> auto; the active one does nothing
+                  hotkey={nextRouting(shownRouting) === v ? 'r' : undefined}
+                  onPress={() => { if (shownRouting !== v) void setControls($, c => ({ ...c, routing: v, manualModel: false })).catch(() => undefined) }} />,
               ])}
               <Text color="subtle">{'      ' + eff.why}</Text>
             </Box>
@@ -529,8 +591,9 @@ export const register: Register = on => {
                 i > 0 ? <Text>{' '}</Text> : null,
                 <Button key={`review-${v}`} label={`${ctl.review === v ? '◉' : '○'} ${v}`}
                   variant={ctl.review === v ? 'primary' : 'secondary'}
-                  hotkey={ctl.review === v ? 'v' : undefined}
-                  onPress={() => { void setControls($, c => ({ ...c, review: c.review === v ? (v === 'auto' ? 'off' : 'auto') : v })).catch(() => undefined) }} />,
+                  // v presses the other option
+                  hotkey={ctl.review !== v ? 'v' : undefined}
+                  onPress={() => { if (ctl.review !== v) void setControls($, c => ({ ...c, review: v })).catch(() => undefined) }} />,
               ])}
             </Box>
             <Box flexDirection="row">
