@@ -20,7 +20,7 @@ You run Claude Code with a small, cheap model (Haiku) as the main session. Every
 | X / Twitter data | Grok (`grok`, Grok Build) |
 | Independent code review, image generation | Codex (`codex`, ChatGPT subscription) |
 
-Each delegate also gets an effort level chosen per task. The triage layer enters plan mode itself for wide, risky, ambiguous or greenfield work, and hands you a ready-made `/goal` line when a task has a machine-checkable finish. A quota gate reads the usage the CLIs already cache on disk (no third-party tools) and moves work down a fallback chain when a subscription is 80% used. Codex review is triggered by a short checklist (money/auth/unattended code, big diffs, no tests, hedged reports), not on every change. Every reply ends with a label line such as `[Model: Haiku 5.5 → coder Sonnet 5.5 | Effort: High | Review: skipped]` so you can see what ran.
+Each delegate also gets an effort level chosen per task. The triage layer enters plan mode itself for wide, risky, ambiguous or greenfield work, and hands you a ready-made `/goal` line when a task has a machine-checkable finish. A quota collector reads the usage each subscribed CLI reports (no third-party tools) into a cache, and the per-prompt checklist shows it as one plain `Quota` line; the model weighs it, no fixed thresholds. Codex review is triggered by a short checklist (money/auth/unattended code, big diffs, no tests, hedged reports), not on every change. Every reply ends with a label line such as `[Model: Haiku 5.5 → coder Sonnet 5.5 | Effort: High | Review: skipped]` so you can see what ran.
 
 Claude is the default for work; the outside lanes are used only where they are genuinely better or cheaper. If a CLI is not installed, its lane is skipped. With nothing but Claude installed you still get the internal tiering.
 
@@ -58,7 +58,7 @@ Answer `y` to add the marketplace, pick the user scope. The band above the promp
 |---|---|
 | `spick setup` | first-run onboarding (re-runnable) |
 | `spick doctor` | detection table: installed, logged in, versions |
-| `spick quota` | local usage for Claude and Codex; Grok and Gemini report unknown |
+| `spick quota` | the cached usage facts for the subscriptions listed in `~/.claude/spick.json`; `--refresh` collects now |
 
 ## Requirements
 
@@ -73,7 +73,7 @@ skills/spick/
 ├── SKILL.md                 the routing rules
 ├── references/providers.md  spells, flags, model ids, quota sources, pitfalls
 ├── references/onboarding.md first-run flow
-├── scripts/quota.sh         local quota reader
+├── scripts/quota.sh         quota collector (quota.py) and cache
 ├── scripts/setup.sh         detection and install
 └── assets/                  subagent definitions, CLAUDE.md snippet
 mod/spick-dashboard/         the dashboard mod (band above the prompt, /spick pane)
@@ -87,7 +87,7 @@ mod/spick-dashboard/         the dashboard mod (band above the prompt, /spick pa
 ## Known limits
 
 - A Claude Code session cannot change its own model or effort; only delegates can be re-priced. That is why the main session is cheap and everything else is pinned.
-- Grok and Gemini do not expose quota locally; those lanes rely on "quota error means tight".
+- Grok exposes only its billing period, not a used percent, so it reports unknown; an unmeasured lane relies on "a quota error means move on".
 - Cloud agents (Codex Cloud, ChatGPT agent mode, Grok web tasks) are out of scope.
 
 MIT licensed.

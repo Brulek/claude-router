@@ -548,3 +548,20 @@ test('/spick with no UI surface prints a one-paragraph status', async ($, on) =>
   expect(text).toBe('spick: routing auto (on for this session (Haiku 5.5)); review auto; lanes: Gemini on, Grok on, Codex off; band shown; quota unknown (no provider known; grok and gemini report unknown).')
   expect(text).not.toContain('\n')
 })
+
+test('the quota line from the cache file is the checklist\'s last line; with no cache the line is left out', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  let cache: string | null = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"codex","plan":"Pro Lite","sampled_at":"2026-10-13T15:29:00Z","windows":[{"name":"7d","used_pct":53,"resets_at":"2026-10-20T05:38:29Z","reset":false}]}]}'
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' && cache !== null ? { value: cache } : { deny: 'missing' }))
+  await $.session.start(START)
+  const withLine = await contextOf($)
+  expect(withLine.length).toBe(1)
+  expect((withLine[0] ?? '').split('\n').at(-1)).toBe('Quota (cache 4m old): codex Pro Lite: 7d 53% used (resets 10-20 05:38Z).')
+  cache = null
+  const without = await contextOf($)
+  expect(isChecklist(without)).toBe(true)
+  expect(without[0]).not.toContain('Quota')
+})

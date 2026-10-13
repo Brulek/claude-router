@@ -1,0 +1,23 @@
+{
+ "cachedUsageUtilization": {
+  "fetchedAtMs": 1791884005705,
+  "utilization": {
+   "five_hour": {
+    "utilization": 19,
+    "resets_at": "2026-10-13T10:19:59.536299+00:00",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+   },
+   "seven_day": {
+    "utilization": 9,
+    "resets_at": "2026-10-20T00:59:59.536324+00:00",
+    "limit_dollars": null,
+    "used_dollars": null,
+    "remaining_dollars": null,
+    "locked_reason": null
+   }
+  }
+ }
+}

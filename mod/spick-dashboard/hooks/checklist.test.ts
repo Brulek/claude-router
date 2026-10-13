@@ -133,3 +133,13 @@ test('the band test and the delivery origins', () => {
   for (const k of ['task-notification', 'peer', 'peer-send-message', 'projects-relay', 'observer', 'observer-activity']) expect(isDelivery(k)).toBe(true)
   for (const k of ['composer', 'bridge', 'sdk', 'plugin', 'scheduled-trigger']) expect(isDelivery(k)).toBe(false)
 })
+
+test('a quota line is appended as the last line, only while routing is on', () => {
+  const line = 'Quota (cache 4m old): codex Pro Lite: 7d 53% used (resets 10-20 05:38Z).'
+  const base = checklist(ctl(), HAIKU, true)
+  expect(checklist(ctl(), HAIKU, true, line)).toBe(base + '\n' + line)
+  expect(checklist(ctl({ review: 'off' }), HAIKU, true, line).split('\n').at(-1)).toBe(line)
+  expect(checklist(ctl(), HAIKU, true, undefined)).toBe(base)
+  expect(checklist(ctl(), HAIKU, true, '')).toBe(base)
+  expect(checklist(ctl({ routing: 'off' }), HAIKU, true, line)).toBe(offSentence(true))
+})

@@ -4,8 +4,13 @@
 # When the spick-dashboard mod is loaded it injects the checklist itself (built from its switches) and
 # writes ~/.claude/.spick-mod-active at session start; a marker younger than 24 hours silences this copy.
 # A stale marker (mod uninstalled) expires on its own. `find -mmin` works on both macOS and Linux.
+# The quota cache (~/.claude/spick-quota.json) is refreshed from here in the background, never awaited;
+# the last line printed below is a one-line summary of that cache (plain facts, no rules).
+here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+py=$(command -v python3 || command -v python || true)
 marker="${HOME}/.claude/.spick-mod-active"
 if [ -f "$marker" ] && [ -n "$(find "$marker" -mmin -1440 2>/dev/null)" ]; then
+  [ -n "$py" ] && "$py" "$here/quota.py" --touch >/dev/null 2>&1   # the mod prints the checklist; keep its cache warm
   exit 0
 fi
 cat <<'TXT'
@@ -15,3 +20,5 @@ cat <<'TXT'
 3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.
 Reply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex gpt-6-astra (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.
 TXT
+[ -n "$py" ] && "$py" "$here/quota.py" --line 2>/dev/null
+exit 0

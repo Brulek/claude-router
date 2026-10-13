@@ -5,6 +5,7 @@ import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, U
 import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
+import { quotaLineFromCache } from './quotaline'
 
 const P = 'spick-dashboard'
 const current = atom({ plugin: 'spick-dashboard', key: 'current' } as const, null)
@@ -32,6 +33,18 @@ async function refreshQuota($: EngineInterface, force = false): Promise<Quota> {
   const fresh: Quota = await readQuota({ env, read: path => $.fs.read(path), list: path => $.fs.list(path) }, now)
   await update($, quota, () => fresh)
   return fresh
+}
+
+/**
+ * The quota line, from the cache scripts/quota.py keeps at ~/.claude/spick-quota.json. One read, no run:
+ * a missing, unreadable or empty cache gives null and the line is left out. The bash hook keeps the cache warm.
+ */
+async function quotaLineNow($: EngineInterface): Promise<string | null> {
+  try {
+    const home = await $.env.get('HOME')
+    if (!home) return null
+    return quotaLineFromCache(await $.fs.read(`${home}/.claude/spick-quota.json`), await $.clock.now())
+  } catch { return null }
 }
 
 /** The three remembered choices: routing, review and the lanes (a JSON string). */
@@ -242,7 +255,7 @@ export const register: Register = on => {
           if (fresh && fresh !== before) await modelPickedByHand($, fresh)
         }
         const surfaces = await $.session.surfaces().catch(() => [] as readonly RenderSurface[])
-        block = checklist(await read($, controls), fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)))
+        block = checklist(await read($, controls), fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)), (await quotaLineNow($)) ?? undefined)
         // keep the bash hook silent through long sessions: refresh the marker hourly
         const now = await $.clock.now()
         if (now - markerAt >= MARKER_REFRESH_MS) {

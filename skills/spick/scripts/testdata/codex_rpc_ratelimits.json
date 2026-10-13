@@ -1,0 +1,51 @@
+{
+ "id": 2,
+ "result": {
+  "ordinaryUsageAllowed": true,
+  "rateLimits": {
+   "limitId": "codex",
+   "limitName": null,
+   "normalModelSlug": null,
+   "primary": {
+    "usedPercent": 53,
+    "windowDurationMins": 10080,
+    "resetsAt": 1792472309
+   },
+   "secondary": null,
+   "credits": {
+    "hasCredits": false,
+    "unlimited": false,
+    "balance": "0"
+   },
+   "individualLimit": null,
+   "spendControlReached": false,
+   "planType": "prolite",
+   "rateLimitReachedType": null
+  },
+  "rateLimitsByLimitId": {
+   "codex": {
+    "limitId": "codex",
+    "primary": {
+     "usedPercent": 53,
+     "windowDurationMins": 10080,
+     "resetsAt": 1792472309
+    },
+    "secondary": null
+   }
+  },
+  "rateLimitResetCredits": {
+   "availableCount": 1,
+   "credits": [
+    {
+     "id": "REDACTED",
+     "resetType": "codexRateLimits",
+     "status": "available",
+     "grantedAt": 1791416684,
+     "expiresAt": 1794008684
+    }
+   ]
+  },
+  "accountId": "REDACTED",
+  "rateLimitUpsell": null
+ }
+}

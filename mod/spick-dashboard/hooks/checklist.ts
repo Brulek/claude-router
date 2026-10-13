@@ -42,9 +42,10 @@ export function effectiveRouting(c: Controls, sessionModel: string): Effective {
 /**
  * The one context block attached to each prompt: the three-question triage checklist
  * (lanes that are off left out, their notes and the review note appended) while routing
- * is effectively on, the off sentence while it is off.
+ * is effectively on, the off sentence while it is off. `quotaLine`, when given, is appended
+ * as the last line (plain facts from the quota cache; see quotaline.ts).
  */
-export function checklist(c: Controls, sessionModel: string, labelLine: boolean): string {
+export function checklist(c: Controls, sessionModel: string, labelLine: boolean, quotaLine?: string): string {
   if (!effectiveRouting(c, sessionModel).on) return offSentence(labelLine)
   // the label example names the session's own model (forced on may run on any)
   const main = sessionModel ? modelName(sessionModel) : 'Haiku 5.5'
@@ -64,6 +65,7 @@ export function checklist(c: Controls, sessionModel: string, labelLine: boolean)
   ]
   for (const k of LANE_KEYS) if (!c.lanes[k]) lines.push(laneOffNote(k))
   if (c.review === 'off') lines.push(reviewOffNote(labelLine))
+  if (quotaLine) lines.push(quotaLine)
   return lines.join('\n')
 }
 

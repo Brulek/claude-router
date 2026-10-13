@@ -74,7 +74,7 @@ Hand the user exactly one line, in a code block, in this shape:
 /goal <the check command and its expected result>; stop after 10 attempts or if the same error repeats 3 times
 ```
 
-Rules for the condition: name the command, not an adjective ("`python3 -m pytest -q` exits 0", not "tests are fine"); include a stop guard; keep it under 4,000 characters. If the weekly quota is above 50% used, say so before offering it, because a goal loop is the fastest way to spend quota. Waiting on something external (CI, a deploy) is not a goal; suggest `/loop` instead.
+Rules for the condition: name the command, not an adjective ("`python3 -m pytest -q` exits 0", not "tests are fine"); include a stop guard; keep it under 4,000 characters. If the Quota line shows the weekly window heavily used, say so before offering it, because a goal loop is the fastest way to spend quota. Waiting on something external (CI, a deploy) is not a goal; suggest `/loop` instead.
 
 Plan first, goal second: an ambiguous multi-step task gets plan mode, and once the plan is approved the execution can run under `/goal`.
 
@@ -112,22 +112,14 @@ Always:
 
 Review findings go back to `coder` for one fix round. Do not review the fix again; infinite loops burn quota for little gain. The spell is in `references/providers.md`.
 
-## Step 4 - quota gate
+## Step 4 - quota
 
-Before delegating, run `bash <skill-dir>/scripts/quota.sh`. It reads only local files the CLIs already write (no third-party tools) and prints one line per provider, e.g.
+Read the `Quota` line at the end of the checklist (or run `bash <skill-dir>/scripts/quota.sh`). It lists, per subscribed provider, the plan, the price, each window's used share with its reset time, and how old the sample is. Weigh task size, plan and remaining share yourself; no fixed thresholds.
 
-```
-claude  5h=4%  7d=1%   age=3m
-codex   7d=30%          age=2h
-grok    unknown
-gemini  unknown
-```
-
-Rules:
-- A provider at **80% or more** of any window is "tight": move down the fallback chain for new work. Weekly windows matter more than 5-hour ones because they take longer to recover.
-- When Claude itself is tight, flip the coding default: Codex becomes primary for implementation, `coder` the fallback.
-- `unknown` is not "fine"; it means "unmeasured". Delegate anyway, but if the call comes back with a quota or rate-limit error, mark that lane tight for the rest of the session and move on. Mention unmeasured lanes in the label line only when you used one.
-- If `quota.sh` itself fails, treat everything as unknown and continue; never block the user on a monitoring glitch.
+- The line states facts only. A window marked `reset passed` has rolled over since the sample, so its old figure is gone; `unknown` and `stale` mean unmeasured or old, not "fine".
+- If a call comes back with a quota or rate-limit error, treat that lane as exhausted for the rest of the session and move down the fallback chain.
+- If the line is absent or says `unknown (no data yet)`, carry on; never block the user on a monitoring glitch.
+- The provider list comes from `subscriptions` in `~/.claude/spick.json` (shape in `references/providers.md`). A provider not listed there is not shown.
 
 ## Step 5 - brief the delegate properly
 
@@ -207,5 +199,5 @@ If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haik
 
 - `references/providers.md` - per-provider spells, flags, model ids, quota sources, known pitfalls. Read before the first external call.
 - `references/onboarding.md` - first-run flow.
-- `scripts/quota.sh` - local quota reader. `scripts/setup.sh` - detection and install.
+- `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection and install.
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.

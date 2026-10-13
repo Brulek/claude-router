@@ -1,0 +1,79 @@
+{
+ "written_at": "2026-10-13T15:30:00Z",
+ "providers": [
+  {
+   "provider": "claude",
+   "plan": "Max 20x",
+   "price": "$200/mo",
+   "source": "~/.claude.json",
+   "sampled_at": "2026-10-13T09:33:25Z",
+   "age_s": null,
+   "windows": [
+    {
+     "name": "5h",
+     "used_pct": 19.0,
+     "resets_at": "2026-10-13T10:19:59Z",
+     "reset": false
+    },
+    {
+     "name": "7d",
+     "used_pct": 9.0,
+     "resets_at": "2026-10-20T00:59:59Z",
+     "reset": false
+    }
+   ],
+   "status": "stale"
+  },
+  {
+   "provider": "codex",
+   "plan": "Pro Lite",
+   "price": null,
+   "source": "codex app-server",
+   "sampled_at": "2026-10-13T15:29:00Z",
+   "age_s": null,
+   "windows": [
+    {
+     "name": "7d",
+     "used_pct": 53.0,
+     "resets_at": "2026-10-20T05:38:29Z",
+     "reset": false
+    }
+   ],
+   "status": "fresh"
+  },
+  {
+   "provider": "gemini",
+   "plan": "AI Pro",
+   "price": null,
+   "source": "agy /usage",
+   "sampled_at": "2026-10-13T15:29:30Z",
+   "age_s": null,
+   "windows": [
+    {
+     "name": "Gemini 7d",
+     "used_pct": 0.6,
+     "resets_at": "2026-10-15T01:43:55Z",
+     "reset": false
+    },
+    {
+     "name": "Gemini 5h",
+     "used_pct": 0.0,
+     "resets_at": "2026-10-13T20:34:05Z",
+     "reset": false
+    }
+   ],
+   "status": "fresh"
+  },
+  {
+   "provider": "grok",
+   "plan": "SuperGrok",
+   "price": null,
+   "source": "grok agent stdio",
+   "sampled_at": null,
+   "age_s": null,
+   "windows": [],
+   "status": "unknown",
+   "reason": "login needed"
+  }
+ ]
+}
