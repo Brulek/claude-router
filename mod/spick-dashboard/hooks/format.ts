@@ -1,4 +1,4 @@
-import type { Note } from '../types'
+import type { Note, Quota } from '../types'
 
 const CLAUDE_NAMES: Record<string, string> = {
   'claude-haiku-5-5': 'Haiku 5.5',
@@ -79,22 +79,89 @@ export function isSourcePath(path: string): boolean {
   return /\.[A-Za-z0-9]+$/.test(path)
 }
 
+/** the main session's lane name in state, totals and the pane */
+export const MAIN_LANE = 'main session'
+
 export type Seg = { text: string; style: 'brand' | 'lane' | 'plain' | 'dim' | 'warning' | 'error' }
-/** agentIndex: ordinal of the agent the band shows among this turn's agents; absent when no agent is showing */
-export type BandView = { lane: string; model: string; effort?: string; agents: number; agentIndex?: number; isIdle: boolean; durationMs?: number; note?: Note }
+export type BandView = {
+  lane: string
+  model: string
+  effort?: string
+  agents: number
+  /** ordinal of the agent the band shows among this turn's agents; absent when no agent is showing */
+  agentIndex?: number
+  isIdle: boolean
+  /** active: time since the turn began; idle: the last turn's wall time */
+  durationMs?: number
+  /** the showing call is a Codex review */
+  isReview?: boolean
+  note?: Note
+  /** active delegate: the main session's model, for `main: <model>` */
+  mainModel?: string
+  /** idle: known quota windows, e.g. `claude 7d 1% · codex 7d 30%` */
+  quota?: string
+}
+/** left: the status sentence; right: hint, main model, quota summary or the attention cause */
+export type Band = { left: Seg[]; right: Seg[] }
 const SEP: Seg = { text: ' · ', style: 'dim' }
+const GAP: Seg = { text: '   ', style: 'plain' }
 export const HINT = '/spick for details'
 
-export function bandSegments(v: BandView, columns: number): Seg[] {
-  const body = (text: string, style: Seg['style']): Seg => ({ text, style: v.isIdle ? 'dim' : style })
-  const segs: Seg[] = [{ text: 'spick', style: 'brand' }, SEP, body(v.isIdle ? `last: ${v.lane}` : v.lane, 'lane')]
-  if (v.model) segs.push(SEP, body(v.model, 'plain'))
-  if (columns >= 50 && v.effort) segs.push(SEP, body(v.effort, 'plain'))
-  if (columns >= 70 && !v.isIdle && v.agents > 1 && v.agentIndex !== undefined) segs.push(SEP, body(`${v.agentIndex} of ${v.agents} agents`, 'dim'))
-  if (v.isIdle && v.durationMs !== undefined && columns >= 40) segs.push(SEP, body(fmtDuration(v.durationMs), 'dim'))
-  if (v.note && columns >= 40) segs.push({ text: v.note.text, style: v.note.kind })
-  else if (columns >= 70 && !v.isIdle) segs.push({ text: HINT, style: 'dim' })
-  return segs
+const VERBS: Record<string, string> = { Gemini: 'is searching', Grok: 'is fetching X' }
+export function verbOf(lane: string, isReview = false): string {
+  if (lane === 'Codex') return isReview ? 'is reviewing' : 'is working'
+  return VERBS[lane] ?? 'is working'
+}
+
+/** An attention cause as segments: a breach colors only the file name, other causes color whole. */
+export function noteParts(note: Note): Seg[] {
+  if (note.kind === 'error' && note.text.startsWith('edited ')) return [{ text: 'edited ', style: 'plain' }, { text: note.text.slice(7), style: 'error' }]
+  return [{ text: note.text, style: note.kind }]
+}
+
+/** One window per known provider, the weekly one when known: `claude 7d 1% · codex 7d 30%`. */
+export function quotaSummary(q: Quota | null | undefined): string | undefined {
+  const parts: string[] = []
+  for (const [name, w] of [['claude', q?.claude], ['codex', q?.codex]] as const) {
+    if (w?.sevenDay !== undefined) parts.push(`${name} 7d ${Math.round(w.sevenDay)}%`)
+    else if (w?.fiveHour !== undefined) parts.push(`${name} 5h ${Math.round(w.fiveHour)}%`)
+  }
+  return parts.length > 0 ? parts.join(' · ') : undefined
+}
+
+export function bandSegments(v: BandView, columns: number): Band {
+  const brand: Seg = { text: 'spick', style: 'brand' }
+  const isMain = v.lane === MAIN_LANE
+  const style = (s: Seg['style']): Seg['style'] => (v.isIdle ? 'dim' : s)
+  if (columns < 40) {
+    const left: Seg[] = [brand, SEP, { text: v.isIdle ? 'Idle' : isMain ? 'Working' : v.lane, style: style('lane') }]
+    if (v.model) left.push(SEP, { text: v.model, style: style('plain') })
+    return { left, right: [] }
+  }
+
+  const parts: Seg[][] = []
+  if (v.isIdle) {
+    const who = isMain ? v.model || MAIN_LANE : v.model ? `${v.lane} on ${v.model}` : v.lane
+    parts.push([{ text: 'Idle', style: 'dim' }], [{ text: `last turn: ${who}`, style: 'dim' }])
+  } else {
+    parts.push(isMain ? [{ text: 'Working', style: 'lane' }] : [{ text: v.lane, style: 'lane' }, { text: ` ${verbOf(v.lane, v.isReview)}`, style: 'plain' }])
+    if (v.model) parts.push([{ text: v.model, style: 'plain' }])
+  }
+  if (columns >= 50 && v.effort) parts.push([{ text: `${v.effort} effort`, style: style('plain') }])
+  if (columns >= 70 && !v.isIdle && v.agents > 1 && v.agentIndex !== undefined) parts.push([{ text: `agent ${v.agentIndex} of ${v.agents}`, style: 'dim' }])
+  if (v.durationMs !== undefined) {
+    if (v.isIdle) parts.push([{ text: `took ${fmtDuration(v.durationMs)}`, style: 'dim' }])
+    else if (columns >= 70) parts.push([{ text: fmtDuration(v.durationMs), style: 'dim' }])
+  }
+  const left: Seg[] = [brand, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
+
+  let right: Seg[] = []
+  if (v.note) right = noteParts(v.note)
+  else if (columns >= 90) {
+    const context = v.isIdle ? (v.quota ? `quota: ${v.quota}` : undefined) : !isMain && v.mainModel ? `main: ${v.mainModel}` : HINT
+    if (context) right = [{ text: context, style: 'dim' }]
+  }
+  return { left, right }
 }
 
 export function padRight(s: string, w: number): string { return s + ' '.repeat(Math.max(0, w - s.length)) }

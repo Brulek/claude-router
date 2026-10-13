@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
-import type { LaneTotals, Note, Quota, QuotaWindows, TurnRecord } from '../types'
-import { HINT, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, padRight, parseCli, quotaBar, table } from './format'
+import type { LaneTotals, Quota, QuotaWindows, TurnRecord } from '../types'
+import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaSummary, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
 
@@ -14,6 +14,7 @@ const quota = atom({ plugin: 'spick-dashboard', key: 'quota' } as const, null)
 const hidden = atom({ plugin: 'spick-dashboard', key: 'hidden' } as const, false)
 
 const QUOTA_TTL_MS = 600_000
+const TICK_MS = 1_000
 const PANE = 'spick'
 
 // Helpers that take $ are top-level function declarations: the validator
@@ -34,7 +35,7 @@ async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promi
 }
 
 /** who works on the band: the main session, a subagent call or a CLI call */
-type Lane = { lane: string; model: string; effort?: string; agentIndex?: number }
+type Lane = { lane: string; model: string; effort?: string; agentIndex?: number; isReview?: boolean }
 
 /**
  * Put a lane on the current turn. `pick` runs inside the update, so calls that
@@ -44,8 +45,20 @@ async function showLane($: EngineInterface, pick: () => Lane, extra: (c: TurnRec
   await update($, current, c => {
     if (!c) return c
     const l = pick()
-    return { ...c, ...extra(c), lane: l.lane, model: l.model, effort: l.effort, agentIndex: l.agentIndex }
+    return { ...c, ...extra(c), lane: l.lane, model: l.model, effort: l.effort, agentIndex: l.agentIndex, isReview: l.isReview }
   })
+}
+
+/**
+ * Stamp the current turn with the time, so the band's elapsed time moves.
+ * At most one write per TICK_MS: returns the stamp to compare the next call with.
+ */
+async function tick($: EngineInterface, lastMs: number): Promise<number> {
+  const now = await $.clock.now()
+  if (now - lastMs < TICK_MS) return lastMs
+  if (!(await read($, current))) return lastMs
+  await update($, current, c => (c ? { ...c, nowMs: now } : c))
+  return now
 }
 
 const ZERO_TOTALS: LaneTotals = { turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null }
@@ -69,11 +82,6 @@ function passThrough<E, R>($: unknown, e: E, next: (e: E) => R): R {
 
 const clock = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 
-/** The colored part of a note: the file name of a breach, the whole cause otherwise. */
-function splitNote(note: Note): [lead: string, cause: string] {
-  return note.kind === 'error' && note.text.startsWith('edited ') ? ['edited ', note.text.slice(7)] : ['', note.text]
-}
-
 // Every hook here only observes: its own work sits in try/catch so a failure
 // still ends in next(e), and next's own result is never swallowed.
 export const register: Register = on => {
@@ -88,8 +96,10 @@ export const register: Register = on => {
   let agentsThisTurn = 0
   let mainModel = ''
   let mainEffort: string | undefined
+  /** the last elapsed-time stamp written to `current` */
+  let lastTickMs = 0
 
-  const mainLane = (): Lane => ({ lane: 'you', model: modelName(mainModel), effort: mainEffort })
+  const mainLane = (): Lane => ({ lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort })
   /** the most recent call still in flight; the main session only when none is */
   const showing = (): Lane => {
     let top: Lane | undefined
@@ -124,13 +134,15 @@ export const register: Register = on => {
       inFlight.clear()
       delegate = null
       agentsThisTurn = 0
-      await update($, current, () => ({ turnId: e.turnId, startedAt, lane: 'you', model: modelName(mainModel), effort: mainEffort, agents: 0 }))
+      lastTickMs = startedAt
+      await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0 }))
       // the TTL gates it: at most one read per ten minutes, so the band's quota warnings stay current
       void refreshQuota($).catch(() => undefined)
     } catch {}
     return next(e)
   })
 
+  // Every chunk passes up unchanged; each one (main loop or subagent) may tick the elapsed time.
   on('turn.step', async function* ($, e, next) {
     try {
       if (!e.agentId) {
@@ -139,8 +151,19 @@ export const register: Register = on => {
         await showLane($, showing)
       }
     } catch {}
-    return yield* next(e)
+    const stream = next(e)
+    for await (const chunk of stream) {
+      yield chunk
+      try { lastTickMs = await tick($, lastTickMs) } catch {}
+    }
+    return await stream.result
   })
+
+  // any tool call, from any loop, ticks the elapsed time
+  on('tool.call', async ($, e, next) => {
+    try { lastTickMs = await tick($, lastTickMs) } catch {}
+    return next(e)
+  }).catch(passThrough)
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const id = e.tool_use_id
@@ -189,7 +212,7 @@ export const register: Register = on => {
       const cli = parseCli(e.command)
       if (cli) {
         isCli = true
-        const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort }
+        const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview: cli.isReview }
         inFlight.set(id, entry)
         delegate = entry
         await showLane($, showing, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
@@ -223,7 +246,7 @@ export const register: Register = on => {
 
   on('turn.complete', async ($, e, next) => {
     try {
-      const lane = e.agentId ? (laneOfAgent.get(e.agentId) ?? 'agent') : 'you'
+      const lane = e.agentId ? (laneOfAgent.get(e.agentId) ?? 'agent') : MAIN_LANE
       const usage = e.usage
       if (usage) {
         const cost = estimateCost(usage.model, usage)
@@ -249,10 +272,12 @@ export const register: Register = on => {
         const endedAt = await $.clock.now()
         const c = await read($, current)
         if (c) {
-          // the turn is recorded under its latest delegate, `you` when it had none
+          // the turn is recorded under its latest delegate, the main session when it had none
           const who = delegate ?? mainLane()
           const done: TurnRecord = { ...c, lane: who.lane, model: who.model, effort: who.effort, endedAt, costUsd: usage ? estimateCost(usage.model, usage) : null }
           delete done.agentIndex
+          delete done.isReview
+          delete done.nowMs
           await update($, last, () => done)
           await update($, turns, list => [done, ...list].slice(0, 50))
           await update($, current, () => null)
@@ -271,46 +296,43 @@ export const register: Register = on => {
     return { text: placed.isPlaced ? 'Spick pane opened.' : `Spick pane not placed: ${placed.reason}` }
   })
 
-  // The band: one line, who is working now. Slot order never changes; the hint
-  // or an attention cause sits alone on the right.
+  // The band: one line, a short sentence about who is working now. Slot order
+  // never changes; the right group holds context or an attention cause.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, hidden))) return next(e)
     const c = await read($, current)
     const l = await read($, last)
     const view: BandView | null = c
-      ? { lane: c.lane, model: c.model, effort: c.effort, agents: c.agents, agentIndex: c.agentIndex, isIdle: false, note: c.note }
+      ? { lane: c.lane, model: c.model, effort: c.effort, agents: c.agents, agentIndex: c.agentIndex, isReview: c.isReview, isIdle: false,
+          durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - c.startedAt), note: c.note, mainModel: mainModel ? modelName(mainModel) : undefined }
       : l
         ? { lane: l.lane, model: l.model, effort: l.effort, agents: 0, isIdle: true, durationMs: (l.endedAt ?? l.startedAt) - l.startedAt }
         : null
     if (!view) return next(e)
-    // a breach or review note already on the turn wins over quota; quota wins over the hint
-    if (!view.note && !view.isIdle) {
-      const q = await read($, quota)
+    const q = await read($, quota)
+    if (view.isIdle) view.quota = quotaSummary(q)
+    // a breach or review note already on the turn wins over a quota warning; a warning wins over context
+    else if (!view.note) {
       const windows: [string, number | undefined][] = [['claude 5h', q?.claude?.fiveHour], ['claude 7d', q?.claude?.sevenDay], ['codex 7d', q?.codex?.sevenDay]]
       for (const [name, pct] of windows) {
         if (pct !== undefined && pct >= 80) { view.note = { kind: 'warning', text: `${name} ${Math.round(pct)}%` }; break }
       }
     }
-    const segs = bandSegments(view, e.props.bodyColumns)
+    const { left, right } = bandSegments(view, e.props.bodyColumns)
     const { Box, Text } = $.ui.resolve(e)
-    const right = segs[segs.length - 1]!
-    const isRight = right.text === HINT || right.style === 'warning' || right.style === 'error'
     const paint = (s: Seg) => {
       switch (s.style) {
         case 'brand': return <Text bold color="claude" wrap="truncate-end">{s.text}</Text>
         case 'lane': return <Text bold wrap="truncate-end">{s.text}</Text>
         case 'dim': return <Text color="subtle" wrap="truncate-end">{s.text}</Text>
         case 'plain': return <Text wrap="truncate-end">{s.text}</Text>
-        default: {
-          const [lead, cause] = splitNote({ kind: s.style, text: s.text })
-          return <Text wrap="truncate-end">{lead}<Text color={s.style} wrap="truncate-end">{cause}</Text></Text>
-        }
+        default: return <Text color={s.style} wrap="truncate-end">{s.text}</Text>
       }
     }
     return (
       <Box flexDirection="row" justifyContent="space-between" gap={2} width="100%">
-        <Box flexDirection="row">{(isRight ? segs.slice(0, -1) : segs).map(paint)}</Box>
-        {isRight ? <Box flexDirection="row">{paint(right)}</Box> : null}
+        <Box flexDirection="row">{left.map(paint)}</Box>
+        {right.length > 0 ? <Box flexDirection="row">{right.map(paint)}</Box> : null}
       </Box>
     )
   })
@@ -390,8 +412,7 @@ export const register: Register = on => {
             {recentTable.map((line, i) => {
               const note = recent[i]?.note
               if (!note) return <Text>{line}</Text>
-              const [lead, cause] = splitNote(note)
-              return <Text>{`${line}   ${lead}`}<Text color={note.kind}>{cause}</Text></Text>
+              return <Text>{`${line}   `}{noteParts(note).map(p => (p.style === 'warning' || p.style === 'error' ? <Text color={p.style}>{p.text}</Text> : p.text))}</Text>
             })}
           </Box>
         </Box>

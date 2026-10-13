@@ -33,23 +33,23 @@ async function probe($: Engine): Promise<Snapshot> {
   return JSON.parse(r.text ?? '{}') as Snapshot
 }
 
-test('a main-session turn closes into last and turns, lane you', { plugins: [probePlugin] }, async ($, on) => {
+test('a main-session turn closes into last and turns, lane main session', { plugins: [probePlugin] }, async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
 
   await $.turn.start({ text: 'hi', turnId: 't1' })
-  expect((await probe($)).current).toMatchObject({ turnId: 't1', lane: 'you', startedAt: 1000, agents: 0 })
+  expect((await probe($)).current).toMatchObject({ turnId: 't1', lane: 'main session', startedAt: 1000, agents: 0 })
 
   await clock.advance(2500)
   await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 2500, isAborted: false, reason: 'answer', usage: USAGE })
 
   const s = await probe($)
-  expect(s.last).toMatchObject({ turnId: 't1', lane: 'you', startedAt: 1000, endedAt: 3500, agents: 0, costUsd: 3 })
+  expect(s.last).toMatchObject({ turnId: 't1', lane: 'main session', startedAt: 1000, endedAt: 3500, agents: 0, costUsd: 3 })
   expect(s.turns).toHaveLength(1)
   expect(s.turns?.[0]).toEqual(s.last)
   expect(s.current).toBeNull()
-  expect(s.totals?.you).toEqual({ turns: 1, inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 3 })
+  expect(s.totals?.['main session']).toEqual({ turns: 1, inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 3 })
 })
 
 test('a subagent turn.complete adds to its lane totals and leaves last alone', { plugins: [probePlugin] }, async ($, on) => {
@@ -62,7 +62,7 @@ test('a subagent turn.complete adds to its lane totals and leaves last alone', {
 
   const s = await probe($)
   expect(s.totals?.coder).toMatchObject({ turns: 1, inputTokens: 1_000_000, outputTokens: 100_000 })
-  expect(s.totals?.you).toBeUndefined()
+  expect(s.totals?.['main session']).toBeUndefined()
   expect(s.last).toBeUndefined()
 })
 
@@ -96,14 +96,14 @@ test('a turn that delegated to a coder Agent call closes as lane coder', { plugi
   await $.turn.start({ text: 'fix it', turnId: 't1' })
   await $.tool.call({ ...agentCall('tu1', 'coder'), model: 'sonnet', effort: 'medium' })
   // the call is over, so the band is back on the main session
-  expect((await probe($)).current).toMatchObject({ lane: 'you' })
+  expect((await probe($)).current).toMatchObject({ lane: 'main session' })
   await $.turn.complete({ turnId: 't1', ...DONE })
 
   const s = await probe($)
   expect(s.last).toMatchObject({ lane: 'coder', model: 'Sonnet 5.5', effort: 'medium', agents: 1 })
   expect(s.turns?.[0]?.lane).toBe('coder')
-  // the main loop's own usage still counts under you
-  expect(s.totals?.you?.turns).toBe(1)
+  // the main loop's own usage still counts under the main session
+  expect(s.totals?.['main session']?.turns).toBe(1)
 })
 
 test('an agy -p Bash call counts a Gemini turn and the turn closes as lane Gemini', { plugins: [probePlugin] }, async ($, on) => {
@@ -121,7 +121,7 @@ test('an agy -p Bash call counts a Gemini turn and the turn closes as lane Gemin
   expect(s.last).toMatchObject({ lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low' })
 })
 
-test('two Agent calls in flight show the later one; the earlier finishing does not drop to you', { plugins: [probePlugin] }, async ($, on) => {
+test('two Agent calls in flight show the later one; the earlier finishing does not drop to the main session', { plugins: [probePlugin] }, async ($, on) => {
   mock.clock(on, { now: 1000 })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   const tools = gatedTools(on)
@@ -139,7 +139,7 @@ test('two Agent calls in flight show the later one; the earlier finishing does n
 
   tools.release('p1')
   await planner
-  expect((await probe($)).current?.lane).toBe('you')
+  expect((await probe($)).current?.lane).toBe('main session')
 })
 
 test('the later call finishing first brings the earlier one back, with its own ordinal', { plugins: [probePlugin] }, async ($, on) => {
@@ -188,6 +188,42 @@ test('turn.start refreshes the quota', { plugins: [probePlugin] }, async ($, on)
   let q: Snapshot['quota']
   for (let i = 0; i < 50 && !q; i++) { q = (await probe($)).quota; if (!q) await tick() }
   expect(q).toMatchObject({ readAt: 5000 })
+})
+
+test('tool calls tick the elapsed time, at most one write per second', { plugins: [probePlugin] }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('tool.call', async () => ({ result: {} as never }))
+  const read = { tool: 'Read' as const, file_path: '/repo/a.py' }
+
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  expect((await probe($)).current?.nowMs).toBe(1000)
+  await clock.advance(1500)
+  await $.tool.call({ ...read, tool_use_id: 'r1' })
+  expect((await probe($)).current?.nowMs).toBe(2500)
+  await clock.advance(400)
+  await $.tool.call({ ...read, tool_use_id: 'r2' })
+  expect((await probe($)).current?.nowMs).toBe(2500)
+  await clock.advance(700)
+  await $.tool.call({ ...read, tool_use_id: 'r3' })
+  expect((await probe($)).current?.nowMs).toBe(3600)
+})
+
+test('turn.step chunks tick the elapsed time', { plugins: [probePlugin] }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.step', async function* ($, e) {
+    yield { kind: 'text' as const, index: 0, text: 'hi' }
+    return { turnId: e.turnId, index: e.index, answer: 'hi', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+  })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await clock.advance(2000)
+  const chunks: unknown[] = []
+  const step = $.turn.step({ turnId: 't1', index: 0, model: 'claude-fable-5-1', effort: 'high', messageCount: 1 })
+  for await (const c of step) chunks.push(c)
+  // the chunk passes up unchanged, and its arrival stamped the turn
+  expect(chunks).toEqual([{ kind: 'text', index: 0, text: 'hi' }])
+  expect((await probe($)).current).toMatchObject({ nowMs: 3000, model: 'Fable 5.1', effort: 'high' })
 })
 
 const COMPOSE = { model: 'claude-haiku-5-5', promptModel: 'claude-haiku-5-5', tools: [], outputStyle: null, traits: [] }

@@ -5,7 +5,7 @@ export type TurnRecord = {
   turnId: string
   startedAt: number
   endedAt?: number
-  /** 'you' for the main session, a subagent type, or 'Gemini' | 'Grok' | 'Codex' */
+  /** 'main session', a subagent type, or 'Gemini' | 'Grok' | 'Codex' */
   lane: string
   /** display name, e.g. 'Haiku 5.5' or 'gemini-3.8-flash'; '' when unknown */
   model: string
@@ -14,6 +14,10 @@ export type TurnRecord = {
   agents: number
   /** while an agent shows on the band: its ordinal among this turn's agents (1-based) */
   agentIndex?: number
+  /** while a Codex review call shows on the band: the verb reads `is reviewing` */
+  isReview?: boolean
+  /** while active: the latest tick (a turn.step chunk or tool.call, at most one write per second), so the band's elapsed time moves */
+  nowMs?: number
   /** attention cause, shown in color on the band and in the pane's note column */
   note?: Note
   costUsd?: number | null
