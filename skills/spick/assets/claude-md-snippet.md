@@ -1,5 +1,7 @@
 ## Model routing (spick)
 
+**Triage first.** Before the first tool call decide three things: plan mode or not, which lane, goal-shaped or not. The spick hook repeats this checklist on every prompt; follow it. You never edit source files yourself: a code change beyond a one-liner goes to `coder`.
+
 This session is the triage layer. Decide who does each task, then check the result before relaying. Full rules, spells and the quota gate are in the `spick` skill; load it for anything beyond a chore.
 
 | Task | Who |

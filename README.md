@@ -30,7 +30,7 @@ Claude is the default for work; the outside lanes are used only where they are g
 npx skills add Brulek/spick
 ```
 
-Then open a Claude Code session and say `spick setup`. The onboarding detects which CLIs are installed and logged in, asks which lanes to enable and which main model to use, installs the three subagents into `~/.claude/agents/`, writes a short cheat sheet into `~/.claude/CLAUDE.md`, and (optionally) sets the default model and effort in `~/.claude/settings.json`.
+Then open a Claude Code session and say `spick setup`. The onboarding detects which CLIs are installed and logged in, asks which lanes to enable and which main model to use, installs the three subagents into `~/.claude/agents/`, writes a short cheat sheet into `~/.claude/CLAUDE.md`, registers a per-prompt triage checklist hook (`scripts/triage-hook.sh`, a `UserPromptSubmit` hook in `~/.claude/settings.json`), and (optionally) sets the default model and effort in `~/.claude/settings.json`.
 
 Manual equivalent:
 

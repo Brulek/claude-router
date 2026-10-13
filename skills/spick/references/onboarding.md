@@ -38,6 +38,7 @@ Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <h
 - copies `assets/agents/*.md` into `~/.claude/agents/` (existing files are kept unless `--force`),
 - writes `~/.claude/spick.json` with the enabled lanes and thresholds,
 - inserts `assets/claude-md-snippet.md` into `~/.claude/CLAUDE.md` between `<!-- spick:start -->` / `<!-- spick:end -->` markers (re-running replaces the block, never duplicates it),
+- registers a `UserPromptSubmit` hook (`scripts/triage-hook.sh`) in `~/.claude/settings.json` that prints a three-question triage checklist on every prompt; small models follow a per-turn checklist far better than a once-per-session rule,
 - sets `model` and `effortLevel` in `~/.claude/settings.json` only if `--model` / `--effort` were given, keeping every other key.
 
 Tell the user what was written, file by file.

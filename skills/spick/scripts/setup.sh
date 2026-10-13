@@ -106,6 +106,24 @@ print(f"  wrote  {cfg}")
 PY
   fi
 
+  echo "== triage hook (UserPromptSubmit) =="
+  if [ -n "$PY" ]; then
+    "$PY" - "$CLAUDE_DIR/settings.json" <<'PY2'
+import sys, json, os
+p = sys.argv[1]
+d = json.load(open(p)) if os.path.exists(p) else {}
+cmd = 'bash "$HOME/.claude/skills/spick/scripts/triage-hook.sh"'
+hooks = d.setdefault("hooks", {}); lst = hooks.setdefault("UserPromptSubmit", [])
+present = any("spick/scripts/triage-hook.sh" in h.get("command", "") for e in lst for h in e.get("hooks", []))
+if not present:
+    lst.append({"hooks": [{"type": "command", "command": cmd}]})
+    json.dump(d, open(p, "w"), indent=2, ensure_ascii=False); open(p, "a").write("\n")
+    print(f"  added  UserPromptSubmit hook -> {p}")
+else:
+    print(f"  keep   hook already present in {p}")
+PY2
+  fi
+
   if [ -n "$model$effort" ] && [ -n "$PY" ]; then
     echo "== settings.json =="
     "$PY" - "$CLAUDE_DIR/settings.json" "$model" "$effort" <<'PY'
