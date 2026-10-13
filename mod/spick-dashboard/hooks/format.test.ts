@@ -29,6 +29,26 @@ test('parseCli ignores CLI names inside quoted strings and ordinary words', () =
   expect(parseCli('python3 -m pytest')).toBeNull()
 })
 
+test('parseCli requires the CLI in command position, not just anywhere', () => {
+  expect(parseCli('grep -r grok .')).toBeNull()
+  expect(parseCli('which agy')).toBeNull()
+  expect(parseCli('brew install grok')).toBeNull()
+  expect(parseCli('man agy')).toBeNull()
+})
+
+test('parseCli accepts path invocations and env/npx/sudo/time prefixes', () => {
+  expect(parseCli('~/.local/bin/agy -p "x"')?.lane).toBe('Gemini')
+  expect(parseCli('/opt/homebrew/bin/codex exec "fix"')?.lane).toBe('Codex')
+  expect(parseCli('npx agy -p "x"')?.lane).toBe('Gemini')
+  expect(parseCli('cd /tmp && time grok -p "x"')?.lane).toBe('Grok')
+})
+
+test('parseCli marks Codex review only when the prompt says review as a word', () => {
+  expect(parseCli('codex exec "build the preview pane"')?.isReview).toBe(false)
+  expect(parseCli('codex exec "Review this diff for bugs"')?.isReview).toBe(true)
+  expect(parseCli('codex exec --sandbox read-only "fix" < docs/code-review.md')?.isReview).toBe(false)
+})
+
 test('isSourcePath excludes docs, data, plan files and .claude', () => {
   expect(isSourcePath('src/lru.py')).toBe(true)
   expect(isSourcePath('scripts/quota.sh')).toBe(true)

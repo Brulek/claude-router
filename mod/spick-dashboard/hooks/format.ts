@@ -22,26 +22,51 @@ export function modelName(id: string): string {
 
 export type CliLane = { lane: 'Gemini' | 'Grok' | 'Codex'; model?: string; effort?: string; isReview: boolean }
 
-/** Strip quoted strings so a CLI name inside an argument never counts as a command. */
-function unquoted(command: string): string {
-  return command.replace(/"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g, '""')
+const PREFIX_WORDS = new Set(['env', 'npx', 'sudo', 'time'])
+const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g
+
+/** Classify one command segment by its first real word (after env/npx/sudo/time and any path). */
+function segmentLane(words: string[]): { lane: CliLane['lane']; rest: string[] } | null {
+  let i = 0
+  while (i < words.length) {
+    const w = words[i]
+    if (PREFIX_WORDS.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || (i > 0 && w.startsWith('-'))) i++
+    else break
+  }
+  const first = words[i]
+  if (!first) return null
+  const base = first.slice(first.lastIndexOf('/') + 1)
+  if (base === 'agy') return { lane: 'Gemini', rest: words.slice(i + 1) }
+  if (base === 'grok') return { lane: 'Grok', rest: words.slice(i + 1) }
+  if (base === 'codex' && words[i + 1] === 'exec') return { lane: 'Codex', rest: words.slice(i + 2) }
+  return null
 }
 
+/**
+ * A CLI counts only when its basename is the first word of a command segment
+ * (segments split on ; & | ( ), optionally behind a path and env/npx/sudo/time.
+ * Quoted strings are masked first so names inside arguments never match.
+ */
 export function parseCli(command: string): CliLane | null {
-  const bare = unquoted(command)
-  const atStart = (name: string) => new RegExp(`(^|[\\s;&|(])${name}(\\s|$)`).test(bare)
-  let lane: CliLane['lane'] | null = null
-  if (atStart('agy')) lane = 'Gemini'
-  else if (atStart('grok')) lane = 'Grok'
-  else if (/(^|[\s;&|(])codex\s+exec(\s|$)/.test(bare)) lane = 'Codex'
-  if (!lane) return null
-  const out: CliLane = { lane, isReview: false }
-  const model = bare.match(/(?:--model|-m)[=\s]+(\S+)/)
-  if (model) out.model = model[1]
-  const effort = bare.match(/(?:--effort|--reasoning-effort)[=\s]+(\S+)/) ?? command.match(/model_reasoning_effort="?(\w+)"?/)
-  if (effort) out.effort = effort[1]
-  if (lane === 'Codex' && /review/i.test(command)) out.isReview = true
-  return out
+  const quoted: string[] = []
+  const masked = command.replace(QUOTED, m => `"${quoted.push(m) - 1}"`)
+  for (const seg of masked.split(/[;&|(]+/)) {
+    const hit = segmentLane(seg.trim().split(/\s+/).filter(Boolean))
+    if (!hit) continue
+    const restored = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)])
+    const text = hit.rest.join(' ')
+    const out: CliLane = { lane: hit.lane, isReview: false }
+    const model = text.match(/(?:--model|-m)[=\s]+(\S+)/)
+    if (model) out.model = model[1]
+    const effort = text.match(/(?:--effort|--reasoning-effort)[=\s]+(\S+)/) ?? restored(text).match(/model_reasoning_effort="?(\w+)"?/)
+    if (effort) out.effort = effort[1]
+    if (hit.lane === 'Codex') {
+      const prompts = [...text.matchAll(/"(\d+)"/g)].map(m => quoted[Number(m[1])])
+      out.isReview = prompts.some(p => /\breview\b/i.test(p))
+    }
+    return out
+  }
+  return null
 }
 
 const NON_SOURCE = /\.(md|markdown|txt|json|jsonl|csv|tsv|ya?ml|toml|lock|log)$/i
