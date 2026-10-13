@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 import type { LaneTotals, Quota, QuotaWindows, TurnRecord } from '../types'
-import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaSummary, quotaWarning, table } from './format'
+import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
 
@@ -137,7 +137,7 @@ export const register: Register = on => {
       agentsThisTurn = 0
       lastTickMs = startedAt
       await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0 }))
-      // the TTL gates it: at most one read per ten minutes, so the band's quota warnings stay current
+      // the TTL gates it: at most one read per ten minutes, so the band's quota meters stay current
       void refreshQuota($).catch(() => undefined)
     } catch {}
     return next(e)
@@ -310,10 +310,8 @@ export const register: Register = on => {
         ? { lane: l.lane, model: l.model, effort: l.effort, agents: 0, isIdle: true, durationMs: (l.endedAt ?? l.startedAt) - l.startedAt }
         : null
     if (!view) return next(e)
-    const q = await read($, quota)
-    // a breach or review note already on the turn wins over a hot quota window; a hot window, active or idle, wins over context
-    view.note ??= quotaWarning(q)
-    if (view.isIdle) view.quota = quotaSummary(q)
+    // quota shows as meters on the right (bandSegments decides when); a hot provider is colored there, never a cause
+    view.meters = quotaMeters(await read($, quota))
     const { left, right } = bandSegments(view, e.props.bodyColumns)
     const { Box, Text } = $.ui.resolve(e)
     const paint = (s: Seg) => {

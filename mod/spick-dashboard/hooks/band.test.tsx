@@ -3,6 +3,9 @@ import { test, expect, mock } from 'claude-code/testing'
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 1, bodyColumns: 80, scroll: { offset: 0, bodyRows: 1 }, view: {} }
 const WIDE = { ...BAND, bodyColumns: 100 }
+// the kit's types carry no timers; the runner has them
+const timers = globalThis as unknown as { setTimeout: (f: () => void, ms: number) => void }
+const tick = () => new Promise<void>(r => timers.setTimeout(r, 1))
 const PANE = { title: 'Spick', isFocused: false, bodyColumns: 80, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} }
 
 for (const surface of ['terminal', 'desktop'] as const) {
@@ -65,6 +68,44 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const lead = await ui.find({ type: 'Text', text: 'edited ' })
     expect(lead).toBeDefined()
     expect(lead?.props.color).toBeUndefined()
+  })
+
+  test(`band shows quota meters on the right when idle, a hot provider in warning, on ${surface}`, async ($, on) => {
+    mock.clock(on, { now: 1000 })
+    mock.env(on, { HOME: '/h' })
+    const claudeJson = JSON.stringify({ cachedUsageUtilization: { utilization: { five_hour: { utilization: 5 }, seven_day: { utilization: 8 } } } })
+    const codexLine = JSON.stringify({ payload: { rate_limits: { primary: { used_percent: 83, window_minutes: 10080 } } } })
+    const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 1, isLink: false })
+    on('fs.read', async ($, e) => ({ value: e.path === '/h/.claude.json' ? claudeJson : codexLine }))
+    // sessions/YYYY/MM/DD/s.jsonl: one directory per level, one file at the bottom
+    on('fs.list', async ($, e) => {
+      const depth = e.path.split('/').length - '/h/.codex/sessions'.split('/').length
+      return { value: depth < 3 ? [entry(String(depth), 'dir')] : [entry('s.jsonl', 'file')] }
+    })
+    on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+    on('turn.complete', async ($, e) => ({ text: e.answer }))
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
+
+    // turn.start's quota read runs unawaited; draw again until the meters land
+    const draw = async () => (await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 120 } })).findAll({ type: 'Text' })
+    let texts = await draw()
+    for (let i = 0; i < 50 && !texts.some(t => t.text.startsWith('codex ')); i++) { await tick(); texts = await draw() }
+    const line = texts.map(t => t.text).join('')
+    expect(line).toBe('spick   Idle · last turn: main session · took 0s' + 'claude ▰▱▱▱▱▱▱▱▱▱ 8%   codex ▰▰▰▰▰▰▰▰▱▱ 83%')
+    expect(line).not.toContain('quota:')
+    expect(texts.find(t => t.text === 'claude ▰▱▱▱▱▱▱▱▱▱ 8%')?.props).toMatchObject({ color: 'subtle', wrap: 'truncate-end' })
+    expect(texts.find(t => t.text === 'codex ▰▰▰▰▰▰▰▰▱▱ 83%')?.props).toMatchObject({ color: 'warning', wrap: 'truncate-end' })
+  })
+
+  test(`band shows nothing on the right when idle with no provider known on ${surface}`, async ($, on) => {
+    mock.clock(on, { now: 1000 })
+    on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+    on('turn.complete', async ($, e) => ({ text: e.answer }))
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
+    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 120 } })
+    expect((await ui.findAll({ type: 'Text' })).map(t => t.text).join('')).toBe('spick   Idle · last turn: main session · took 0s')
   })
 
   test(`pane draws the three sections and toggles the band on ${surface}`, async ($, on) => {

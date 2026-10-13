@@ -24,14 +24,15 @@ Appearance is a first-class requirement, not polish at the end. Every screen in 
 
 ## The band
 
-Rendered by a `ui.render` hook on `AbovePrompt`. Layout: a single row `Box` with `justifyContent="space-between"`; the left group is the status sentence, the right group is context (hint, main-session model, quota summary, or the attention cause). The wordmark is followed by three spaces, then segments separated by ` · `.
+Rendered by a `ui.render` hook on `AbovePrompt`. Layout: a single row `Box` with `justifyContent="space-between"`; the left group is the status sentence, the right group is context (quota meters, main-session model, hint, or the attention cause). The wordmark is followed by three spaces, then segments separated by ` · `.
 
 Every state reads as a short sentence. No pronouns, no bare abbreviations: `high effort`, `took 36s`, `agent 2 of 2`.
 
-Active, the main session itself working (elapsed time ticks on each model chunk or tool call):
+Active, the main session itself working (elapsed time ticks on each model chunk or tool call; right group is the quota meters, or `/spick for details` when no provider is known):
 
 ```
-spick   Working · Fable 5.1 · high effort · 12s                                    /spick for details
+spick   Working · Fable 5.1 · high effort · 12s                    claude ▰▱▱▱▱▱▱▱▱▱ 8%   codex ▰▰▰▰▱▱▱▱▱▱ 37%
+spick   Working · Fable 5.1 · high effort · 12s                                                /spick for details
 ```
 
 Active, a subagent working (right group names the main session's model):
@@ -46,19 +47,24 @@ Active, an outside CLI (verb by lane: Gemini `is searching`, Grok `is fetching X
 spick   Gemini is searching · gemini-3.8-flash · low effort · 31s                  main: Fable 5.1
 ```
 
-Idle (all `subtle` after the wordmark; right group is a quota summary of the known providers, blank when none is known):
+Idle (all `subtle` after the wordmark except a meter at 80% or more; right group is the quota meters of the known providers, blank when none is known):
 
 ```
-spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s        quota: claude 7d 1% · codex 7d 30%
-spick   Idle · last turn: Fable 5.1 · high effort · took 36s                       quota: claude 7d 1% · codex 7d 30%
+spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s   claude ▰▱▱▱▱▱▱▱▱▱ 8%   codex ▰▰▰▰▱▱▱▱▱▱ 37%
+spick   Idle · last turn: Fable 5.1 · high effort · took 36s                  claude ▰▱▱▱▱▱▱▱▱▱ 8%   codex ▰▰▰▰▱▱▱▱▱▱ 37%
 ```
 
-Attention states replace the right group with the cause; only the cause word is colored:
+Quota meters: one per known provider (`claude`, `codex`), the weekly window preferred, the five-hour one when the weekly is unknown. Each reads `<name> <bar> <pct>%` with the pane's ten-cell bar (`▰` used, `▱` free); meters are three spaces apart. A provider at 80% or more renders its whole meter in `warning`, the others `subtle`; quota is never a text cause.
+
+```
+spick   Idle · last turn: Fable 5.1 · high effort · took 36s                  claude ▰▱▱▱▱▱▱▱▱▱ 8%   codex ▰▰▰▰▰▰▰▰▱▱ 83%   ← codex meter in warning
+```
+
+Attention states (a breach, a review) replace the right group with the cause; only the cause word is colored:
 
 ```
 spick   Working · Haiku 5.5 · low effort · 8s                                      edited src/lru.py      ← error color on the file name
 spick   coder is working · Sonnet 5.5 · medium effort · 44s                        review: codex          ← warning
-spick   Working · Haiku 5.5 · low effort · 8s                                      codex 7d 83%           ← warning
 ```
 
 Segment rules:
@@ -69,13 +75,14 @@ Segment rules:
 - Effort: `<level> effort`. Absent when unknown.
 - Agent ordinal: `agent <n> of <m>` only while a subagent is active and more than one agent ran this turn.
 - Elapsed: `<duration>` while active (refreshed on every `turn.step` chunk and `tool.call`), `took <duration>` when idle.
-- Right group precedence: attention cause > (active delegate: `main: <model>`) > (active main: `/spick for details`) > (idle: `quota: …` summary, omitted when nothing is known).
+- Right group precedence: attention cause (`edited <file>`, `review: codex`) > (active delegate: `main: <model>`) > (active main session or idle: quota meters when at least one provider is known) > (active main session: `/spick for details`; idle: nothing).
 
 Width tiers (from `e.props.bodyColumns`):
 
 | Columns | Shown |
 |---|---|
-| ≥ 90 | everything |
+| ≥ 110 | everything; quota meters with ten-cell bars |
+| 90–109 | everything; quota meters with five-cell bars (`▰▰▱▱▱`, used cells = round(pct / 20)) |
 | 70–89 | no right group except an attention cause |
 | 50–69 | also no agent ordinal, no elapsed; `effort` keeps its word |
 | 40–49 | also no effort; attention cause and idle duration still show |

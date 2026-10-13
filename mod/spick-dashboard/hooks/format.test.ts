@@ -1,7 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
-  fmtDuration, fmtCost, estimateCost, quotaSummary, quotaWarning, verbOf, MAIN_LANE,
+  fmtDuration, fmtCost, estimateCost, quotaMeters, verbOf, MAIN_LANE,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -73,21 +73,24 @@ const R = (b: { right: { text: string }[] }) => b.right.map(s => s.text).join(''
 const mainActive = { lane: MAIN_LANE, model: 'Fable 5.1', effort: 'high', agents: 0, isIdle: false, durationMs: 12000 }
 const coderActive = { lane: 'coder', model: 'Sonnet 5.5', effort: 'medium', agents: 2, agentIndex: 2, isIdle: false, durationMs: 44000, mainModel: 'Fable 5.1' }
 const geminiActive = { lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', agents: 0, isIdle: false, durationMs: 31000, mainModel: 'Fable 5.1' }
-const QUOTA = 'claude 7d 1% · codex 7d 30%'
-const coderIdle = { lane: 'coder', model: 'Sonnet 5.5', effort: 'medium', agents: 0, isIdle: true, durationMs: 134000, quota: QUOTA }
-const mainIdle = { lane: MAIN_LANE, model: 'Fable 5.1', effort: 'high', agents: 0, isIdle: true, durationMs: 36000, quota: QUOTA }
+const METERS = [{ name: 'claude', pct: 8 }, { name: 'codex', pct: 37 }]
+const WIDE_METERS = 'claude ▰▱▱▱▱▱▱▱▱▱ 8%   codex ▰▰▰▰▱▱▱▱▱▱ 37%'
+const coderIdle = { lane: 'coder', model: 'Sonnet 5.5', effort: 'medium', agents: 0, isIdle: true, durationMs: 134000, meters: METERS }
+const mainIdle = { lane: MAIN_LANE, model: 'Fable 5.1', effort: 'high', agents: 0, isIdle: true, durationMs: 36000, meters: METERS }
 
 test('bandSegments reads the spec sample sentences at 90+ columns', () => {
   expect(L(bandSegments(mainActive, 100))).toBe('spick   Working · Fable 5.1 · high effort · 12s')
+  // no provider known: the hint
   expect(R(bandSegments(mainActive, 100))).toBe('/spick for details')
+  expect(R(bandSegments({ ...mainActive, meters: METERS }, 120))).toBe(WIDE_METERS)
   expect(L(bandSegments(coderActive, 100))).toBe('spick   coder is working · Sonnet 5.5 · medium effort · agent 2 of 2 · 44s')
   expect(R(bandSegments(coderActive, 100))).toBe('main: Fable 5.1')
   expect(L(bandSegments(geminiActive, 100))).toBe('spick   Gemini is searching · gemini-3.8-flash · low effort · 31s')
   expect(R(bandSegments(geminiActive, 100))).toBe('main: Fable 5.1')
   expect(L(bandSegments(coderIdle, 100))).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s')
-  expect(R(bandSegments(coderIdle, 100))).toBe('quota: claude 7d 1% · codex 7d 30%')
+  expect(R(bandSegments(coderIdle, 120))).toBe(WIDE_METERS)
   expect(L(bandSegments(mainIdle, 100))).toBe('spick   Idle · last turn: Fable 5.1 · high effort · took 36s')
-  expect(R(bandSegments(mainIdle, 100))).toBe('quota: claude 7d 1% · codex 7d 30%')
+  expect(R(bandSegments(mainIdle, 120))).toBe(WIDE_METERS)
 })
 
 test('bandSegments attention samples: the cause replaces the right group, only the cause is colored', () => {
@@ -99,8 +102,8 @@ test('bandSegments attention samples: the cause replaces the right group, only t
   const review = bandSegments({ ...coderActive, agents: 1, agentIndex: 1, note: { kind: 'warning' as const, text: 'review: codex' } }, 100)
   expect(L(review)).toBe('spick   coder is working · Sonnet 5.5 · medium effort · 44s')
   expect(review.right).toEqual([{ text: 'review: codex', style: 'warning' }])
-  const quota = bandSegments({ ...haiku, note: { kind: 'warning' as const, text: 'codex 7d 83%' } }, 100)
-  expect(quota.right).toEqual([{ text: 'codex 7d 83%', style: 'warning' }])
+  // a cause wins over the meters
+  expect(bandSegments({ ...haiku, meters: METERS, note: { kind: 'error' as const, text: 'edited src/lru.py' } }, 120).right).toEqual(edited.right)
 })
 
 test('bandSegments styles: bold wordmark in brand, three spaces, bold lane, idle all dim', () => {
@@ -111,7 +114,7 @@ test('bandSegments styles: bold wordmark in brand, three spaces, bold lane, idle
   expect(b.left[3]).toEqual({ text: ' is working', style: 'plain' })
   expect(bandSegments(mainActive, 100).left[2]).toEqual({ text: 'Working', style: 'lane' })
   const idle = bandSegments(coderIdle, 100)
-  expect([...idle.left.slice(2), ...idle.right].every(s => s.style === 'dim')).toBe(true)
+  expect([...idle.left.slice(2), ...idle.right].filter(s => s.text.trim() !== '').every(s => s.style === 'dim')).toBe(true)
 })
 
 test('bandSegments verbs by lane: Codex reviews only on a review call', () => {
@@ -129,20 +132,25 @@ test('bandSegments drops the agent ordinal for a single agent or the main sessio
 })
 
 test('bandSegments width tiers: 90+, 70-89, 50-69, 40-49, under 40', () => {
-  const warned = { ...coderActive, note: { kind: 'warning' as const, text: 'codex 7d 83%' } }
+  const warned = { ...coderActive, note: { kind: 'warning' as const, text: 'review: codex' } }
+  // 90-109: meters with five-cell bars; 110+: ten cells
+  expect(R(bandSegments(coderIdle, 109))).toBe('claude ▱▱▱▱▱ 8%   codex ▰▰▱▱▱ 37%')
+  expect(R(bandSegments(coderIdle, 90))).toBe('claude ▱▱▱▱▱ 8%   codex ▰▰▱▱▱ 37%')
+  expect(R(bandSegments(coderIdle, 110))).toBe(WIDE_METERS)
   // 70-89: no right group except an attention cause
   expect(L(bandSegments(coderActive, 80))).toBe('spick   coder is working · Sonnet 5.5 · medium effort · agent 2 of 2 · 44s')
   expect(R(bandSegments(coderActive, 80))).toBe('')
   expect(R(bandSegments(mainActive, 89))).toBe('')
-  expect(R(bandSegments(coderIdle, 80))).toBe('')
-  expect(R(bandSegments(warned, 80))).toBe('codex 7d 83%')
+  expect(R(bandSegments(coderIdle, 89))).toBe('')
+  expect(R(bandSegments({ ...mainActive, meters: METERS }, 89))).toBe('')
+  expect(R(bandSegments(warned, 80))).toBe('review: codex')
   // 50-69: also no agent ordinal and no elapsed; effort keeps its word
   expect(L(bandSegments(coderActive, 60))).toBe('spick   coder is working · Sonnet 5.5 · medium effort')
   expect(L(bandSegments(coderIdle, 60))).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s')
-  expect(R(bandSegments(warned, 60))).toBe('codex 7d 83%')
+  expect(R(bandSegments(warned, 60))).toBe('review: codex')
   // 40-49: also no effort; the cause and the idle duration still show
   expect(L(bandSegments(coderActive, 45))).toBe('spick   coder is working · Sonnet 5.5')
-  expect(R(bandSegments(warned, 45))).toBe('codex 7d 83%')
+  expect(R(bandSegments(warned, 45))).toBe('review: codex')
   expect(L(bandSegments(coderIdle, 45))).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · took 2m 14s')
   // under 40: wordmark, lane or Working, model
   expect(L(bandSegments(coderActive, 35))).toBe('spick · coder · Sonnet 5.5')
@@ -151,32 +159,30 @@ test('bandSegments width tiers: 90+, 70-89, 50-69, 40-49, under 40', () => {
   expect(L(bandSegments(coderIdle, 35))).toBe('spick · Idle · Sonnet 5.5')
 })
 
-test('bandSegments idle: quota summary when known, nothing on the right when not', () => {
-  expect(R(bandSegments({ ...coderIdle, quota: undefined }, 100))).toBe('')
+test('bandSegments meters: a hot provider is warning as a whole, the others subtle, three spaces apart', () => {
+  const b = bandSegments({ ...coderIdle, meters: [{ name: 'claude', pct: 8 }, { name: 'codex', pct: 83 }] }, 120)
+  expect(b.right).toEqual([
+    { text: 'claude ▰▱▱▱▱▱▱▱▱▱ 8%', style: 'dim' },
+    { text: '   ', style: 'plain' },
+    { text: 'codex ▰▰▰▰▰▰▰▰▱▱ 83%', style: 'warning' },
+  ])
+  expect(bandSegments({ ...mainActive, meters: [{ name: 'claude', pct: 80 }] }, 100).right).toEqual([{ text: 'claude ▰▰▰▰▱ 80%', style: 'warning' }])
+})
+
+test('bandSegments right group fallbacks: idle with no provider is empty, active main shows the hint, a delegate names the main model', () => {
+  expect(R(bandSegments({ ...coderIdle, meters: [] }, 120))).toBe('')
+  expect(R(bandSegments({ ...coderIdle, meters: undefined }, 120))).toBe('')
+  expect(R(bandSegments({ ...mainActive, meters: [] }, 120))).toBe('/spick for details')
+  expect(R(bandSegments({ ...coderActive, meters: METERS }, 120))).toBe('main: Fable 5.1')
   expect(L(bandSegments({ ...mainIdle, model: '' }, 100))).toBe('spick   Idle · last turn: main session · high effort · took 36s')
 })
 
-test('bandSegments idle with a hot quota window shows it as the cause, in warning', () => {
-  const hot = { ...coderIdle, quota: 'claude 7d 1% · codex 7d 83%', note: quotaWarning({ claude: { sevenDay: 1 }, codex: { sevenDay: 83 }, readAt: 0 }) }
-  const b = bandSegments(hot, 100)
-  expect(b.right).toEqual([{ text: 'codex 7d 83%', style: 'warning' }])
-  expect(L(b)).toBe('spick   Idle · last turn: coder on Sonnet 5.5 · medium effort · took 2m 14s')
-  // the cause still shows at 40-89 columns
-  expect(bandSegments(hot, 45).right).toEqual([{ text: 'codex 7d 83%', style: 'warning' }])
-})
-
-test('quotaWarning names the first window at 80% or more, none otherwise', () => {
-  expect(quotaWarning({ claude: { fiveHour: 5, sevenDay: 1 }, codex: { sevenDay: 83 }, readAt: 0 })).toEqual({ kind: 'warning', text: 'codex 7d 83%' })
-  expect(quotaWarning({ claude: { fiveHour: 80 }, codex: { sevenDay: 90 }, readAt: 0 })).toEqual({ kind: 'warning', text: 'claude 5h 80%' })
-  expect(quotaWarning({ claude: { sevenDay: 79 }, codex: null, readAt: 0 })).toBeUndefined()
-  expect(quotaWarning(null)).toBeUndefined()
-})
-
-test('quotaSummary picks the weekly window per known provider', () => {
-  expect(quotaSummary({ claude: { fiveHour: 5, sevenDay: 1 }, codex: { sevenDay: 30 }, readAt: 0 })).toBe(QUOTA)
-  expect(quotaSummary({ claude: { fiveHour: 12 }, codex: null, readAt: 0 })).toBe('claude 5h 12%')
-  expect(quotaSummary({ claude: null, codex: null, readAt: 0 })).toBeUndefined()
-  expect(quotaSummary(null)).toBeUndefined()
+test('quotaMeters takes the weekly window per known provider, five-hour when the weekly is unknown', () => {
+  expect(quotaMeters({ claude: { fiveHour: 5, sevenDay: 8 }, codex: { sevenDay: 37 }, readAt: 0 })).toEqual(METERS)
+  expect(quotaMeters({ claude: { fiveHour: 12 }, codex: null, readAt: 0 })).toEqual([{ name: 'claude', pct: 12 }])
+  expect(R(bandSegments({ ...coderIdle, meters: quotaMeters({ claude: { fiveHour: 12 }, codex: null, readAt: 0 }) }, 120))).toBe('claude ▰▱▱▱▱▱▱▱▱▱ 12%')
+  expect(quotaMeters({ claude: null, codex: null, readAt: 0 })).toEqual([])
+  expect(quotaMeters(null)).toEqual([])
 })
 
 test('table pads columns and right-aligns numbers, with em dash for unpriced', () => {
@@ -190,7 +196,11 @@ test('table pads columns and right-aligns numbers, with em dash for unpriced', (
   expect(new Set(rows.map(r => r.length)).size).toBe(1)
 })
 
-test('quotaBar renders ten cells', () => {
+test('quotaBar renders ten cells, or as many as asked', () => {
+  expect(quotaBar(8, 5)).toBe('▱▱▱▱▱')
+  expect(quotaBar(37, 5)).toBe('▰▰▱▱▱')
+  expect(quotaBar(50, 5)).toBe('▰▰▰▱▱')
+  expect(quotaBar(100, 5)).toBe('▰▰▰▰▰')
   expect(quotaBar(0)).toBe('▱▱▱▱▱▱▱▱▱▱')
   expect(quotaBar(30)).toBe('▰▰▰▱▱▱▱▱▱▱')
   expect(quotaBar(83)).toBe('▰▰▰▰▰▰▰▰▱▱')

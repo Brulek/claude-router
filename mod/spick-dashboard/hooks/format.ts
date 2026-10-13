@@ -98,10 +98,12 @@ export type BandView = {
   note?: Note
   /** active delegate: the main session's model, for `main: <model>` */
   mainModel?: string
-  /** idle: known quota windows, e.g. `claude 7d 1% · codex 7d 30%` */
-  quota?: string
+  /** active main session or idle: one quota meter per known provider */
+  meters?: QuotaMeter[]
 }
-/** left: the status sentence; right: hint, main model, quota summary or the attention cause */
+/** one provider's quota for the band: the weekly window, else the five-hour one */
+export type QuotaMeter = { name: string; pct: number }
+/** left: the status sentence; right: the attention cause, main model, quota meters or the hint */
 export type Band = { left: Seg[]; right: Seg[] }
 const SEP: Seg = { text: ' · ', style: 'dim' }
 const GAP: Seg = { text: '   ', style: 'plain' }
@@ -119,21 +121,22 @@ export function noteParts(note: Note): Seg[] {
   return [{ text: note.text, style: note.kind }]
 }
 
-/** One window per known provider, the weekly one when known: `claude 7d 1% · codex 7d 30%`. */
-export function quotaSummary(q: Quota | null | undefined): string | undefined {
-  const parts: string[] = []
+/** One meter per known provider, the weekly window preferred, five-hour when the weekly is unknown. */
+export function quotaMeters(q: Quota | null | undefined): QuotaMeter[] {
+  const out: QuotaMeter[] = []
   for (const [name, w] of [['claude', q?.claude], ['codex', q?.codex]] as const) {
-    if (w?.sevenDay !== undefined) parts.push(`${name} 7d ${Math.round(w.sevenDay)}%`)
-    else if (w?.fiveHour !== undefined) parts.push(`${name} 5h ${Math.round(w.fiveHour)}%`)
+    const pct = w?.sevenDay ?? w?.fiveHour
+    if (pct !== undefined) out.push({ name, pct })
   }
-  return parts.length > 0 ? parts.join(' · ') : undefined
+  return out
 }
 
-/** The first quota window at 80% or more, as an attention cause; none when nothing is hot. */
-export function quotaWarning(q: Quota | null | undefined): Note | undefined {
-  const windows: [string, number | undefined][] = [['claude 5h', q?.claude?.fiveHour], ['claude 7d', q?.claude?.sevenDay], ['codex 7d', q?.codex?.sevenDay]]
-  for (const [name, pct] of windows) if (pct !== undefined && pct >= 80) return { kind: 'warning', text: `${name} ${Math.round(pct)}%` }
-  return undefined
+/** `claude ▰▱▱▱▱▱▱▱▱▱ 8%` per provider, three spaces apart; a provider at 80% or more in warning. */
+function meterSegs(meters: QuotaMeter[], cells: number): Seg[] {
+  return meters.flatMap((m, i) => {
+    const seg: Seg = { text: `${m.name} ${quotaBar(m.pct, cells)} ${Math.round(m.pct)}%`, style: m.pct >= 80 ? 'warning' : 'dim' }
+    return i === 0 ? [seg] : [GAP, seg]
+  })
 }
 
 export function bandSegments(v: BandView, columns: number): Band {
@@ -162,11 +165,15 @@ export function bandSegments(v: BandView, columns: number): Band {
   }
   const left: Seg[] = [brand, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
 
+  // right group: an attention cause from 40 columns; from 90, the main model for a delegate,
+  // else quota meters (ten cells from 110, five below), else the hint while active
   let right: Seg[] = []
   if (v.note) right = noteParts(v.note)
   else if (columns >= 90) {
-    const context = v.isIdle ? (v.quota ? `quota: ${v.quota}` : undefined) : !isMain && v.mainModel ? `main: ${v.mainModel}` : HINT
-    if (context) right = [{ text: context, style: 'dim' }]
+    const meters = v.meters ?? []
+    if (!v.isIdle && !isMain) right = [{ text: v.mainModel ? `main: ${v.mainModel}` : HINT, style: 'dim' }]
+    else if (meters.length > 0) right = meterSegs(meters, columns >= 110 ? 10 : 5)
+    else if (!v.isIdle) right = [{ text: HINT, style: 'dim' }]
   }
   return { left, right }
 }
@@ -180,9 +187,10 @@ export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
   return rows.map(r => widths.map((w, i) => (align[i] === 'r' ? padLeft(r[i] ?? '', w) : padRight(r[i] ?? '', w))).join('  '))
 }
 
-export function quotaBar(pct: number): string {
-  const used = Math.min(10, Math.max(0, Math.round(pct / 10)))
-  return '▰'.repeat(used) + '▱'.repeat(10 - used)
+/** `cells` cells of used (▰) and free (▱): ten in the pane and the wide band, five on a narrower band. */
+export function quotaBar(pct: number, cells = 10): string {
+  const used = Math.min(cells, Math.max(0, Math.round(pct / (100 / cells))))
+  return '▰'.repeat(used) + '▱'.repeat(cells - used)
 }
 
 export function fmtDuration(ms: number): string {
