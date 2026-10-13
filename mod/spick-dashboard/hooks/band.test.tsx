@@ -35,6 +35,27 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.find({ type: 'Text', text: '/spick for details' }))?.props).toMatchObject({ color: 'subtle' })
   })
 
+  test(`band colors only the file name of a breach on ${surface}`, async ($, on) => {
+    mock.clock(on, { now: 1000 })
+    on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+    on('turn.step', async function* ($, e) {
+      return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+    })
+    on('tool.call', async () => ({ result: {} as never }))
+    await $.turn.start({ text: 'hi', turnId: 't1' })
+    const step = $.turn.step({ turnId: 't1', index: 0, model: 'claude-haiku-5-5', effort: 'low', messageCount: 1 })
+    for await (const _ of step) { /* drain */ }
+    await $.tool.call({ tool: 'Edit', tool_use_id: 'tu1', file_path: '/repo/src/lru.py', old_string: 'a', new_string: 'b' })
+
+    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: BAND })
+    const line = (await ui.findAll({ type: 'Text' })).map(t => t.text).join('')
+    expect(line).toContain('edited')
+    expect(line).toContain('src/lru.py')
+    expect(line).not.toContain('/spick for details')
+    expect((await ui.findAll({ type: 'Text' })).find(t => t.text === 'src/lru.py')?.props).toMatchObject({ color: 'error', wrap: 'truncate-end' })
+    expect((await ui.find({ type: 'Text', text: 'you' }))?.props).toMatchObject({ bold: true })
+  })
+
   test(`pane draws the three sections and toggles the band on ${surface}`, async ($, on) => {
     mock.clock(on, { now: 1000 })
     on('turn.start', async ($, e) => ({ turnId: e.turnId }))
@@ -47,6 +68,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     for (const want of ['Spick', 'stop picking, just start', 'This session', 'Quota', 'not read yet', 'Recent turns']) expect(all).toContain(want)
     expect(all).toContain('total      1      $3.00     list price, not a bill')
     expect(all.some(t => t.startsWith('grok') && t.endsWith('unknown'))).toBe(true)
+    // the Quota heading row spans the quota block, not the pane
+    expect((await ui.findAll({ type: 'Box' })).find(b => b.props.justifyContent === 'space-between' && b.text.startsWith('Quota'))?.props.width).toBe(21)
     expect((await ui.find({ type: 'Button', key: 'hide' }))?.props.label).toBe('Hide band')
     await ui.press({ key: 'hide' })
     expect((await ui.find({ type: 'Button', key: 'hide' }))?.props.label).toBe('Show band')

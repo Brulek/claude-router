@@ -88,8 +88,8 @@ export function bandSegments(v: BandView, columns: number): Seg[] {
   if (v.model) segs.push(SEP, body(v.model, 'plain'))
   if (columns >= 50 && v.effort) segs.push(SEP, body(v.effort, 'plain'))
   if (columns >= 70 && !v.isIdle && v.agents > 1) segs.push(SEP, body(`1 of ${v.agents} agents`, 'dim'))
-  if (v.isIdle && v.durationMs !== undefined && columns >= 50) segs.push(SEP, body(fmtDuration(v.durationMs), 'dim'))
-  if (v.note && columns >= 50) segs.push({ text: v.note.text, style: v.note.kind })
+  if (v.isIdle && v.durationMs !== undefined && columns >= 40) segs.push(SEP, body(fmtDuration(v.durationMs), 'dim'))
+  if (v.note && columns >= 40) segs.push({ text: v.note.text, style: v.note.kind })
   else if (columns >= 70 && !v.isIdle) segs.push({ text: HINT, style: 'dim' })
   return segs
 }

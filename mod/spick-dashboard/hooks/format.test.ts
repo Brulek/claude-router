@@ -86,6 +86,16 @@ test('bandSegments attention note replaces the hint and carries its color', () =
   expect(segs.some(s => s.text === '/spick for details')).toBe(false)
 })
 
+test('bandSegments keeps the cause and the idle wall time at 40-49 columns, drops both below 40', () => {
+  const warned = { ...view, agents: 0, note: { kind: 'warning' as const, text: 'codex 7d 83%' } }
+  const idle = { ...view, isIdle: true, durationMs: 134000, agents: 0 }
+  expect(bandSegments(warned, 45).map(s => s.text)).toEqual(['spick', ' · ', 'coder', ' · ', 'Sonnet 5.5', 'codex 7d 83%'])
+  expect(bandSegments(warned, 45).at(-1)).toEqual({ text: 'codex 7d 83%', style: 'warning' })
+  expect(bandSegments(idle, 45).map(s => s.text)).toEqual(['spick', ' · ', 'last: coder', ' · ', 'Sonnet 5.5', ' · ', '2m 14s'])
+  expect(bandSegments(warned, 35).map(s => s.text)).toEqual(['spick', ' · ', 'coder', ' · ', 'Sonnet 5.5'])
+  expect(bandSegments(idle, 35).map(s => s.text)).toEqual(['spick', ' · ', 'last: coder', ' · ', 'Sonnet 5.5'])
+})
+
 test('table pads columns and right-aligns numbers, with em dash for unpriced', () => {
   const rows = table([
     ['lane', 'turns', 'est. cost'],

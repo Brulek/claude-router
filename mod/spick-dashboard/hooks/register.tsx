@@ -248,7 +248,7 @@ export const register: Register = on => {
         case 'plain': return <Text wrap="truncate-end">{s.text}</Text>
         default: {
           const [lead, cause] = splitNote({ kind: s.style, text: s.text })
-          return <Text wrap="truncate-end">{lead}<Text color={s.style}>{cause}</Text></Text>
+          return <Text wrap="truncate-end">{lead}<Text color={s.style} wrap="truncate-end">{cause}</Text></Text>
         }
       }
     }
@@ -268,7 +268,7 @@ export const register: Register = on => {
     const list = await read($, turns)
     const isHidden = await read($, hidden)
     const now = await $.clock.now()
-    const rows = e.viewport?.rows ?? 30
+    const rows = e.props.scroll?.bodyRows || e.viewport?.rows || 30
 
     const lanes = Object.entries(t).sort((a, b) => b[1].turns - a[1].turns)
     const totalCost = lanes.reduce<number | null>((acc, [, v]) => (v.costUsd === null ? acc : (acc ?? 0) + v.costUsd), null)
@@ -279,23 +279,22 @@ export const register: Register = on => {
     ], ['l', 'r', 'r'])
 
     // name column 8 wide; `unknown` starts where the bars do
-    const quotaRow = (name: string, w: QuotaWindows | null | undefined) => {
-      const cells: [string, number][] = []
-      if (w?.fiveHour !== undefined) cells.push(['5h', w.fiveHour])
-      if (w?.sevenDay !== undefined) cells.push(['7d', w.sevenDay])
-      if (cells.length === 0) return <Text>{padRight(name, 8) + '    '}<Text color="subtle">unknown</Text></Text>
-      return (
-        <Text>
-          {padRight(name, 8)}
-          {cells.flatMap(([label, pct], i) => {
-            const meter = `${quotaBar(pct)} ${String(Math.round(pct)).padStart(3)}%`
-            return [`${i > 0 ? '     ' : ''}${label}  `, pct >= 80 ? <Text color="warning">{meter}</Text> : meter]
-          })}
-        </Text>
-      )
-    }
+    const quotaSources: [string, QuotaWindows | null | undefined][] = [['claude', q?.claude], ['codex', q?.codex], ['grok', null], ['gemini', null]]
+    const quotaCells = quotaSources.map(([name, w]) => {
+      const cells: { lead: string; meter: string; isTight: boolean }[] = []
+      for (const [label, pct] of [['5h', w?.fiveHour], ['7d', w?.sevenDay]] as const) {
+        if (pct === undefined) continue
+        cells.push({ lead: `${cells.length > 0 ? '     ' : ''}${label}  `, meter: `${quotaBar(pct)} ${String(Math.round(pct)).padStart(3)}%`, isTight: pct >= 80 })
+      }
+      return { name: padRight(name, 8), cells }
+    })
+    const quotaRowLength = (r: (typeof quotaCells)[number]) =>
+      r.cells.length === 0 ? r.name.length + 11 : r.cells.reduce((n, c) => n + c.lead.length + c.meter.length, r.name.length)
+    const staleness = q ? `refreshed ${fmtAge(now - q.readAt)}` : 'not read yet'
+    // the heading row spans the quota block, so the staleness note sits beside the numbers it describes
+    const quotaWidth = Math.max(2 + Math.max(...quotaCells.map(quotaRowLength)), 'Quota'.length + 2 + staleness.length)
 
-    const recent = list.slice(0, Math.max(3, rows - 14))
+    const recent = list.slice(0, Math.max(1, rows - 14))
     const recentTable = table(
       recent.map(r => [clock(r.startedAt), r.lane, r.model, r.effort ?? '', fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt)]),
       ['l', 'l', 'l', 'l', 'r'])
@@ -318,15 +317,14 @@ export const register: Register = on => {
         </Box>
 
         <Box flexDirection="column" marginTop={1}>
-          <Box flexDirection="row" justifyContent="space-between">
+          <Box flexDirection="row" justifyContent="space-between" width={quotaWidth}>
             <Text bold>Quota</Text>
-            <Text color="subtle">{q ? `refreshed ${fmtAge(now - q.readAt)}` : 'not read yet'}</Text>
+            <Text color="subtle">{staleness}</Text>
           </Box>
           <Box flexDirection="column" paddingLeft={2}>
-            {quotaRow('claude', q?.claude)}
-            {quotaRow('codex', q?.codex)}
-            {quotaRow('grok', null)}
-            {quotaRow('gemini', null)}
+            {quotaCells.map(r => r.cells.length === 0
+              ? <Text>{r.name + '    '}<Text color="subtle">unknown</Text></Text>
+              : <Text>{r.name}{r.cells.flatMap(c => [c.lead, c.isTight ? <Text color="warning">{c.meter}</Text> : c.meter])}</Text>)}
           </Box>
         </Box>
 
