@@ -12,6 +12,8 @@ export type TurnRecord = {
   effort?: string
   /** subagents spawned in this turn */
   agents: number
+  /** while an agent shows on the band: its ordinal among this turn's agents (1-based) */
+  agentIndex?: number
   /** attention cause, shown in color on the band and in the pane's note column */
   note?: Note
   costUsd?: number | null
@@ -22,6 +24,7 @@ export type LaneTotals = {
   inputTokens: number
   outputTokens: number
   cacheReadTokens: number
+  cacheCreationTokens: number
   /** null when the lane cannot be priced (outside CLIs, unknown models) */
   costUsd: number | null
 }

@@ -22,7 +22,9 @@ async function refreshQuota($: EngineInterface, force = false): Promise<Quota> {
   const now = await $.clock.now()
   const q = await read($, quota)
   if (!force && q && now - q.readAt < QUOTA_TTL_MS) return q
-  const fresh: Quota = await readQuota({ home: () => $.env.get('HOME'), read: path => $.fs.read(path), list: path => $.fs.list(path) }, now)
+  // env names stay literal: the validator lists the variables a module reads
+  const env = (name: 'HOME' | 'CODEX_HOME') => (name === 'CODEX_HOME' ? $.env.get('CODEX_HOME') : $.env.get('HOME'))
+  const fresh: Quota = await readQuota({ env, read: path => $.fs.read(path), list: path => $.fs.list(path) }, now)
   await update($, quota, () => fresh)
   return fresh
 }
@@ -30,6 +32,23 @@ async function refreshQuota($: EngineInterface, force = false): Promise<Quota> {
 async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promise<void> {
   await update($, current, c => (c ? { ...c, ...patch } : c))
 }
+
+/** who works on the band: the main session, a subagent call or a CLI call */
+type Lane = { lane: string; model: string; effort?: string; agentIndex?: number }
+
+/**
+ * Put a lane on the current turn. `pick` runs inside the update, so calls that
+ * finish in parallel never write back a lane read before the other one landed.
+ */
+async function showLane($: EngineInterface, pick: () => Lane, extra: (c: TurnRecord) => Partial<TurnRecord> = () => ({})): Promise<void> {
+  await update($, current, c => {
+    if (!c) return c
+    const l = pick()
+    return { ...c, ...extra(c), lane: l.lane, model: l.model, effort: l.effort, agentIndex: l.agentIndex }
+  })
+}
+
+const ZERO_TOTALS: LaneTotals = { turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null }
 
 /** a Haiku main session editing source itself is the attention case the band flags */
 async function noteEdit($: EngineInterface, mainModel: string, agentId: string | undefined, filePath: string): Promise<void> {
@@ -60,12 +79,23 @@ function splitNote(note: Note): [lead: string, cause: string] {
 export const register: Register = on => {
   /** agentId -> lane name, for attributing subagent turn.complete usage */
   const laneOfAgent = new Map<string, string>()
-  /** lane the band shows while a CLI call or an Agent tool call is in flight */
-  let activeLane: { lane: string; model: string; effort?: string } | null = null
+  /** agentId -> the Agent call that started it, so a background agent's lane leaves the band when it finishes */
+  const callOfAgent = new Map<string, string>()
+  /** tool_use_id -> lane of every Agent or CLI call in flight, oldest first; the band shows the most recent */
+  const inFlight = new Map<string, Lane>()
+  /** the turn's latest delegate (Agent or CLI call), kept after the call ends: the closed turn is recorded under it */
+  let delegate: Lane | null = null
+  let agentsThisTurn = 0
   let mainModel = ''
   let mainEffort: string | undefined
 
-  const mainLane = (): Partial<TurnRecord> => ({ lane: 'you', model: modelName(mainModel), effort: mainEffort })
+  const mainLane = (): Lane => ({ lane: 'you', model: modelName(mainModel), effort: mainEffort })
+  /** the most recent call still in flight; the main session only when none is */
+  const showing = (): Lane => {
+    let top: Lane | undefined
+    for (const l of inFlight.values()) top = l
+    return top ?? mainLane()
+  }
 
   on('session.start', async ($, e, next) => {
     try {
@@ -75,10 +105,12 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // Tell the model the band is showing so it omits the label line; a hidden band shows nothing, so the label stays.
+  // Tell the model the band is showing so it omits the label line. Only where a
+  // band is drawn (terminal, desktop) and not hidden; elsewhere the label stays.
   on('prompt.compose', async ($, e, next) => {
     const r = await next(e)
     try {
+      if (!e.surfaces.some(s => s === 'terminal' || s === 'desktop')) return r
       if (await read($, hidden)) return r
       return { sections: [...r.sections, { id: `${P}:band`, scope: 'session' as const, text: 'The Spick status band is showing above the prompt. Do not print the [Model: ... | Effort: ...] label line at the end of replies.' }] }
     } catch {
@@ -89,8 +121,12 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     try {
       const startedAt = await $.clock.now()
-      activeLane = null
+      inFlight.clear()
+      delegate = null
+      agentsThisTurn = 0
       await update($, current, () => ({ turnId: e.turnId, startedAt, lane: 'you', model: modelName(mainModel), effort: mainEffort, agents: 0 }))
+      // the TTL gates it: at most one read per ten minutes, so the band's quota warnings stay current
+      void refreshQuota($).catch(() => undefined)
     } catch {}
     return next(e)
   })
@@ -100,18 +136,19 @@ export const register: Register = on => {
       if (!e.agentId) {
         mainModel = e.model
         mainEffort = typeof e.effort === 'string' ? e.effort : undefined
-        if (!activeLane) await setCurrent($, { lane: 'you', model: modelName(e.model), effort: mainEffort })
+        await showLane($, showing)
       }
     } catch {}
     return yield* next(e)
   })
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+    const id = e.tool_use_id
     try {
-      const lane = e.subagent_type ?? 'agent'
-      const model = e.model ? modelName(e.model) : ''
-      activeLane = { lane, model, effort: e.effort }
-      await update($, current, c => (c ? { ...c, lane, model, effort: e.effort, agents: c.agents + 1 } : c))
+      const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn }
+      inFlight.set(id, entry)
+      delegate = entry
+      await showLane($, showing, () => ({ agents: agentsThisTurn }))
     } catch {}
     // finally: an interrupted call must not leave the subagent's lane on the band
     try {
@@ -119,8 +156,8 @@ export const register: Register = on => {
     } finally {
       try {
         if (!e.run_in_background) {
-          activeLane = null
-          await setCurrent($, mainLane())
+          inFlight.delete(id)
+          await showLane($, showing)
         }
       } catch {}
     }
@@ -131,10 +168,14 @@ export const register: Register = on => {
     try {
       if (r.agentId) {
         laneOfAgent.set(r.agentId, e.subagentType)
-        if (activeLane && activeLane.lane === e.subagentType) {
-          activeLane.model = modelName(r.model)
-          await setCurrent($, { model: activeLane.model })
-        }
+        callOfAgent.set(r.agentId, e.tool_use_id)
+      }
+      // the resolved type and model replace what the Agent call named (it may have named neither)
+      const entry = inFlight.get(e.tool_use_id)
+      if (entry && !r.deny) {
+        entry.lane = e.subagentType
+        if (r.model) entry.model = modelName(r.model)
+        await showLane($, showing)
       }
     } catch {}
     return r
@@ -142,15 +183,21 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     if (e.agentId) return next(e)
-    let before: typeof activeLane = null
+    const id = e.tool_use_id
     let isCli = false
     try {
       const cli = parseCli(e.command)
       if (cli) {
         isCli = true
-        before = activeLane
-        activeLane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort }
-        await update($, current, c => (c ? { ...c, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, note: cli.isReview ? { kind: 'warning' as const, text: 'review: codex' } : c.note } : c))
+        const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort }
+        inFlight.set(id, entry)
+        delegate = entry
+        await showLane($, showing, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
+        // outside CLIs report no usage: count the call, leave it unpriced
+        await update($, totals, t => {
+          const cur = t[cli.lane] ?? ZERO_TOTALS
+          return { ...t, [cli.lane]: { ...cur, turns: cur.turns + 1 } }
+        })
       }
     } catch {}
     try {
@@ -158,8 +205,8 @@ export const register: Register = on => {
     } finally {
       if (isCli) {
         try {
-          activeLane = before
-          await setCurrent($, before ? { lane: before.lane, model: before.model, effort: before.effort } : mainLane())
+          inFlight.delete(id)
+          await showLane($, showing)
         } catch {}
       }
     }
@@ -181,23 +228,31 @@ export const register: Register = on => {
       if (usage) {
         const cost = estimateCost(usage.model, usage)
         await update($, totals, t => {
-          const cur: LaneTotals = t[lane] ?? { turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, costUsd: null }
+          const cur: LaneTotals = t[lane] ?? ZERO_TOTALS
           return { ...t, [lane]: {
             turns: cur.turns + 1,
             inputTokens: cur.inputTokens + usage.input_tokens,
             outputTokens: cur.outputTokens + usage.output_tokens,
             cacheReadTokens: cur.cacheReadTokens + usage.cache_read_input_tokens,
+            cacheCreationTokens: (cur.cacheCreationTokens ?? 0) + usage.cache_creation_input_tokens,
             costUsd: cost === null ? cur.costUsd : (cur.costUsd ?? 0) + cost,
           } }
         })
       }
       if (e.agentId) {
         laneOfAgent.delete(e.agentId)
+        const call = callOfAgent.get(e.agentId)
+        callOfAgent.delete(e.agentId)
+        // a background agent's Agent call returned long ago; its lane leaves the band now
+        if (call !== undefined && inFlight.delete(call)) await showLane($, showing)
       } else {
         const endedAt = await $.clock.now()
         const c = await read($, current)
         if (c) {
-          const done: TurnRecord = { ...c, endedAt, costUsd: usage ? estimateCost(usage.model, usage) : null }
+          // the turn is recorded under its latest delegate, `you` when it had none
+          const who = delegate ?? mainLane()
+          const done: TurnRecord = { ...c, lane: who.lane, model: who.model, effort: who.effort, endedAt, costUsd: usage ? estimateCost(usage.model, usage) : null }
+          delete done.agentIndex
           await update($, last, () => done)
           await update($, turns, list => [done, ...list].slice(0, 50))
           await update($, current, () => null)
@@ -223,7 +278,7 @@ export const register: Register = on => {
     const c = await read($, current)
     const l = await read($, last)
     const view: BandView | null = c
-      ? { lane: c.lane, model: c.model, effort: c.effort, agents: c.agents, isIdle: false, note: c.note }
+      ? { lane: c.lane, model: c.model, effort: c.effort, agents: c.agents, agentIndex: c.agentIndex, isIdle: false, note: c.note }
       : l
         ? { lane: l.lane, model: l.model, effort: l.effort, agents: 0, isIdle: true, durationMs: (l.endedAt ?? l.startedAt) - l.startedAt }
         : null

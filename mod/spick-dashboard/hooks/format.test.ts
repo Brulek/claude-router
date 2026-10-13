@@ -43,6 +43,15 @@ test('parseCli accepts path invocations and env/npx/sudo/time prefixes', () => {
   expect(parseCli('cd /tmp && time grok -p "x"')?.lane).toBe('Grok')
 })
 
+test('parseCli finds a CLI on a later line of a multi-line command', () => {
+  expect(parseCli('cd /repo\nagy -p "find it" --model gemini-3.8-flash')).toEqual({ lane: 'Gemini', model: 'gemini-3.8-flash', isReview: false })
+  expect(parseCli('echo start\n  grok -p "x"')?.lane).toBe('Grok')
+  // a backslash-newline continues the same command, so its flags still count
+  expect(parseCli('agy -p "x" \\\n  --effort low')?.effort).toBe('low')
+  // a newline inside quotes is not a command boundary
+  expect(parseCli('echo "line one\nagy -p x"')).toBeNull()
+})
+
 test('parseCli marks Codex review only when the prompt says review as a word', () => {
   expect(parseCli('codex exec "build the preview pane"')?.isReview).toBe(false)
   expect(parseCli('codex exec "Review this diff for bugs"')?.isReview).toBe(true)
@@ -58,13 +67,19 @@ test('isSourcePath excludes docs, data, plan files and .claude', () => {
   expect(isSourcePath('config.json')).toBe(false)
 })
 
-const view = { lane: 'coder', model: 'Sonnet 5.5', effort: 'medium', agents: 2, isIdle: false }
+const view = { lane: 'coder', model: 'Sonnet 5.5', effort: 'medium', agents: 2, agentIndex: 1, isIdle: false }
 
 test('bandSegments shows everything at 80 columns', () => {
   const texts = bandSegments(view, 80).map(s => s.text)
   expect(texts).toEqual(['spick', ' · ', 'coder', ' · ', 'Sonnet 5.5', ' · ', 'medium', ' · ', '1 of 2 agents', '/spick for details'])
   expect(bandSegments(view, 80)[0]?.style).toBe('brand')
   expect(bandSegments(view, 80)[2]?.style).toBe('lane')
+})
+
+test('bandSegments counts the showing agent by its ordinal, and drops the count when no agent shows', () => {
+  expect(bandSegments({ ...view, lane: 'planner', agentIndex: 2 }, 80).map(s => s.text)).toContain('2 of 2 agents')
+  const main = { lane: 'you', model: 'Haiku 5.5', effort: 'low', agents: 2, isIdle: false }
+  expect(bandSegments(main, 80).map(s => s.text)).toEqual(['spick', ' · ', 'you', ' · ', 'Haiku 5.5', ' · ', 'low', '/spick for details'])
 })
 
 test('bandSegments drops hint and agent count below 70, effort below 50, keeps lane+model below 40', () => {
@@ -120,7 +135,15 @@ test('formatters', () => {
   expect(fmtCost(0.0412)).toBe('$0.04')
   expect(fmtCost(null)).toBe('—')
   // toBeCloseTo is not in the engine's test kit; compare with a tolerance by hand
-  const haiku = estimateCost('claude-haiku-5-5', { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0 })
+  const haiku = estimateCost('claude-haiku-5-5', { input_tokens: 1_000_000, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })
   expect(haiku !== null && Math.abs(haiku - 0.1) < 1e-5).toBe(true)
-  expect(estimateCost('gemini-3.8-flash', { input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0 })).toBeNull()
+  // cache writes are priced at 1.25 x input: Haiku 0.125, Sonnet 2.5, Opus 5 per million
+  const writes = { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 1_000_000 }
+  const near = (got: number | null, want: number) => got !== null && Math.abs(got - want) < 1e-5
+  expect(near(estimateCost('claude-haiku-5-5', writes), 0.125)).toBe(true)
+  expect(near(estimateCost('claude-sonnet-5-5', writes), 2.5)).toBe(true)
+  expect(near(estimateCost('claude-opus-5-5', writes), 5)).toBe(true)
+  const mixed = estimateCost('claude-sonnet-5-5', { input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 400_000 })
+  expect(near(mixed, 2 + 1 + 0.2 + 1)).toBe(true)
+  expect(estimateCost('gemini-3.8-flash', { input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })).toBeNull()
 })

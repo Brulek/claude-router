@@ -65,11 +65,12 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'Pane', requestId: 'spick', props: PANE, viewport: { columns: 82, rows: 30 } })
     const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-    for (const want of ['Spick', 'stop picking, just start', 'This session', 'Quota', 'not read yet', 'Recent turns']) expect(all).toContain(want)
+    // turn.start refreshed the quota (nothing readable in the test, so every source is unknown)
+    for (const want of ['Spick', 'stop picking, just start', 'This session', 'Quota', 'refreshed 0m ago', 'Recent turns']) expect(all).toContain(want)
     expect(all).toContain('total      1      $3.00     list price, not a bill')
     expect(all.some(t => t.startsWith('grok') && t.endsWith('unknown'))).toBe(true)
-    // the Quota heading row spans the quota block, not the pane
-    expect((await ui.findAll({ type: 'Box' })).find(b => b.props.justifyContent === 'space-between' && b.text.startsWith('Quota'))?.props.width).toBe(21)
+    // the Quota heading row spans the quota block, not the pane: here its own text, 'Quota' + 2 + 'refreshed 0m ago'
+    expect((await ui.findAll({ type: 'Box' })).find(b => b.props.justifyContent === 'space-between' && b.text.startsWith('Quota'))?.props.width).toBe(23)
     expect((await ui.find({ type: 'Button', key: 'hide' }))?.props.label).toBe('Hide band')
     await ui.press({ key: 'hide' })
     expect((await ui.find({ type: 'Button', key: 'hide' }))?.props.label).toBe('Show band')

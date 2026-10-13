@@ -49,49 +49,61 @@ export function parseCodexRateLimits(text: string): QuotaWindows | null {
 /**
  * The reads readQuota needs, as plain functions. `$` never crosses an import
  * (claude plugin validate refuses it), so register.tsx builds this from
- * $.env.get('HOME'), $.fs.read and $.fs.list.
+ * $.env.get (names spelled as literals there), $.fs.read and $.fs.list.
  */
 export type QuotaIO = {
-  home: () => Promise<string | undefined>
+  env: (name: 'HOME' | 'CODEX_HOME') => Promise<string | undefined>
   read: (path: string) => Promise<string>
   list: (path: string) => Promise<readonly FsEntry[]>
 }
 
+/** the engine refuses to read a file larger than this */
+export const MAX_READ_BYTES = 4 * 1024 * 1024
+/** most session files one refresh reads, across all day directories */
+const MAX_CODEX_FILES = 20
+
 async function newestCodexWindows(io: QuotaIO, root: string): Promise<QuotaWindows | null> {
-  // sessions/YYYY/MM/DD/*.jsonl: walk the newest branch by name, then by mtime, reading at most 5 files
-  const pick = async (dir: string, depth: number): Promise<string[]> => {
-    const entries = (await io.list(dir)).filter(e => e.kind === 'dir').map(e => e.name).sort().reverse()
-    for (const name of entries) {
-      const sub = `${dir}/${name}`
-      if (depth === 0) {
-        const files = (await io.list(sub)).filter(e => e.kind === 'file' && e.name.endsWith('.jsonl'))
-          .sort((a, b) => b.mtimeMs - a.mtimeMs).slice(0, 5).map(e => `${sub}/${e.name}`)
-        if (files.length) return files
-      } else {
-        const files = await pick(sub, depth - 1)
-        if (files.length) return files
+  // sessions/YYYY/MM/DD/*.jsonl: walk days newest first by name; inside a day,
+  // files newest first by mtime; stop at the first file that parses, or after
+  // MAX_CODEX_FILES reads.
+  let reads = 0
+  const ls = async (dir: string): Promise<readonly FsEntry[]> => { try { return await io.list(dir) } catch { return [] } }
+  const subdirs = async (dir: string): Promise<string[]> =>
+    (await ls(dir)).filter(e => e.kind === 'dir').map(e => e.name).sort().reverse().map(n => `${dir}/${n}`)
+  const walk = async (dir: string, depth: number): Promise<QuotaWindows | null> => {
+    if (depth > 0) {
+      for (const sub of await subdirs(dir)) {
+        const hit = await walk(sub, depth - 1)
+        if (hit || reads >= MAX_CODEX_FILES) return hit
       }
+      return null
     }
-    return []
+    const files = (await ls(dir))
+      .filter(e => e.kind === 'file' && e.name.endsWith('.jsonl') && e.size <= MAX_READ_BYTES)
+      .sort((a, b) => b.mtimeMs - a.mtimeMs)
+    for (const f of files) {
+      if (reads >= MAX_CODEX_FILES) return null
+      reads++
+      try {
+        const windows = parseCodexRateLimits(await io.read(`${dir}/${f.name}`))
+        if (windows) return windows
+      } catch { /* next file */ }
+    }
+    return null
   }
-  for (const file of await pick(root, 2)) {
-    try {
-      const text = await io.read(file)
-      const windows = parseCodexRateLimits(text)
-      if (windows) return windows
-    } catch { /* next file */ }
-  }
-  return null
+  return walk(root, 3)
 }
 
 export async function readQuota(io: QuotaIO, nowMs: number): Promise<Quota> {
   let home = ''
-  try { home = (await io.home()) ?? '' } catch { home = '' }
+  try { home = (await io.env('HOME')) ?? '' } catch { home = '' }
+  let codexHome = ''
+  try { codexHome = (await io.env('CODEX_HOME')) || `${home}/.codex` } catch { codexHome = `${home}/.codex` }
   let claude: QuotaWindows | null = null
   let codex: QuotaWindows | null = null
   try { claude = parseClaudeUsage(await io.read(`${home}/.claude.json`)) } catch { claude = null }
   try {
-    codex = await newestCodexWindows(io, `${home}/.codex/sessions`)
+    codex = await newestCodexWindows(io, `${codexHome}/sessions`)
   } catch { codex = null }
   return { claude, codex, readAt: nowMs }
 }
