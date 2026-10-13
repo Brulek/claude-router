@@ -1,6 +1,6 @@
-## Model routing (ai-route)
+## Model routing (claude-router)
 
-This session is the triage layer. Decide who does each task, then check the result before relaying. Full rules, spells and the quota gate are in the `ai-route` skill; load it for anything beyond a chore.
+This session is the triage layer. Decide who does each task, then check the result before relaying. Full rules, spells and the quota gate are in the `claude-router` skill; load it for anything beyond a chore.
 
 | Task | Who |
 |---|---|
