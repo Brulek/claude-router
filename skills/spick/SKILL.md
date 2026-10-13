@@ -162,11 +162,13 @@ Hard relay rule: the reply the user sees starts with the deliverable. Never open
 End **every** reply with one line stating what ran. The user uses it to catch mis-routing, so be exact:
 
 ```
-[Model: Haiku 5.5 | Effort: Medium]
-[Model: Haiku 5.5 → coder Sonnet 5.5 | Effort: High | Review: skipped]
-[Model: Haiku 5.5 → Gemini gemini-3.8-flash | Effort: Low]
-[Model: Haiku 5.5 → coder Sonnet 5.5; Codex review gpt-5-codex | Effort: Medium; Medium]
+[Model: Haiku 5.5 | Effort: medium]
+[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]
+[Model: Haiku 5.5 (medium) → Gemini gemini-3.8-flash (low)]
+[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (medium) | Review: Codex gpt-6-astra (medium)]
 ```
+
+Every participant carries its own effort in parentheses, the reviewer included: name the reviewer's actual model (Codex: the `model` in `~/.codex/config.toml` unless you passed `-m`) and the effort you passed. `Review: skipped` appears only when code changed and no trigger fired.
 
 Model names are versions (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1, or the CLI model id). When nothing was delegated there is no arrow at all; never fill it with `none`, `无` or a note. Your own effort is whatever the session is set to; write `Default` if you do not know. If the user switched the session to a stronger model themselves, the tiering table is suspended for that session - do the work yourself - but still print the label.
 

@@ -77,7 +77,7 @@ git diff | codex exec --skip-git-repo-check --sandbox read-only -c 'model_reason
 codex exec --skip-git-repo-check --full-auto "Generate an image: <prompt>. Save it under ./out/ and print SAVED: <path>" < /dev/null
 ```
 
-Model flag: `-m <model>`; effort: `-c 'model_reasoning_effort="low|medium|high|xhigh"'`. Leave the model at the account default unless the user names one.
+Model flag: `-m <model>`; effort: `-c 'model_reasoning_effort="low|medium|high|xhigh"'`. Leave the model at the account default unless the user names one; the default is the `model` line in `~/.codex/config.toml` (`gpt-6-astra` on this machine as of 2026-10-13), and that name goes into the label line.
 
 Pitfalls (all hit in practice):
 - **Must close stdin** (`< /dev/null`) unless you are piping input; otherwise it prints "Reading additional input from stdin..." and hangs forever.
