@@ -1,5 +1,6 @@
 {
   "name": "spick",
+  "description": "Spick: one triage layer for Claude Code, plus its optional dashboard mod.",
   "owner": { "name": "Brulek" },
   "plugins": [{ "name": "spick-dashboard", "source": "./mod/spick-dashboard" }]
 }
