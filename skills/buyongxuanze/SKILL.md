@@ -118,7 +118,9 @@ Delegated output is a draft until you have checked it. Three passes, in order:
 2. **Verify.** Check the user's hard constraints against the stripped text: length (count it), required placeholders, forbidden words, required sections. For work products also check the facts: files changed (`git status` or `ls`), tests actually run (output present), claimed sources exist (spot-check one with `curl -sI`).
 3. **Retry or take over.** A failing check goes back once to the same delegate with the defect quoted. If it still fails, fix a mechanical defect yourself (trim a sentence, drop a word); anything else, do yourself or tell the user plainly.
 
-The strip pass applies to delegate output only. The user's own wording is never edited.
+The strip pass applies to delegate output only.
+Hard relay rule: the reply the user sees starts with the deliverable. Never open with a sentence about the delegation ("以下为…，由…子代理撰写", "已核对…"), and add no process commentary before or after it. The label line is the only extra line.
+ The user's own wording is never edited.
 
 ## Step 7 - the label line
 
