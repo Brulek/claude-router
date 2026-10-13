@@ -106,7 +106,7 @@ Quota                                      refreshed 4m ago
 
 Recent turns
   12:41  coder    Sonnet 5.5  medium   44s   review: skipped
-  12:38  you      Haiku 5.5   low       6s
+  12:38  main session  Haiku 5.5   low       6s
   12:31  planner  Opus 5.5    high   2m14s
   12:20  Gemini   3.8-flash   low      31s   quota unmeasured
 ```
@@ -126,19 +126,19 @@ What the Mod observes and how it turns it into state:
 
 | Event | What is recorded |
 |---|---|
-| `turn.start` | new turn record: start time, lane `you`, model and effort from the first `turn.step`; clears the in-flight calls and the delegate record; refreshes quota (the ten-minute TTL gates the read) |
-| `turn.step` (main loop) | current model and effort for the `you` lane |
+| `turn.start` | new turn record: start time, lane `main session`, model and effort from the first `turn.step`; clears the in-flight calls and the delegate record; refreshes quota (the ten-minute TTL gates the read) |
+| `turn.step` (main loop) | current model and effort for the `main session` lane |
 | `tool.call` on `Agent` | a subagent call starts: an in-flight entry keyed by `tool_use_id` (lane = `subagent_type`, else `agent`; model and effort as the call named them; its ordinal among this turn's agents), which also becomes the turn's delegate; the entry leaves when a foreground call returns |
 | `agent.spawn` | the in-flight entry with the same `tool_use_id` takes the resolved `subagentType` as its lane and the spawn result's model; a background agent's entry leaves on its own `turn.complete` |
 | `tool.call` on `Bash` | if any command segment (split on `;` `&` `|` `(` and newlines) starts a known CLI (`agy -p`, `grok -p` / `grok agent`, `codex exec`), an in-flight entry for that CLI, which also becomes the turn's delegate, and one turn on that CLI's totals row (no tokens, unpriced); `--model` / `-m` and `--effort` / `model_reasoning_effort` are parsed for display; `codex exec … review` sets `review: codex`; the entry leaves when the call returns |
 | `tool.call` on `Edit` or `Write` from the main loop while its model is Haiku | if the path is a source file (not `.md`, `.txt`, `.json`, `.csv`, plan files, or anything under `.claude/`), set the breach note `edited <file>` for this turn |
-| `turn.complete` | close the record with wall time under the turn's delegate (lane, model, effort; `you` when it had none); roll the loop's usage and estimated cost into the session table under the loop's own lane (`you` for main, the subagent type for a subagent) |
+| `turn.complete` | close the record with wall time under the turn's delegate (lane, model, effort; `main session` when it had none); roll the loop's usage and estimated cost into the session table under the loop's own lane (`main session` for main, the subagent type for a subagent) |
 | `session.start` | register `/spick`; read quota |
 | `prompt.compose` | when the render's `surfaces` include `terminal` or `desktop` and the band is not hidden, add a section telling the model the band is showing so it omits the label line |
 
-Lane on the band: every Agent or CLI call in flight is held in a map keyed by `tool_use_id`, in start order. The band shows the most recent entry still in the map and falls back to `you` only when the map is empty, so parallel agents never show the wrong lane and one finishing early does not drop the band to `you` while another still works.
+Lane on the band: every Agent or CLI call in flight is held in a map keyed by `tool_use_id`, in start order. The band shows the most recent entry still in the map and falls back to `main session` only when the map is empty, so parallel agents never show the wrong lane and one finishing early does not drop the band to `main session` while another still works.
 
-Delegate record: alongside the map, each turn keeps one `delegate` (lane, model, effort), set whenever an Agent or CLI call starts and never cleared when the call ends. At `turn.complete` the closed record in `last` and `turns` takes its lane, model and effort from the delegate, `you` when the turn had none, so the idle band reads `last: planner · Opus 5.5 · high · 2m 14s` and recent turns list delegates.
+Delegate record: alongside the map, each turn keeps one `delegate` (lane, model, effort), set whenever an Agent or CLI call starts and never cleared when the call ends. At `turn.complete` the closed record in `last` and `turns` takes its lane, model and effort from the delegate, `main session` when the turn had none, so the idle band reads `last: planner · Opus 5.5 · high · 2m 14s` and recent turns list delegates.
 
 Cost estimate: tokens per model from the engine's usage events when available (input, output, cache read, cache write; cache write is priced at 1.25 × input), multiplied by the list prices held in a small table in the Mod; otherwise the cell shows `—`. Outside CLIs report no usage, so their rows count turns and show `—`. The pane says "list price, not a bill" next to the total.
 
