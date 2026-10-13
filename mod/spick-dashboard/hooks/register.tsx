@@ -478,27 +478,25 @@ export const register: Register = on => {
         await refreshQuota($, true).catch(() => undefined)
         const surfaces = await $.session.surfaces().catch(() => [] as const)
         if (surfaces.length === 0) return { text: await statusParagraph($) }
-        const placed = await $.ui.open({ id: PANE, title: 'Spick', closeOnEscape: true })
+        const placed = await $.ui.open({ id: PANE, title: 'SPICK', closeOnEscape: true })
         return { text: placed.isPlaced ? 'spick: pane opened' : `spick: pane not placed: ${placed.reason}` }
       }
     }
   })
 
   // The band: one line, a short sentence about who is working now. Slot order
-  // never changes; the right group holds context or an attention cause.
+  // never changes; the right group holds at most one item: an attention cause or a hint.
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     if (e.props.hasSurvey || (await read($, hidden))) return next(e)
     const c = await read($, current)
     const l = await read($, last)
     const view: BandView | null = c
-      ? { lane: c.lane, model: c.model, effort: c.effort, agents: c.agents, agentIndex: c.agentIndex, isReview: c.isReview, isIdle: false,
+      ? { lane: c.lane, model: c.model, agents: c.agents, agentIndex: c.agentIndex, isReview: c.isReview, isIdle: false,
           durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - c.startedAt), note: c.note, mainModel: mainModel ? modelName(mainModel) : undefined }
       : l
-        ? { lane: l.lane, model: l.model, effort: l.effort, agents: 0, isIdle: true, durationMs: (l.endedAt ?? l.startedAt) - l.startedAt }
+        ? { lane: l.lane, model: l.model, agents: 0, isIdle: true }
         : null
     if (!view) return next(e)
-    // quota shows as meters on the right (bandSegments decides when); a hot provider is colored there, never a cause
-    view.meters = quotaMeters(await read($, quota))
     // routing off shows on the wordmark; under auto, only once the model is known
     const ctl = await read($, controls)
     const model = (await read($, sessionModel)) || mainModel
@@ -522,7 +520,7 @@ export const register: Register = on => {
     )
   })
 
-  // The pane: the controls, then three sections, spacing and weight only, no borders.
+  // The pane: the controls, then the session, quota and recent turns, spacing and weight only, no borders.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
     const ctl = await read($, controls)
@@ -536,32 +534,33 @@ export const register: Register = on => {
     const now = await $.clock.now()
     const rows = e.props.scroll?.bodyRows || e.viewport?.rows || 30
 
+    const isNarrow = e.props.bodyColumns < 80
+    const barCells = isNarrow ? 5 : 10
+
+    // "This session" is the table's header row: its heading and column headers share one row
     const lanes = Object.entries(t).sort((a, b) => b[1].turns - a[1].turns)
     const totalCost = lanes.reduce<number | null>((acc, [, v]) => (v.costUsd === null ? acc : (acc ?? 0) + v.costUsd), null)
     const sessionTable = table([
-      ['lane', 'turns', 'est. cost'],
-      ...lanes.map(([lane, v]) => [lane, String(v.turns), fmtCost(v.costUsd)]),
-      ['total', String(lanes.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)],
+      ['This session', 'turns', 'est. cost'],
+      ...lanes.map(([lane, v]) => ['  ' + lane, String(v.turns), fmtCost(v.costUsd)]),
+      ...(lanes.length > 1 ? [['  total', String(lanes.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)]] : []),
     ], ['l', 'r', 'r'])
+    const headCut = 'This session'.length
 
-    // name column 8 wide; `unknown` starts where the bars do
-    const quotaSources: [string, QuotaWindows | null | undefined][] = [['claude', q?.claude], ['codex', q?.codex], ['grok', null], ['gemini', null]]
-    const quotaCells = quotaSources.map(([name, w]) => {
+    // only claude and codex; a provider with no window data gets no row
+    const quotaRows = ([['claude', q?.claude], ['codex', q?.codex]] as [string, QuotaWindows | null | undefined][]).map(([name, w]) => {
       const cells: { lead: string; meter: string; isTight: boolean }[] = []
       for (const [label, pct] of [['5h', w?.fiveHour], ['7d', w?.sevenDay]] as const) {
         if (pct === undefined) continue
-        cells.push({ lead: `${cells.length > 0 ? '     ' : ''}${label}  `, meter: `${quotaBar(pct)} ${String(Math.round(pct)).padStart(3)}%`, isTight: pct >= 80 })
+        cells.push({ lead: `${cells.length > 0 ? '     ' : ''}${label}  `, meter: `${quotaBar(pct, barCells)} ${String(Math.round(pct)).padStart(3)}%`, isTight: pct >= 80 })
       }
       return { name: padRight(name, 8), cells }
-    })
-    const quotaRowLength = (r: (typeof quotaCells)[number]) =>
-      r.cells.length === 0 ? r.name.length + 11 : r.cells.reduce((n, c) => n + c.lead.length + c.meter.length, r.name.length)
-    const staleness = q ? `refreshed ${fmtAge(now - q.readAt)}` : 'not read yet'
-    // the heading row spans the quota block, so the staleness note sits beside the numbers it describes
-    const quotaWidth = Math.max(2 + Math.max(...quotaCells.map(quotaRowLength)), 'Quota'.length + 2 + staleness.length)
+    }).filter(r => r.cells.length > 0)
+    const quotaNote = !q ? 'not read' : quotaRows.length === 0 ? 'unknown' : ''
 
-    // fixed rows: 19 (header, controls, table header and total, quota, headings, gaps) plus one per lane row
-    const recent = list.slice(0, Math.max(1, rows - 19 - lanes.length))
+    // rows the pane uses besides the turn list, so the list never scrolls past the bottom
+    const used = 2 + 5 + (isNarrow ? 1 : 0) + 2 + sessionTable.length + 2 + 1 + Math.max(quotaRows.length, quotaNote ? 1 : 0) + 2
+    const recent = list.slice(0, Math.max(1, rows - used))
     const recentTable = table(
       recent.map(r => [clock(r.startedAt), r.lane, r.model, r.effort ?? '', fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt)]),
       ['l', 'l', 'l', 'l', 'r'])
@@ -569,8 +568,8 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column" paddingX={1}>
         <Box flexDirection="row" justifyContent="space-between">
-          <Text bold>Spick</Text>
-          <Text color="subtle">stop picking, just start</Text>
+          <Text bold color="claude">SPICK</Text>
+          <Button key="close" label="Close" variant="secondary" hotkey="x" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />
         </Box>
 
         <Box flexDirection="column" marginTop={1}>
@@ -586,8 +585,9 @@ export const register: Register = on => {
                   hotkey={nextRouting(shownRouting) === v ? 'r' : undefined}
                   onPress={() => { if (shownRouting !== v) void setControls($, c => ({ ...c, routing: v, manualModel: false })).catch(() => undefined) }} />,
               ])}
-              <Text color="subtle">{'      ' + eff.why}</Text>
+              {isNarrow ? null : <Text color="subtle">{'      ' + eff.why}</Text>}
             </Box>
+            {isNarrow ? <Text color="subtle">{' '.repeat(10) + eff.why}</Text> : null}
             <Box flexDirection="row">
               <Text>{padRight('Review', 10)}</Text>
               {reviewOptions.flatMap((v, i) => [
@@ -612,47 +612,42 @@ export const register: Register = on => {
               <Text>{padRight('Band', 10)}</Text>
               <Button key="band" label={isHidden ? 'hidden' : 'shown'} variant={isHidden ? 'secondary' : 'primary'} hotkey="b"
                 onPress={() => { void update($, hidden, v => !v) }} />
-              <Text>{'        '}</Text>
-              <Button key="refresh" label="Refresh quota" variant="secondary" hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }} />
-              <Text>{'        '}</Text>
-              <Button key="close" label="Close" variant="secondary" hotkey="x" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />
             </Box>
           </Box>
         </Box>
 
         <Box flexDirection="column" marginTop={1}>
-          <Text bold>This session</Text>
-          <Box flexDirection="column" paddingLeft={2}>
-            {sessionTable.map((line, i) =>
-              i === 0 ? <Text color="subtle">{line}</Text>
-              : i === sessionTable.length - 1 ? <Text>{line}<Text color="subtle">{'     list price, not a bill'}</Text></Text>
-              : <Text>{line}</Text>)}
-          </Box>
+          {sessionTable.map((line, i) =>
+            i === 0 ? (lanes.length > 0 ? <Text><Text bold>{line.slice(0, headCut)}</Text><Text color="subtle">{line.slice(headCut)}</Text></Text> : <Text bold>This session</Text>)
+            : <Text>{line}</Text>)}
         </Box>
 
         <Box flexDirection="column" marginTop={1}>
-          <Box flexDirection="row" justifyContent="space-between" width={quotaWidth}>
+          <Box flexDirection="row">
             <Text bold>Quota</Text>
-            <Text color="subtle">{staleness}</Text>
+            {q ? <Text>{'  '}</Text> : null}
+            {q ? <Text color="subtle">{fmtAge(now - q.readAt)}</Text> : null}
+            <Text>{'  '}</Text>
+            <Button key="refresh" label="Refresh" variant="secondary" hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }} />
           </Box>
           <Box flexDirection="column" paddingLeft={2}>
-            {quotaCells.map(r => r.cells.length === 0
-              ? <Text>{r.name + '    '}<Text color="subtle">unknown</Text></Text>
-              : <Text>{r.name}{r.cells.flatMap(c => [c.lead, c.isTight ? <Text color="warning">{c.meter}</Text> : c.meter])}</Text>)}
+            {quotaNote ? <Text color="subtle">{quotaNote}</Text> : null}
+            {quotaRows.map(r => <Text>{r.name}{r.cells.flatMap(c => [c.lead, c.isTight ? <Text color="warning">{c.meter}</Text> : c.meter])}</Text>)}
           </Box>
         </Box>
 
-        <Box flexDirection="column" marginTop={1}>
-          <Text bold>Recent turns</Text>
-          <Box flexDirection="column" paddingLeft={2}>
-            {recent.length === 0 ? <Text color="subtle">no turns yet</Text> : null}
-            {recentTable.map((line, i) => {
-              const note = recent[i]?.note
-              if (!note) return <Text>{line}</Text>
-              return <Text>{`${line}   `}{noteParts(note).map(p => (p.style === 'warning' || p.style === 'error' ? <Text color={p.style}>{p.text}</Text> : p.text))}</Text>
-            })}
+        {recent.length > 0 ? (
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold>Recent turns</Text>
+            <Box flexDirection="column" paddingLeft={2}>
+              {recentTable.map((line, i) => {
+                const note = recent[i]?.note
+                if (!note) return <Text>{line}</Text>
+                return <Text>{`${line}   `}{noteParts(note).map(p => (p.style === 'warning' || p.style === 'error' ? <Text color={p.style}>{p.text}</Text> : p.text))}</Text>
+              })}
+            </Box>
           </Box>
-        </Box>
+        ) : null}
 
       </Box>
     )

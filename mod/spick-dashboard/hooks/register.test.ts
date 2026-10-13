@@ -307,7 +307,7 @@ test('the block is worded for the band: no label line while it shows, the label 
   await $.session.start(START)
   expect(await contextOf($)).toEqual([OFF])
   const checklistOn = async () => { await $.command.run({ command: 'spick', args: 'on', ...RUN }); return (await contextOf($))[0] ?? '' }
-  expect(await checklistOn()).toContain('Reply starts with the deliverable; the status band shows model and effort, so print no label line.')
+  expect(await checklistOn()).toContain('Reply starts with the deliverable; the status band shows who worked, so print no label line.')
   // hidden band: the label line is back
   await $.command.run({ command: 'spick', args: 'hide', ...RUN })
   expect(await checklistOn()).toContain('end with the label line: no delegate')

@@ -105,7 +105,7 @@ test('with every switch at its default the block is the bash hook\'s text, word 
 test('while the band shows (labelLine false) no sentence asks for the label line', () => {
   expect(offSentence(false)).toBe('Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; the status band shows who worked, so print no label line.')
   expect(reviewOffNote(false)).toBe('Codex review is off: skip the review step.')
-  expect(NO_LABEL_LINE).toBe('Reply starts with the deliverable; the status band shows model and effort, so print no label line.')
+  expect(NO_LABEL_LINE).toBe('Reply starts with the deliverable; the status band shows who worked, so print no label line.')
 
   const on = checklist(ctl({ review: 'off' }), HAIKU, false).split('\n')
   expect(on).toContain(NO_LABEL_LINE)

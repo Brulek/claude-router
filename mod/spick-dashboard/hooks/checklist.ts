@@ -13,7 +13,7 @@ export const reviewOffNote = (labelLine: boolean): string =>
   labelLine ? 'Codex review is off: skip the review step and write `Review: off` in the label line.' : 'Codex review is off: skip the review step.'
 export const laneOffNote = (lane: LaneKey): string =>
   `${LANE_NAMES[lane]} lane is off: use the fallback chain.${lane === 'grok' ? ' X data has no fallback: say so.' : ''}`
-export const NO_LABEL_LINE = 'Reply starts with the deliverable; the status band shows model and effort, so print no label line.'
+export const NO_LABEL_LINE = 'Reply starts with the deliverable; the status band shows who worked, so print no label line.'
 
 /** True where an AbovePrompt band is drawn: terminal and desktop. */
 export const drawsBand = (surfaces: readonly string[]): boolean => surfaces.some(s => s === 'terminal' || s === 'desktop')

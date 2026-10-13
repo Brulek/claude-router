@@ -6,7 +6,7 @@ const CLAUDE_NAMES: Record<string, string> = {
   'claude-opus-5-5': 'Opus 5.5',
   'claude-fable-5-1': 'Fable 5.1',
 }
-// list prices, USD per million tokens: input, output, cache read, cache write
+// price table, USD per million tokens: input, output, cache read, cache write
 // (1.25 x input). Estimates only.
 const PRICES: Record<string, [number, number, number, number]> = {
   'claude-haiku-5-5': [0.1, 0.5, 0.01, 0.125],
@@ -86,26 +86,23 @@ export type Seg = { text: string; style: 'brand' | 'lane' | 'plain' | 'dim' | 'w
 export type BandView = {
   lane: string
   model: string
-  effort?: string
   agents: number
   /** ordinal of the agent the band shows among this turn's agents; absent when no agent is showing */
   agentIndex?: number
   isIdle: boolean
-  /** active: time since the turn began; idle: the last turn's wall time */
+  /** active: time since the turn began; ignored when idle (the band shows no duration then) */
   durationMs?: number
   /** the showing call is a Codex review */
   isReview?: boolean
   note?: Note
   /** active delegate: the main session's model, for `main: <model>` */
   mainModel?: string
-  /** active main session or idle: one quota meter per known provider */
-  meters?: QuotaMeter[]
-  /** routing is effectively off this session: the wordmark reads `spick off`, `off` in warning */
+  /** routing is effectively off this session: the wordmark reads `SPICK off`, `off` in warning */
   routingOff?: boolean
 }
-/** one provider's quota for the band: the weekly window, else the five-hour one */
+/** one provider's quota: the weekly window, else the five-hour one */
 export type QuotaMeter = { name: string; pct: number }
-/** left: the status sentence; right: the attention cause, main model, quota meters or the hint */
+/** left: the status sentence; right: at most one item: the attention cause, the main model or the hint */
 export type Band = { left: Seg[]; right: Seg[] }
 const SEP: Seg = { text: ' · ', style: 'dim' }
 const GAP: Seg = { text: '   ', style: 'plain' }
@@ -134,14 +131,6 @@ export function quotaMeters(q: Quota | null | undefined): QuotaMeter[] {
   return out
 }
 
-/** `claude ▰▱▱▱▱▱▱▱▱▱ 8%` per provider, three spaces apart; a provider at 80% or more in warning. */
-function meterSegs(meters: QuotaMeter[], cells: number): Seg[] {
-  return meters.flatMap((m, i) => {
-    const seg: Seg = { text: `${m.name} ${quotaBar(m.pct, cells)} ${Math.round(m.pct)}%`, style: m.pct >= 80 ? 'warning' : 'dim' }
-    return i === 0 ? [seg] : [GAP, seg]
-  })
-}
-
 /** Terminal cells a string takes: the meter glyphs and CJK/fullwidth characters count two, everything else one. */
 export function displayWidth(s: string): number {
   let w = 0
@@ -152,8 +141,8 @@ const segsWidth = (segs: Seg[]): number => segs.reduce((n, s) => n + displayWidt
 /** the renderer's gap={2} between the left and right groups */
 const GROUP_GAP = 2
 /** what a band too wide for its columns gives up, first to last; the wordmark and the subject never go */
-type Droppable = 'ordinal' | 'elapsed' | 'effort' | 'wording' | 'model'
-const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'effort', 'wording', 'model']
+type Droppable = 'ordinal' | 'elapsed' | 'wording' | 'model'
+const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'wording', 'model']
 
 /**
  * The band for a view at a width. Tiers pick the candidate segments; then the band is
@@ -161,13 +150,12 @@ const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'effort', 'wording', 'mod
  * then left segments in DROP_ORDER, until it fits. A cause is kept even when nothing else fits.
  */
 export function bandSegments(v: BandView, columns: number): Band {
-  const wordmark: Seg[] = v.routingOff ? [{ text: 'spick', style: 'brand' }, { text: ' off', style: 'warning' }] : [{ text: 'spick', style: 'brand' }]
+  const wordmark: Seg[] = v.routingOff ? [{ text: 'SPICK', style: 'brand' }, { text: ' off', style: 'warning' }] : [{ text: 'SPICK', style: 'brand' }]
   const isMain = v.lane === MAIN_LANE
   const style = (s: Seg['style']): Seg['style'] => (v.isIdle ? 'dim' : s)
   const show: Record<Droppable, boolean> = {
     ordinal: columns >= 70 && !v.isIdle && v.agents > 1 && v.agentIndex !== undefined,
-    elapsed: v.durationMs !== undefined && (v.isIdle || columns >= 70),
-    effort: columns >= 50 && !!v.effort,
+    elapsed: v.durationMs !== undefined && !v.isIdle && columns >= 70,
     wording: true,
     model: !!v.model,
   }
@@ -194,22 +182,16 @@ export function bandSegments(v: BandView, columns: number): Band {
         : [{ text: v.lane, style: 'lane' }])
       if (show.model) parts.push([{ text: v.model, style: 'plain' }])
     }
-    if (show.effort) parts.push([{ text: `${v.effort} effort`, style: style('plain') }])
     if (show.ordinal) parts.push([{ text: `agent ${v.agentIndex} of ${v.agents}`, style: 'dim' }])
-    if (show.elapsed && v.durationMs !== undefined) parts.push([{ text: v.isIdle ? `took ${fmtDuration(v.durationMs)}` : fmtDuration(v.durationMs), style: 'dim' }])
+    if (show.elapsed && v.durationMs !== undefined) parts.push([{ text: fmtDuration(v.durationMs), style: 'dim' }])
     return [...wordmark, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
   }
 
-  // right group: an attention cause from 40 columns; from 90, the main model for a delegate,
-  // else quota meters (ten cells from 110, five below), else the hint while active
+  // right group, at most one item: an attention cause from 40 columns; from 90, while
+  // active, the main model for a delegate, else the hint. Idle: nothing.
   let right: Seg[] = []
   if (columns >= 40 && v.note) right = noteParts(v.note)
-  else if (columns >= 90) {
-    const meters = v.meters ?? []
-    if (!v.isIdle && !isMain && v.mainModel) right = [{ text: `main: ${v.mainModel}`, style: 'dim' }]
-    else if (meters.length > 0) right = meterSegs(meters, columns >= 110 ? 10 : 5)
-    else if (!v.isIdle) right = [{ text: HINT, style: 'dim' }]
-  }
+  else if (columns >= 90 && !v.isIdle) right = !isMain && v.mainModel ? [{ text: `main: ${v.mainModel}`, style: 'dim' }] : [{ text: HINT, style: 'dim' }]
 
   const fits = (left: Seg[]) => segsWidth(left) + (right.length > 0 ? GROUP_GAP + segsWidth(right) : 0) <= columns
   let left = buildLeft()
@@ -244,6 +226,7 @@ export function fmtDuration(ms: number): string {
   return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
 }
 export function fmtAge(ms: number): string {
+  if (ms < 60_000) return 'just now'
   const m = Math.round(ms / 60000)
   return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`
 }
