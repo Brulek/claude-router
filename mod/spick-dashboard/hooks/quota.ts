@@ -46,7 +46,7 @@ export function parseCodexRateLimits(text: string): QuotaWindows | null {
   }
 }
 
-async function newestSessionText($: EngineInterface, root: string): Promise<string | null> {
+async function newestCodexWindows($: EngineInterface, root: string): Promise<QuotaWindows | null> {
   // sessions/YYYY/MM/DD/*.jsonl: walk the newest branch by name, then by mtime, reading at most 5 files
   const pick = async (dir: string, depth: number): Promise<string[]> => {
     const entries = (await $.fs.list(dir)).filter(e => e.kind === 'dir').map(e => e.name).sort().reverse()
@@ -66,20 +66,21 @@ async function newestSessionText($: EngineInterface, root: string): Promise<stri
   for (const file of await pick(root, 2)) {
     try {
       const text = await $.fs.read(file)
-      if (text.includes('"rate_limits":')) return text
+      const windows = parseCodexRateLimits(text)
+      if (windows) return windows
     } catch { /* next file */ }
   }
   return null
 }
 
 export async function readQuota($: EngineInterface, nowMs: number): Promise<Quota> {
-  const home = (await $.env.get('HOME')) ?? ''
+  let home = ''
+  try { home = (await $.env.get('HOME')) ?? '' } catch { home = '' }
   let claude: QuotaWindows | null = null
   let codex: QuotaWindows | null = null
   try { claude = parseClaudeUsage(await $.fs.read(`${home}/.claude.json`)) } catch { claude = null }
   try {
-    const text = await newestSessionText($, `${home}/.codex/sessions`)
-    codex = text ? parseCodexRateLimits(text) : null
+    codex = await newestCodexWindows($, `${home}/.codex/sessions`)
   } catch { codex = null }
   return { claude, codex, readAt: nowMs }
 }
