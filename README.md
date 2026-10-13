@@ -1,6 +1,6 @@
-# 不用选择 (buyongxuanze)
+# Spick
 
-*"No need to choose."* One triage layer for Claude Code.
+**Stop picking, just start.** One triage layer for Claude Code.
 
 One triage layer for Claude Code: pick the Claude tier, the effort, and when to hand work to the subscription CLIs you already pay for.
 
@@ -27,16 +27,16 @@ Claude is the default for work; the outside lanes are used only where they are g
 ## Install
 
 ```bash
-npx skills add Brulek/buyongxuanze
+npx skills add Brulek/spick
 ```
 
-Then open a Claude Code session and say `buyongxuanze setup`. The onboarding detects which CLIs are installed and logged in, asks which lanes to enable and which main model to use, installs the three subagents into `~/.claude/agents/`, writes a short cheat sheet into `~/.claude/CLAUDE.md`, and (optionally) sets the default model and effort in `~/.claude/settings.json`.
+Then open a Claude Code session and say `spick setup`. The onboarding detects which CLIs are installed and logged in, asks which lanes to enable and which main model to use, installs the three subagents into `~/.claude/agents/`, writes a short cheat sheet into `~/.claude/CLAUDE.md`, and (optionally) sets the default model and effort in `~/.claude/settings.json`.
 
 Manual equivalent:
 
 ```bash
-bash ~/.claude/skills/buyongxuanze/scripts/setup.sh --check
-bash ~/.claude/skills/buyongxuanze/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
+bash ~/.claude/skills/spick/scripts/setup.sh --check
+bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
 Desktop app users: pick Haiku once in the composer's model menu. The app remembers its own choice and overrides `settings.json`.
@@ -45,9 +45,9 @@ Desktop app users: pick Haiku once in the composer's model menu. The app remembe
 
 | Say | Effect |
 |---|---|
-| `buyongxuanze setup` | first-run onboarding (re-runnable) |
-| `buyongxuanze doctor` | detection table: installed, logged in, versions |
-| `buyongxuanze quota` | local usage for Claude and Codex; Grok and Gemini report unknown |
+| `spick setup` | first-run onboarding (re-runnable) |
+| `spick doctor` | detection table: installed, logged in, versions |
+| `spick quota` | local usage for Claude and Codex; Grok and Gemini report unknown |
 
 ## Requirements
 
@@ -58,7 +58,7 @@ Desktop app users: pick Haiku once in the composer's model menu. The app remembe
 ## Layout
 
 ```
-skills/buyongxuanze/
+skills/spick/
 ├── SKILL.md                 the routing rules
 ├── references/providers.md  spells, flags, model ids, quota sources, pitfalls
 ├── references/onboarding.md first-run flow

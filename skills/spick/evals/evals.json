@@ -1,5 +1,5 @@
 {
-  "skill_name": "buyongxuanze",
+  "skill_name": "spick",
   "evals": [
     {"id": 0, "prompt": "帮我查一下 Google Antigravity CLI(agy)现在最新版本号是多少,有没有 Windows 版本。", "expected_output": "Routes the lookup to Gemini (agy) with built-in search only, verifies the version claim itself, ends with a label line naming Gemini and an effort.", "files": []},
     {"id": 1, "prompt": "给 <SANDBOX>/quota.sh 加一个 --help 参数,打印一段用法说明然后退出 0。改完跑一下确认。", "expected_output": "Routes to the coder lane (Sonnet) at low or medium effort, the file gains --help, it is run to confirm, review is skipped and the label line says so.", "files": ["quota.sh"]},

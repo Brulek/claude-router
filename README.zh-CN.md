@@ -1,4 +1,6 @@
-# 不用选择 (buyongxuanze)
+# Spick
+
+**Stop picking, just start.** 给 Claude Code 装一层统一分诊。
 
 给 Claude Code 装一层统一分诊：决定用哪档 Claude 模型、什么推理强度，以及什么时候把活交给你已经订阅的其它 AI 命令行。
 
@@ -25,16 +27,16 @@ Claude 是工作的默认承担者，外家只在确实更强或更省的地方�
 ## 安装
 
 ```bash
-npx skills add Brulek/buyongxuanze
+npx skills add Brulek/spick
 ```
 
-然后开一个 Claude Code 会话，说 `buyongxuanze setup`。引导会探测装了哪些 CLI、登录没有，问你启用哪几家、主会话用什么模型，把三个子代理装进 `~/.claude/agents/`，往 `~/.claude/CLAUDE.md` 写一段速查表，并可选地把默认模型和推理强度写进 `~/.claude/settings.json`。
+然后开一个 Claude Code 会话，说 `spick setup`。引导会探测装了哪些 CLI、登录没有，问你启用哪几家、主会话用什么模型，把三个子代理装进 `~/.claude/agents/`，往 `~/.claude/CLAUDE.md` 写一段速查表，并可选地把默认模型和推理强度写进 `~/.claude/settings.json`。
 
 手动等价命令：
 
 ```bash
-bash ~/.claude/skills/buyongxuanze/scripts/setup.sh --check
-bash ~/.claude/skills/buyongxuanze/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
+bash ~/.claude/skills/spick/scripts/setup.sh --check
+bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
 桌面 app 用户：在输入框旁的模型菜单里选一次 Haiku。app 会记住自己的选择，并覆盖 `settings.json`。
@@ -43,9 +45,9 @@ bash ~/.claude/skills/buyongxuanze/scripts/setup.sh --install --lanes gemini,gro
 
 | 对 Claude 说 | 效果 |
 |---|---|
-| `buyongxuanze setup` | 首次引导，可重复运行 |
-| `buyongxuanze doctor` | 探测表：装没装、登没登录、版本 |
-| `buyongxuanze quota` | Claude 与 Codex 的本地用量；Grok 与 Gemini 显示 unknown |
+| `spick setup` | 首次引导，可重复运行 |
+| `spick doctor` | 探测表：装没装、登没登录、版本 |
+| `spick quota` | Claude 与 Codex 的本地用量；Grok 与 Gemini 显示 unknown |
 
 ## 要求
 
@@ -56,7 +58,7 @@ bash ~/.claude/skills/buyongxuanze/scripts/setup.sh --install --lanes gemini,gro
 ## 目录
 
 ```
-skills/buyongxuanze/
+skills/spick/
 ├── SKILL.md                 分诊规则
 ├── references/providers.md  各家咒语、参数、模型名、额度来源、坑
 ├── references/onboarding.md 首次引导流程

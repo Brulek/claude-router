@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# buyongxuanze setup: detect CLIs, install agents + CLAUDE.md block, write config.
+# spick setup: detect CLIs, install agents + CLAUDE.md block, write config.
 # Usage:
 #   setup.sh --check
 #   setup.sh --install [--lanes gemini,grok,codex] [--model haiku|sonnet|opus] [--effort low|medium|high] [--force]
@@ -7,7 +7,7 @@ set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$HERE")"
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-CONFIG="$CLAUDE_DIR/buyongxuanze.json"
+CONFIG="$CLAUDE_DIR/spick.json"
 PY=$(command -v python3 || command -v python || true)
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -72,7 +72,7 @@ install() {
     "$PY" - "$md" "$snippet" <<'PY'
 import sys, re
 md, snippet = sys.argv[1], sys.argv[2]
-start, end = "<!-- buyongxuanze:start -->", "<!-- buyongxuanze:end -->"
+start, end = "<!-- spick:start -->", "<!-- spick:end -->"
 block = start + "\n" + open(snippet).read().rstrip() + "\n" + end
 cur = open(md).read()
 if start in cur and end in cur:
