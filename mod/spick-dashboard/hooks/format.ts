@@ -1,0 +1,131 @@
+import type { Note } from '../types'
+
+const CLAUDE_NAMES: Record<string, string> = {
+  'claude-haiku-5-5': 'Haiku 5.5',
+  'claude-sonnet-5-5': 'Sonnet 5.5',
+  'claude-opus-5-5': 'Opus 5.5',
+  'claude-fable-5-1': 'Fable 5.1',
+}
+// list prices, USD per million tokens: input, output, cache read, cache write
+// (1.25 x input). Estimates only.
+const PRICES: Record<string, [number, number, number, number]> = {
+  'claude-haiku-5-5': [0.1, 0.5, 0.01, 0.125],
+  'claude-sonnet-5-5': [2, 10, 0.2, 2.5],
+  'claude-opus-5-5': [4, 20, 0.2, 5],
+}
+
+export function modelName(id: string): string {
+  const exact = CLAUDE_NAMES[id]
+  if (exact) return exact
+  for (const [key, name] of Object.entries(CLAUDE_NAMES)) if (id.startsWith(key)) return name
+  const alias: Record<string, string> = { haiku: 'Haiku 5.5', sonnet: 'Sonnet 5.5', opus: 'Opus 5.5', fable: 'Fable 5.1' }
+  return alias[id] ?? id
+}
+
+export type CliLane = { lane: 'Gemini' | 'Grok' | 'Codex'; model?: string; effort?: string; isReview: boolean }
+
+const PREFIX_WORDS = new Set(['env', 'npx', 'sudo', 'time'])
+const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g
+
+/** Classify one command segment by its first real word (after env/npx/sudo/time and any path). */
+function segmentLane(words: string[]): { lane: CliLane['lane']; rest: string[] } | null {
+  let i = 0
+  while (i < words.length) {
+    const w = words[i]!
+    if (PREFIX_WORDS.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || (i > 0 && w.startsWith('-'))) i++
+    else break
+  }
+  const first = words[i]
+  if (!first) return null
+  const base = first.slice(first.lastIndexOf('/') + 1)
+  if (base === 'agy') return { lane: 'Gemini', rest: words.slice(i + 1) }
+  if (base === 'grok') return { lane: 'Grok', rest: words.slice(i + 1) }
+  if (base === 'codex' && words[i + 1] === 'exec') return { lane: 'Codex', rest: words.slice(i + 2) }
+  return null
+}
+
+/**
+ * A CLI counts only when its basename is the first word of a command segment
+ * (segments split on ; & | ( and newlines), optionally behind a path and env/npx/sudo/time.
+ * Quoted strings are masked first so names inside arguments never match.
+ */
+export function parseCli(command: string): CliLane | null {
+  const quoted: string[] = []
+  const masked = command.replace(QUOTED, m => `"${quoted.push(m) - 1}"`)
+  // a backslash-newline continues the same command; a bare newline starts a new one
+  for (const seg of masked.replace(/\\\n/g, ' ').split(/[;&|(\n]+/)) {
+    const hit = segmentLane(seg.trim().split(/\s+/).filter(Boolean))
+    if (!hit) continue
+    const restored = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
+    const text = hit.rest.join(' ')
+    const out: CliLane = { lane: hit.lane, isReview: false }
+    const model = text.match(/(?:--model|-m)[=\s]+(\S+)/)
+    if (model?.[1]) out.model = model[1]
+    const effort = text.match(/(?:--effort|--reasoning-effort)[=\s]+(\S+)/) ?? restored(text).match(/model_reasoning_effort="?(\w+)"?/)
+    if (effort?.[1]) out.effort = effort[1]
+    if (hit.lane === 'Codex') {
+      const prompts = [...text.matchAll(/"(\d+)"/g)].map(m => quoted[Number(m[1])] ?? '')
+      out.isReview = prompts.some(p => /\breview\b/i.test(p))
+    }
+    return out
+  }
+  return null
+}
+
+const NON_SOURCE = /\.(md|markdown|txt|json|jsonl|csv|tsv|ya?ml|toml|lock|log)$/i
+export function isSourcePath(path: string): boolean {
+  if (/(^|\/)\.claude\//.test(path)) return false
+  if (NON_SOURCE.test(path)) return false
+  return /\.[A-Za-z0-9]+$/.test(path)
+}
+
+export type Seg = { text: string; style: 'brand' | 'lane' | 'plain' | 'dim' | 'warning' | 'error' }
+/** agentIndex: ordinal of the agent the band shows among this turn's agents; absent when no agent is showing */
+export type BandView = { lane: string; model: string; effort?: string; agents: number; agentIndex?: number; isIdle: boolean; durationMs?: number; note?: Note }
+const SEP: Seg = { text: ' · ', style: 'dim' }
+export const HINT = '/spick for details'
+
+export function bandSegments(v: BandView, columns: number): Seg[] {
+  const body = (text: string, style: Seg['style']): Seg => ({ text, style: v.isIdle ? 'dim' : style })
+  const segs: Seg[] = [{ text: 'spick', style: 'brand' }, SEP, body(v.isIdle ? `last: ${v.lane}` : v.lane, 'lane')]
+  if (v.model) segs.push(SEP, body(v.model, 'plain'))
+  if (columns >= 50 && v.effort) segs.push(SEP, body(v.effort, 'plain'))
+  if (columns >= 70 && !v.isIdle && v.agents > 1 && v.agentIndex !== undefined) segs.push(SEP, body(`${v.agentIndex} of ${v.agents} agents`, 'dim'))
+  if (v.isIdle && v.durationMs !== undefined && columns >= 40) segs.push(SEP, body(fmtDuration(v.durationMs), 'dim'))
+  if (v.note && columns >= 40) segs.push({ text: v.note.text, style: v.note.kind })
+  else if (columns >= 70 && !v.isIdle) segs.push({ text: HINT, style: 'dim' })
+  return segs
+}
+
+export function padRight(s: string, w: number): string { return s + ' '.repeat(Math.max(0, w - s.length)) }
+export function padLeft(s: string, w: number): string { return ' '.repeat(Math.max(0, w - s.length)) + s }
+
+/** Fixed-width columns, two spaces between, aligned per column. Every row comes back the same length. */
+export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
+  const widths = (rows[0] ?? []).map((_, i) => Math.max(...rows.map(r => (r[i] ?? '').length)))
+  return rows.map(r => widths.map((w, i) => (align[i] === 'r' ? padLeft(r[i] ?? '', w) : padRight(r[i] ?? '', w))).join('  '))
+}
+
+export function quotaBar(pct: number): string {
+  const used = Math.min(10, Math.max(0, Math.round(pct / 10)))
+  return '▰'.repeat(used) + '▱'.repeat(10 - used)
+}
+
+export function fmtDuration(ms: number): string {
+  const s = Math.round(ms / 1000)
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m ${s % 60}s`
+}
+export function fmtAge(ms: number): string {
+  const m = Math.round(ms / 60000)
+  return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`
+}
+export function fmtCost(usd: number | null): string { return usd === null ? '—' : `$${usd.toFixed(2)}` }
+
+export type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }
+
+export function estimateCost(modelId: string, u: Usage): number | null {
+  const key = Object.keys(PRICES).find(k => modelId === k || modelId.startsWith(k))
+  if (!key) return null
+  const [i, o, c, w] = PRICES[key]!
+  return (u.input_tokens * i + u.output_tokens * o + u.cache_read_input_tokens * c + u.cache_creation_input_tokens * w) / 1_000_000
+}

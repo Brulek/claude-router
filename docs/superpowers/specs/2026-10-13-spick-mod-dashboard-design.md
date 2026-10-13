@@ -64,11 +64,11 @@ Segment rules:
 - Lane: `you` for the main session, the subagent type (`coder`, `planner`, `deep`, `Explore`, …), or the CLI (`Gemini`, `Grok`, `Codex`). Bold.
 - Model: a display name. Claude ids map to `Haiku 5.5` / `Sonnet 5.5` / `Opus 5.5` / `Fable 5.1`; CLI models show the id the command named, or nothing if it named none.
 - Effort: the level as a word (`low` … `max`). Absent for CLIs that did not name one.
-- Agent count appears only when more than one agent ran in this turn: `1 of 2 agents`.
+- Agent count appears only when more than one agent ran in this turn and an agent is the lane showing: `<ordinal> of <agents this turn> agents`, the ordinal being the showing agent's place in the order this turn started them (the second of two reads `2 of 2 agents`).
 - Idle state prefixes `last:` and appends the turn's wall time, all in `subtle`.
 - The hint `/spick for details` is `subtle`; it is dropped first when width is short and whenever an attention state is showing.
 
-Width tiers (terminal columns from `e.viewport.columns`, desktop uses its own width):
+Width tiers (columns from `e.props.bodyColumns`, the band's own body width on every surface):
 
 | Columns | Shown |
 |---|---|
@@ -79,7 +79,7 @@ Width tiers (terminal columns from `e.viewport.columns`, desktop uses its own wi
 
 ## The pane
 
-Opened with `/spick` or the hint; title `Spick`. Three sections stacked, each with a bold heading and a one-line description in `subtle`, separated by one blank line. The pane uses `e.viewport.rows` to cap the history list so it never scrolls past the bottom.
+Opened with `/spick` or the hint; title `Spick`. Three sections stacked, each with a bold heading, separated by one blank line. The pane uses `e.props.scroll.bodyRows` to cap the history list so it never scrolls past the bottom.
 
 ```
 Spick                                                         stop picking, just start
@@ -120,30 +120,36 @@ What the Mod observes and how it turns it into state:
 
 | Event | What is recorded |
 |---|---|
-| `turn.start` | new turn record: start time, lane `you`, model and effort from the first `turn.step` |
+| `turn.start` | new turn record: start time, lane `you`, model and effort from the first `turn.step`; clears the in-flight calls and the delegate record; refreshes quota (the ten-minute TTL gates the read) |
 | `turn.step` (main loop) | current model and effort for the `you` lane |
-| `agent.spawn` | a subagent starts: lane = subagent type, model from the spawn result; count per turn |
-| `tool.call` on `Bash` | if the command starts a known CLI (`agy -p`, `grok -p` / `grok agent`, `codex exec`), lane = that CLI; `--model` / `-m` and `--effort` / `model_reasoning_effort` are parsed for display; `codex exec … review` sets `review: codex` |
+| `tool.call` on `Agent` | a subagent call starts: an in-flight entry keyed by `tool_use_id` (lane = `subagent_type`, else `agent`; model and effort as the call named them; its ordinal among this turn's agents), which also becomes the turn's delegate; the entry leaves when a foreground call returns |
+| `agent.spawn` | the in-flight entry with the same `tool_use_id` takes the resolved `subagentType` as its lane and the spawn result's model; a background agent's entry leaves on its own `turn.complete` |
+| `tool.call` on `Bash` | if any command segment (split on `;` `&` `|` `(` and newlines) starts a known CLI (`agy -p`, `grok -p` / `grok agent`, `codex exec`), an in-flight entry for that CLI, which also becomes the turn's delegate, and one turn on that CLI's totals row (no tokens, unpriced); `--model` / `-m` and `--effort` / `model_reasoning_effort` are parsed for display; `codex exec … review` sets `review: codex`; the entry leaves when the call returns |
 | `tool.call` on `Edit` or `Write` from the main loop while its model is Haiku | if the path is a source file (not `.md`, `.txt`, `.json`, `.csv`, plan files, or anything under `.claude/`), set the breach note `edited <file>` for this turn |
-| `turn.complete` | close the record with wall time; roll counts and estimated cost into the session table |
-| `session.start` | register `/spick`; read quota; add a `prompt.compose` section telling the model the band is active so it omits the label line |
+| `turn.complete` | close the record with wall time under the turn's delegate (lane, model, effort; `you` when it had none); roll the loop's usage and estimated cost into the session table under the loop's own lane (`you` for main, the subagent type for a subagent) |
+| `session.start` | register `/spick`; read quota |
+| `prompt.compose` | when the render's `surfaces` include `terminal` or `desktop` and the band is not hidden, add a section telling the model the band is showing so it omits the label line |
 
-Cost estimate: tokens per model from the engine's usage events when available, multiplied by the list prices held in a small table in the Mod; otherwise the cell shows `—`. The pane says "list price, not a bill" next to the total.
+Lane on the band: every Agent or CLI call in flight is held in a map keyed by `tool_use_id`, in start order. The band shows the most recent entry still in the map and falls back to `you` only when the map is empty, so parallel agents never show the wrong lane and one finishing early does not drop the band to `you` while another still works.
 
-Quota: the same two sources as `scripts/quota.sh`. `~/.claude.json` → `cachedUsageUtilization` for Claude; newest `~/.codex/sessions/**/*.jsonl` with `rate_limits` for Codex. Grok and Gemini are `unknown`. Read through `$.fs`, cached for ten minutes, refreshed on pane open.
+Delegate record: alongside the map, each turn keeps one `delegate` (lane, model, effort), set whenever an Agent or CLI call starts and never cleared when the call ends. At `turn.complete` the closed record in `last` and `turns` takes its lane, model and effort from the delegate, `you` when the turn had none, so the idle band reads `last: planner · Opus 5.5 · high · 2m 14s` and recent turns list delegates.
 
-Label line: while the Mod is loaded, a `prompt.compose` hook appends a session-scoped section: "The Spick status band is showing; do not print the `[Model: … | Effort: …]` line." Without the Mod the skill's rule stands.
+Cost estimate: tokens per model from the engine's usage events when available (input, output, cache read, cache write; cache write is priced at 1.25 × input), multiplied by the list prices held in a small table in the Mod; otherwise the cell shows `—`. Outside CLIs report no usage, so their rows count turns and show `—`. The pane says "list price, not a bill" next to the total.
+
+Quota: the same two sources as `scripts/quota.sh`. `~/.claude.json` → `cachedUsageUtilization` for Claude; newest `$CODEX_HOME/sessions/**/*.jsonl` (default `~/.codex`) with `rate_limits` for Codex, walking days newest first and files newest first within a day, skipping files over 4 MiB (the engine refuses to read them), stopping at the first that parses or after 20 files. Grok and Gemini are `unknown`. Read through `$.fs`, cached for ten minutes, refreshed at session start, at each turn start (within the TTL) and on pane open.
+
+Label line: while the band shows, a `prompt.compose` hook appends a session-scoped section: "The Spick status band is showing; do not print the `[Model: … | Effort: …]` line." It does so only when the render's `surfaces` include `terminal` or `desktop` (the surfaces that draw `AbovePrompt`) and the band is not hidden; under `claude -p` or the SDK (no surfaces), in VS Code, or with the band hidden, the label line stays. Without the Mod the skill's rule stands.
 
 Hide: a `Hide` action in the pane sets a session flag; the band returns `next(e)` while hidden. `/spick show` clears it.
 
 ## State
 
-All values live in `$.state` under `spick`, declared in `types/index.d.ts`:
+All values live in `$.state` under `spick-dashboard`, declared in `types/index.d.ts`:
 
-- `current`: the active turn record or null
+- `current`: the active turn record or null (while an agent shows, it carries that agent's ordinal as `agentIndex`)
 - `last`: the most recent completed turn record
 - `turns`: the last 50 completed records
-- `totals`: per-lane `{ turns, tokensIn, tokensOut, costUsd | null }`
+- `totals`: per-lane `{ turns, inputTokens, outputTokens, cacheReadTokens, cacheCreationTokens, costUsd | null }`
 - `quota`: `{ claude: {...} | null, codex: {...} | null, readAt }`
 - `hidden`: boolean
 
@@ -159,7 +165,9 @@ mod/spick-dashboard/
 ├── hooks/format.ts           display names, width tiers, padding, bars (pure functions)
 ├── hooks/quota.ts            the two file readers (pure parse + $.fs)
 ├── hooks/format.test.ts      width tiers, padding, name mapping, bar rendering
-├── hooks/quota.test.ts       parsing of both file shapes, staleness
+├── hooks/quota.test.ts       parsing of both file shapes, staleness, the Codex session walk
+├── hooks/register.test.ts    events → state: lanes, delegate record, totals, label-line section
+├── hooks/band.test.tsx       band and pane rendering on terminal and desktop
 └── types/index.d.ts          PluginState contract
 ```
 
@@ -167,10 +175,10 @@ Shipped inside the Spick repository under `mod/`, installed with `claude plugin 
 
 ## Verification
 
-1. `claude plugin validate mod/spick-dashboard` passes; `tsc -p` passes; `claude plugin test` runs both test files green.
+1. `claude plugin validate mod/spick-dashboard` passes; `tsc -p` passes; `claude plugin test` runs all four test files green.
 2. Interactive, terminal, width ≥ 70: idle band shows `last:` dim; a chore shows `you · Haiku 5.5`; a code task shows `coder · Sonnet 5.5 · <effort>` while the agent runs; an `agy -p` call shows `Gemini`.
 3. Resize the terminal to 60, 45, 35 columns: the band drops segments in the documented order and never wraps.
 4. Edit a `.py` file from the Haiku main session: the band shows `edited <file>` in error color for that turn only.
 5. `/spick` opens the pane; columns align; quota bars match `scripts/quota.sh`; `Hide` hides the band and `/spick show` restores it.
 6. Desktop app: the same checks in the Code tab; the band and pane render on the `desktop` surface.
-7. With the Mod loaded, replies carry no label line; with it unloaded, the label line returns.
+7. With the Mod loaded and the band showing, replies carry no label line; with the band hidden, under `claude -p`, or with the Mod unloaded, the label line returns.

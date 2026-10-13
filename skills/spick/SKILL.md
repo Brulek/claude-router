@@ -170,6 +170,8 @@ End **every** reply with one line stating what ran. The user uses it to catch mi
 
 Model names are versions (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1, or the CLI model id). When nothing was delegated there is no arrow at all; never fill it with `none`, `无` or a note. Your own effort is whatever the session is set to; write `Default` if you do not know. If the user switched the session to a stronger model themselves, the tiering table is suspended for that session - do the work yourself - but still print the label.
 
+When the Spick dashboard mod is loaded it adds a system section saying the band is showing; then omit the label line entirely. The band is the record.
+
 ## Works with the Router mod (optional, recommended)
 
 [alexei-led/claude-router](https://github.com/alexei-led/claude-router) is a Claude Code Mod that re-prices the **main conversation** itself: a local classifier (Ollama works) picks the model and effort for every turn, so the session is not stuck on Haiku and context is never lost to a handoff. This skill does not do that and does not try to; the two compose:

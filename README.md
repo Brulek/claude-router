@@ -41,6 +41,14 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 
 Desktop app users: pick Haiku once in the composer's model menu. The app remembers its own choice and overrides `settings.json`.
 
+### Dashboard mod (optional)
+
+In a terminal session:
+
+    /plugin install spick-dashboard --marketplace Brulek/spick
+
+Answer `y` to add the marketplace, pick the user scope. The band above the prompt then shows who is working; `/spick` opens the pane. While the band shows (terminal or desktop app), replies carry no label line; hide it with `/spick hide` and the label line returns.
+
 ## Commands
 
 | Say | Effect |
@@ -65,6 +73,7 @@ skills/spick/
 ├── scripts/quota.sh         local quota reader
 ├── scripts/setup.sh         detection and install
 └── assets/                  subagent definitions, CLAUDE.md snippet
+mod/spick-dashboard/         the dashboard mod (band above the prompt, /spick pane)
 ```
 
 ## Pairs well with

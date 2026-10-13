@@ -41,6 +41,14 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 
 桌面 app 用户：在输入框旁的模型菜单里选一次 Haiku。app 会记住自己的选择，并覆盖 `settings.json`。
 
+### 仪表盘 Mod（可选）
+
+在终端会话里执行：
+
+    /plugin install spick-dashboard --marketplace Brulek/spick
+
+回答 `y` 添加 marketplace，选 user 范围；之后提示框上方出现状态带显示谁在干活，`/spick` 打开面板。状态带显示期间（终端或桌面 app）回复不再印标注行；`/spick hide` 隐藏状态带后标注行恢复。
+
 ## 口令
 
 | 对 Claude 说 | 效果 |
@@ -65,6 +73,7 @@ skills/spick/
 ├── scripts/quota.sh         本地额度读取
 ├── scripts/setup.sh         探测与安装
 └── assets/                  子代理定义、CLAUDE.md 片段
+mod/spick-dashboard/         仪表盘 Mod（提示框上方状态带、/spick 面板）
 ```
 
 ## 搭配使用
