@@ -1,6 +1,6 @@
 # First-run onboarding
 
-Follow this when `~/.claude/claude-router.json` is missing or the user says `claude-router setup`. Keep it conversational; most users have never configured a CLI. Ask one question at a time and explain each step in a sentence.
+Follow this when `~/.claude/buyongxuanze.json` is missing or the user says `buyongxuanze setup`. Keep it conversational; most users have never configured a CLI. Ask one question at a time and explain each step in a sentence.
 
 ## 1. Detect
 
@@ -36,8 +36,8 @@ Nothing is required except Claude itself. With no outside CLI installed the skil
 Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <haiku|sonnet|opus> --effort <level>`. It:
 
 - copies `assets/agents/*.md` into `~/.claude/agents/` (existing files are kept unless `--force`),
-- writes `~/.claude/claude-router.json` with the enabled lanes and thresholds,
-- inserts `assets/claude-md-snippet.md` into `~/.claude/CLAUDE.md` between `<!-- claude-router:start -->` / `<!-- claude-router:end -->` markers (re-running replaces the block, never duplicates it),
+- writes `~/.claude/buyongxuanze.json` with the enabled lanes and thresholds,
+- inserts `assets/claude-md-snippet.md` into `~/.claude/CLAUDE.md` between `<!-- buyongxuanze:start -->` / `<!-- buyongxuanze:end -->` markers (re-running replaces the block, never duplicates it),
 - sets `model` and `effortLevel` in `~/.claude/settings.json` only if `--model` / `--effort` were given, keeping every other key.
 
 Tell the user what was written, file by file.
@@ -49,4 +49,4 @@ Say, in the user's language:
 - New sessions pick up the agents and the CLAUDE.md block; this session will not.
 - Desktop app users: pick Haiku once in the model menu.
 - Three self-tests to try in a new session: a web lookup (should route to Gemini), a small code change (should route to `coder`), "review what you just changed" (should trigger Codex review if the triggers match, otherwise say "not reviewed").
-- `claude-router doctor` re-checks tools; `claude-router quota` shows usage.
+- `buyongxuanze doctor` re-checks tools; `buyongxuanze quota` shows usage.

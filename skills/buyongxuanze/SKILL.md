@@ -1,9 +1,9 @@
 ---
-name: claude-router
-description: Triage every task to the cheapest model that can do it well. Picks the Claude tier (Haiku main session, Sonnet coder, Opus planner/deep), the effort level, and when to hand off to subscription CLIs you already pay for (Gemini for web search and long media, Grok for X/Twitter data, Codex for coding review and image generation), with a quota gate so you never drain one subscription while others sit idle. Use this skill on ANY non-trivial request, not only when the user says "delegate", "route", "outsource" or "save quota" - also when they ask to write or fix code, plan something, search the web, check facts, pull X/Twitter posts, generate or edit an image, analyse a long video or PDF, or ask for a review of changes. Also use it when the user says "claude-router setup", "claude-router doctor" or "claude-router quota".
+name: buyongxuanze
+description: Triage every task to the cheapest model that can do it well. Picks the Claude tier (Haiku main session, Sonnet coder, Opus planner/deep), the effort level, and when to hand off to subscription CLIs you already pay for (Gemini for web search and long media, Grok for X/Twitter data, Codex for coding review and image generation), with a quota gate so you never drain one subscription while others sit idle. Use this skill on ANY non-trivial request, not only when the user says "delegate", "route", "outsource" or "save quota" - also when they ask to write or fix code, plan something, search the web, check facts, pull X/Twitter posts, generate or edit an image, analyse a long video or PDF, or ask for a review of changes. Also use it when the user says "buyongxuanze setup", "buyongxuanze doctor" or "buyongxuanze quota".
 ---
 
-# claude-router: one triage for Claude tiers and outside AIs
+# buyongxuanze: one triage for Claude tiers and outside AIs
 
 You are (usually) a small, fast model sitting at the front of a Claude Code session. Your job is not to do everything yourself. It is to decide, in one pass, **who** does the task, on **which model**, at **which effort**, and then to check the result before handing it back. Every decision here trades money and latency against quality, so the rules below explain the *why*; when a situation is not covered, reason from the why rather than guessing.
 
@@ -16,9 +16,9 @@ Claude is the default for work, coding and daily tasks. Outside lanes are used w
 
 ## Step 0 - is this machine set up?
 
-Check once per session: `test -f ~/.claude/claude-router.json`. If the file is missing, this is a first run. Stop routing and follow `references/onboarding.md` (it detects installed CLIs, asks what to enable, installs the agents and the CLAUDE.md snippet). The user can also trigger it any time by saying `claude-router setup`; `claude-router doctor` re-runs only the detection part.
+Check once per session: `test -f ~/.claude/buyongxuanze.json`. If the file is missing, this is a first run. Stop routing and follow `references/onboarding.md` (it detects installed CLIs, asks what to enable, installs the agents and the CLAUDE.md snippet). The user can also trigger it any time by saying `buyongxuanze setup`; `buyongxuanze doctor` re-runs only the detection part.
 
-Read the config (`cat ~/.claude/claude-router.json`) at the start of a session. It tells you which lanes are enabled. Never send work to a disabled lane.
+Read the config (`cat ~/.claude/buyongxuanze.json`) at the start of a session. It tells you which lanes are enabled. Never send work to a disabled lane.
 
 ## Step 1 - pick the lane
 
@@ -135,9 +135,9 @@ Model names are versions (Haiku 5.5, Sonnet 5.5, Opus 5.5, Fable 5.1, or the CLI
 
 | Phrase | What to do |
 |---|---|
-| `claude-router setup` | Follow `references/onboarding.md` from the top |
-| `claude-router doctor` | `bash scripts/setup.sh --check` and report the table |
-| `claude-router quota` | `bash scripts/quota.sh` and report |
+| `buyongxuanze setup` | Follow `references/onboarding.md` from the top |
+| `buyongxuanze doctor` | `bash scripts/setup.sh --check` and report the table |
+| `buyongxuanze quota` | `bash scripts/quota.sh` and report |
 
 ## Files in this skill
 

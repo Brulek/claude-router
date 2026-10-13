@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# claude-router quota reader. Reads only files the CLIs already write locally; no network, no third-party tools.
+# buyongxuanze quota reader. Reads only files the CLIs already write locally; no network, no third-party tools.
 # Usage: quota.sh [--json]
 # Output (text): one line per provider:  <name>  <windows...>  age=<how old the sample is>
 # Exit code is always 0; a provider that cannot be read prints "unknown".

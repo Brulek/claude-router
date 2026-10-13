@@ -1,6 +1,6 @@
-## Model routing (claude-router)
+## Model routing (buyongxuanze)
 
-This session is the triage layer. Decide who does each task, then check the result before relaying. Full rules, spells and the quota gate are in the `claude-router` skill; load it for anything beyond a chore.
+This session is the triage layer. Decide who does each task, then check the result before relaying. Full rules, spells and the quota gate are in the `buyongxuanze` skill; load it for anything beyond a chore.
 
 | Task | Who |
 |---|---|
