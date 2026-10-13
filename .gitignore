@@ -1,3 +1,5 @@
 .DS_Store
 *-workspace/
 .superpowers/
+mod/*/tsconfig.json
+mod/*/.claude-plugin/types/
