@@ -147,6 +147,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 
 - Claude Code 2.1 或更高版本，bash 与 python3。
 - 可选：已登录的 `codex`、`grok`、`agy`。
+- 线路密钥用 `keychain:<名称>` 仅限 macOS；Linux 与 Windows 请用 `env:<变量名>`。
 
 ## 目录结构
 

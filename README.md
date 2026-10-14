@@ -143,7 +143,7 @@ Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini /
 
 ## Requirements
 
-Claude Code 2.1 or later, bash and python3. Optional: `codex`, `grok` and `agy`, each logged in.
+Claude Code 2.1 or later, bash and python3. Optional: `codex`, `grok` and `agy`, each logged in. A lane key stored as `keychain:<name>` works on macOS only; on Linux and Windows use `env:<VAR>`.
 
 ## Project layout
 

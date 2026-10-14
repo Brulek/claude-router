@@ -242,6 +242,14 @@ class Refusals(InvokeCase):
         self.assertIn("key not found: keychain spick-no-such-item-xyz", r.stderr)
         self.assertEqual(RECEIVED, [])
 
+    def test_keychain_without_security_tool_says_macos_only(self):
+        lane = self.api_lane(key_ref="keychain:spick-no-such-item-xyz")
+        r = self.run_invoke(lane, "--lane", "t", extra_env={"PATH": ""})
+        self.assertEqual(r.returncode, 3)
+        self.assertIn("macOS only", r.stderr)
+        self.assertIn("env:<VAR>", r.stderr)
+        self.assertEqual(RECEIVED, [])
+
     def test_api_lane_without_key_ref_exits_3(self):
         lane = self.api_lane()
         del lane["t"]["key_ref"]

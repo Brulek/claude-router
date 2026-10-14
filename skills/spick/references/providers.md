@@ -100,7 +100,7 @@ Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`.
 | `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data:unset` and nothing is blocked |
 | `price` | free-form object; built-ins use `{"model": "subscription"}`; the plan and price from `subscriptions` are folded in |
 | `meter` | `{"type": ...}` with `none`, `builtin` (+ `collector`), `local-file`, `balance-endpoint` or `usage-endpoint`; an optional `health_url` adds one GET-status fact. See Meters below |
-| `key_ref` | top level of the lane record (not inside `invoke`); where the key lives: `keychain:<name>` or `env:<VAR>`; never the key itself, never printed |
+| `key_ref` | top level of the lane record (not inside `invoke`); where the key lives: `keychain:<name>` or `env:<VAR>`; `keychain:` is macOS only (it reads the macOS `security` tool), so on Linux and Windows use `env:<VAR>`; never the key itself, never printed |
 | `invoke` | how to call it; built-ins point here (`see references/providers.md`) |
 | `notes` | free text for the model; never printed in the checklist |
 

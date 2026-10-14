@@ -58,6 +58,8 @@ def read_key(ref):
             r = subprocess.run(["security", "find-generic-password", "-s", name, "-a", "spick", "-w"],
                                capture_output=True, text=True, timeout=30)
             key = r.stdout.strip() if r.returncode == 0 else ""
+        except FileNotFoundError:
+            raise Fail(3, "key not found: keychain is macOS only on this platform; use env:<VAR>")
         except Exception:
             key = ""
         if not key:
