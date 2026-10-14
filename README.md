@@ -135,6 +135,8 @@ Claude Code 2.1 or later, bash and python3. Optional: `codex`, `grok` and `agy`,
 
 Routing rules: `skills/spick/`. Band and pane: `mod/spick-dashboard/`.
 
+CI (`.github/workflows/ci.yml`) runs the python unit tests and the mod tests.
+
 ## Related projects
 
 [alexei-led/claude-router](https://github.com/alexei-led/claude-router) switches the main session's model on each turn and can run alongside Spick.

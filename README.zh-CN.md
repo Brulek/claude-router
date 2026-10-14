@@ -138,6 +138,8 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 
 `skills/spick/`：分诊规则。`mod/spick-dashboard/`：状态带与面板。
 
+CI（`.github/workflows/ci.yml`）跑 python 单测与 mod 测试。
+
 ## 相关项目
 
 [alexei-led/claude-router](https://github.com/alexei-led/claude-router) 逐轮切换主会话的模型。Spick 不提供该功能，两者可配合使用。

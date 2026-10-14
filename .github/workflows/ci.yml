@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  python:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Shell syntax
+        run: for f in skills/spick/scripts/*.sh; do bash -n "$f"; done
+      - name: Unit tests
+        run: cd skills/spick/scripts && python3 -m unittest -q
+
+  mod:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code@2.1.299
+      # runner.temp is not available in job-level env, so set it for later steps here.
+      - name: Isolated Claude config dir
+        run: echo "CLAUDE_CONFIG_DIR=${{ runner.temp }}/claude" >> "$GITHUB_ENV"
+      - name: Validate plugin
+        run: claude plugin validate .
+      - name: Validate mod
+        run: claude plugin validate mod/spick-dashboard
+      - name: Mod tests
+        run: claude plugin test mod/spick-dashboard
