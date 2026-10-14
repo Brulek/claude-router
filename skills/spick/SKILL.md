@@ -49,6 +49,8 @@ Choosing between tagged lanes (the Lanes line lists them; its `data:` is the mos
 
 If a call fails, or the lane is over quota (Step 4), choose again from the lanes that remain.
 
+A registered API lane runs its `invoke.model` by default; pass `--model <id>` to `scripts/invoke.py` to use another model of the same service for one task, and `--list-models` to see which ones it offers.
+
 Two special cases:
 
 - **Chinese official or formal writing** goes to `deep`, not to you. Formal register is where small models slip.
@@ -188,6 +190,16 @@ When the Spick dashboard mod is loaded it adds a system section saying the band 
 
 If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haiku, delegate everything heavy" reflex for pure reasoning and writing tasks (the mod will have raised the tier already), keep delegating coding to `coder` only when you want an isolated worker, and keep the label line honest about which model actually answered (the mod's band above the prompt shows it).
 
+## Adding an outside AI
+
+When the user says "add my DeepSeek", "spick setup" for an API service, or lists the AI services they have, you write the registry entries yourself; the user never edits JSON.
+
+1. Ask once, in one message, for each service: its name, which site (for Kimi: China or international), plan or pay-per-use, and what they want it for. Free text is fine.
+2. For each service tell the user to store its key in the macOS keychain themselves, with exactly this command (they type the key at the prompt, it never goes into the chat): `security add-generic-password -s spick-<name> -a spick -w`. Never ask for the key in chat. If a key is pasted into the chat anyway, say it must be revoked and regenerated, and do not repeat it.
+3. Look up `base_url`, api protocol and meter preset in `references/providers-catalog.md`; do not invent a `base_url` or a model id. If the service is not in the catalogue, ask the user for the provider's docs URL and read it (WebFetch) before writing anything. Then back up `~/.claude/spick.json` to `spick.json.bak` and add the entry under `lane_registry`, keeping every other key: `kind`, `data`, `key_ref` (`"keychain:spick-<name>"`, at the top level of the record), `invoke` (`api`, `base_url`, `model`, `max_tokens`), `meter` (`type` and `preset`, only if the catalogue has a preset), `tags`, `prefer`, `notes`.
+4. Run `python3 scripts/lanes.py --validate`, then one call: write `Reply with the single word OK.` to a scratchpad file and run `python3 scripts/invoke.py --lane <id> --prompt-file <path> --max-tokens 400`. Report works, or fails with the exit code and the one-line reason. Never include a key value in the report.
+5. Tell the user what was registered and that the next prompt's Lanes line shows it.
+
 ## Failures
 
 - **Auth failure** (401, "not authenticated", browser login prompt): do not retry. Move to the next lane and, at the end, tell the user the exact re-login command (`codex login`, `grok login`, `agy` opens a browser). Never try to log in on their behalf.
@@ -198,7 +210,7 @@ If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haik
 
 | Phrase | What to do |
 |---|---|
-| `spick setup` | Follow `references/onboarding.md` from the top |
+| `spick setup` | Follow `references/onboarding.md` from the top; for API services follow "Adding an outside AI" |
 | `spick doctor` | `bash scripts/setup.sh --check` and report the table |
 | `spick quota` | `bash scripts/quota.sh` and report |
 | `/spick` | (dashboard mod) opens the pane; with no UI it prints a one-paragraph status |
@@ -212,6 +224,7 @@ If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haik
 
 - `references/providers.md` - per-provider spells, flags, model ids, quota sources, known pitfalls. Read before the first external call.
 - `references/onboarding.md` - first-run flow.
+- `references/providers-catalog.md` - checked `base_url`, key name and meter preset per API service. Read it before writing a registry entry.
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection and install.
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.
