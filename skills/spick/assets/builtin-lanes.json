@@ -1,0 +1,35 @@
+{
+  "gemini": {
+    "name": "Gemini",
+    "kind": "cli-subscription",
+    "enabled": true,
+    "tags": ["search", "long-context", "multimodal", "image"],
+    "prefer": ["search", "long-context"],
+    "data": "code",
+    "price": {"model": "subscription"},
+    "meter": {"type": "builtin", "collector": "gemini"},
+    "invoke": {"cli": "see references/providers.md"}
+  },
+  "grok": {
+    "name": "Grok",
+    "kind": "cli-subscription",
+    "enabled": true,
+    "tags": ["x-data"],
+    "prefer": ["x-data"],
+    "data": "code",
+    "price": {"model": "subscription"},
+    "meter": {"type": "builtin", "collector": "grok"},
+    "invoke": {"cli": "see references/providers.md"}
+  },
+  "codex": {
+    "name": "Codex",
+    "kind": "cli-subscription",
+    "enabled": true,
+    "tags": ["code", "review", "image"],
+    "prefer": ["review", "image"],
+    "data": "code",
+    "price": {"model": "subscription"},
+    "meter": {"type": "builtin", "collector": "codex"},
+    "invoke": {"cli": "see references/providers.md"}
+  }
+}
