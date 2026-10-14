@@ -148,6 +148,8 @@ Output: only the deliverable. No preamble, no note about how it was made, no lab
 
 A rule that is not in the brief will not be followed, so copy the user's numbers and wording into "Hard constraints" word for word. For `agy` add "use your built-in search only; do not open specific URLs" (headless `read_url` is auto-denied). For `codex exec` always end the command with `< /dev/null` and add `--skip-git-repo-check` outside a repo. Full spells, flags and model names are in `references/providers.md`; read it before the first external call of a session.
 
+For a registry lane with `invoke.api` or a command template in `invoke.cli`, write the brief to a scratchpad file first and call `python3 scripts/invoke.py --lane <id> --prompt-file <path>`. Never put the brief on the command line and never pass a key or any other secret; the key is read from the lane's `key_ref`. The answer comes back on stdout and Step 6 checks it as usual. Exit 3 means web-only or no key, 4 quota or rate limit, 5 any other failure (see `references/providers.md`).
+
 ## Step 6 - clean and check before you relay
 
 Delegated output is a draft until you have checked it. Three passes, in order:

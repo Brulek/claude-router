@@ -118,6 +118,16 @@ Example:
 }
 ```
 
+### Calling a registry lane
+
+`scripts/invoke.py` sends one prompt to a lane and prints the answer:
+
+```
+python3 scripts/invoke.py --lane <id> --prompt-file <path> [--system-file <path>] [--model <m>] [--max-tokens <n>] [--timeout <s>] [--contains public|text|code]
+```
+
+Write the brief to a scratchpad file first and pass only the path; never put the brief on the command line and never pass secrets. `invoke` in the lane record is one of: `{"api": "openai-chat" | "anthropic-messages", "base_url": ..., "model": ...}` (POST `{base_url}/chat/completions`, or `{base_url}/v1/messages`) or `{"cli": "<command with {prompt_file}>"}` (run as argv without a shell; without `{prompt_file}` the prompt goes on stdin). A `key_ref` is required for an api lane except `kind: local`; `keychain:<name>` is read as service `<name>`, account `spick`. stdout is the answer only; stderr is one fact line (`spick-invoke: <id> <model> <in> in / <out> out tokens, <s>s`). `--contains` is a self-report: a lane whose declared `data` is lower gets one warning line and the call proceeds. Exit codes: 0 ok, 2 usage error or unknown lane, 3 web-only lane or missing key or auth 401/403, 4 quota or rate 402/429, 5 anything else. No retries, no streaming. Step 6 checks the answer as usual.
+
 ## Subscriptions and the quota cache
 
 `~/.claude/spick.json` may carry a `subscriptions` object. Only the providers listed in it are collected and shown; a missing key means not subscribed. Write it by hand (setup does not manage it yet):
