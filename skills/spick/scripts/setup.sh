@@ -424,12 +424,19 @@ PY
   for p in "$CLAUDE_DIR/.spick-mod-active" "$HOME/.claude/.spick-mod-active" "$CLAUDE_DIR/spick-quota.json"; do
     if [ -e "$p" ]; then rm -f "$p" && echo "  removed $p"; fi
   done
+  # the dashboard mod writes its spend records to $HOME/.claude/spick-spend (it does not read CLAUDE_CONFIG_DIR):
+  # that and $CLAUDE_DIR/spick-spend, once each (the same path unless CLAUDE_CONFIG_DIR points elsewhere)
+  local spend_dirs=("$CLAUDE_DIR/spick-spend")
+  if [ "$HOME/.claude/spick-spend" != "$CLAUDE_DIR/spick-spend" ]; then spend_dirs+=("$HOME/.claude/spick-spend"); fi
   if [ "$purge" = 1 ]; then
-    for p in "$CONFIG" "$CLAUDE_DIR/spick-quota.json" "$CLAUDE_DIR/spick-spend"; do
+    for p in "$CONFIG" "$CLAUDE_DIR/spick-quota.json" "${spend_dirs[@]}"; do
       if [ -e "$p" ]; then rm -rf "$p" && echo "  removed $p (--purge)"; fi
     done
   else
     [ -e "$CONFIG" ] && echo "  keep   $CONFIG (--purge to remove)"
+    for p in "${spend_dirs[@]}"; do
+      if [ -e "$p" ]; then echo "  keep   $p (--purge to remove)"; fi
+    done
   fi
   echo "  keep   $CLAUDE_DIR/spick-backup (never removed)"
 

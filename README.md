@@ -137,6 +137,7 @@ It backs up first, like `--install`, then removes only what the install wrote: t
 | `/spick lane <id> <field> <value>` | Changes any field of a lane through `set_lane.py` (tags take a comma list) |
 | `/spick hide` / `show` | Hides or shows the band for the current session |
 | `/spick quota` | Refreshes the quota line |
+| `/spick spend` | What the sessions cost in the last 7 days, by lane (`scripts/spend.py`; `--days N`, `--by lane\|day\|session`, `--json` when run by hand). The mod writes one file per session to `~/.claude/spick-spend/`: a row per turn that carried usage and a row per outside CLI call (tokens 0, unpriced). Without the mod there is no spend record: the bash hook sees no usage |
 
 Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
 

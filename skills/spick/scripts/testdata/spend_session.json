@@ -1,0 +1,6 @@
+{"sessionId":"5f0c2a9e-1111-4222-8333-944455556666","cwd":"/Users/me/dev/app","startedAt":"2026-10-01T07:59:00.000Z","rows":[
+{"at":"2026-10-01T08:00:00.000Z","turnId":"t0","lane":"main session","model":"claude-haiku-5-5","effort":"medium","inputTokens":1000,"outputTokens":100,"cacheReadTokens":0,"cacheCreationTokens":0,"costUsd":0.01},
+{"at":"2026-10-12T09:00:00.000Z","turnId":"t1","lane":"main session","model":"claude-haiku-5-5","effort":"medium","inputTokens":10000,"outputTokens":2000,"cacheReadTokens":50000,"cacheCreationTokens":1000,"costUsd":0.05},
+{"at":"2026-10-12T09:01:00.000Z","turnId":"t1","agentId":"a1","lane":"coder","model":"claude-sonnet-5-5","effort":"high","inputTokens":200000,"outputTokens":20000,"cacheReadTokens":0,"cacheCreationTokens":0,"costUsd":0.9},
+{"at":"2026-10-12T09:02:00.000Z","turnId":"t1","lane":"Gemini","model":"gemini-3.8-flash","effort":"low","inputTokens":0,"outputTokens":0,"cacheReadTokens":0,"cacheCreationTokens":0,"costUsd":null}
+]}

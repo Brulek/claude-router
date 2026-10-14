@@ -139,6 +139,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 | `/spick lane <id> <field> <value>` | 经 `set_lane.py` 修改 lane 的任意字段（tags 用逗号分隔） |
 | `/spick hide` / `show` | 隐藏或显示状态带，仅限本会话 |
 | `/spick quota` | 刷新额度信息 |
+| `/spick spend` | 近 7 天各 lane 的花费（`scripts/spend.py`；手动运行可加 `--days N`、`--by lane\|day\|session`、`--json`）。mod 为每个会话在 `~/.claude/spick-spend/` 写一个文件：每个带用量的回合一行，每次外部 CLI 调用一行（tokens 为 0，不计价）。没有 mod 就没有花费记录：bash 钩子拿不到用量 |
 
 面板快捷键：`r` 分流，`v` 审核，`e` 拦截，`d` 守卫，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
 

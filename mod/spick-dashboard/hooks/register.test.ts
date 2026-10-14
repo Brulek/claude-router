@@ -653,7 +653,7 @@ test('every /spick answer is one line starting with spick:', async ($, on) => {
   session(on)
   await $.session.start(START)
   const answer = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text ?? ''
-  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota]')
+  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend]')
   expect(await answer('lane glm')).toBe('spick: unknown lane id glm')
   expect(await answer('hide')).toBe('spick: band hidden · /spick show restores it')
   expect(await answer('show')).toBe('spick: band shown')
@@ -1117,4 +1117,118 @@ test('guard off persists to the store and comes back at the next session.start',
   for (const f of ['a.py', 'b.py', 'c.py', 'd.py']) expect((await $.tool.call(edit(f, `/repo/${f}`))).deny).toBeUndefined()
   expect((await $.classic.Stop({ ...GATE_STOP, last_assistant_message: CHECKED })).block).toBeUndefined()
   await $.turn.complete({ turnId: 't1', ...DONE })
+})
+
+// --- spend: one file per session under ~/.claude/spick-spend/ -------------------------------------------------------------
+
+type SpendDoc = { sessionId: string; cwd: string; startedAt: string; rows: Record<string, unknown>[] }
+
+/** a session whose id is s1 and whose HOME is /h; every fs.write recorded (never the real file), a previous file served when given */
+function spendWorld(on: Parameters<TestBody>[1], previous: string | null = null) {
+  const world = { writes: [] as { path: string; text: string }[], isWriteBroken: false }
+  mock.env(on, { HOME: '/h' })
+  mock.store(on)
+  on('session.id', async () => ({ value: 's1' }))
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  on('fs.write', async ($, e) => { if (world.isWriteBroken) return { deny: 'read-only' }; world.writes.push({ path: e.path, text: e.text }); return { value: undefined } })
+  on('fs.read', async ($, e) => (e.path === '/h/.claude/spick-spend/s1.json' && previous !== null ? { value: previous } : { deny: 'missing' }))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  const spendWrites = () => world.writes.filter(w => w.path.includes('/spick-spend/'))
+  const lastDoc = (): SpendDoc | undefined => { const w = spendWrites().at(-1); return w ? JSON.parse(w.text) as SpendDoc : undefined }
+  return { world, spendWrites, lastDoc }
+}
+
+test('a subagent turn, a CLI call and the main turn each write a row to ~/.claude/spick-spend/<session>.json, as the totals count them', { plugins: [probePlugin] }, async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  const { spendWrites, lastDoc } = spendWorld(on)
+  const tools = gatedTools(on)
+  on('agent.spawn', async () => ({ model: 'claude-haiku-5-5', agentId: 'a1' }))
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+
+  const agent = $.tool.call({ ...agentCall('tu1', 'coder'), model: 'haiku', effort: 'high' })
+  await tools.held('tu1')
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'd', subagentType: 'coder', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: false, fork: false })
+  await $.turn.complete({ turnId: 'sub1', agentId: 'a1', ...DONE, usage: { ...USAGE, model: 'claude-haiku-5-5' } })
+  tools.release('tu1')
+  await agent
+
+  const cli = $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'agy -p "look it up" --model gemini-3.8-flash --effort low' })
+  await tools.held('b1')
+  tools.release('b1')
+  await cli
+  await $.turn.complete({ turnId: 't1', ...DONE })
+
+  // one write per row, each with every row so far, all to the one file
+  expect(spendWrites().map(w => w.path)).toEqual(Array(3).fill('/h/.claude/spick-spend/s1.json'))
+  const doc = lastDoc()!
+  expect(doc).toMatchObject({ sessionId: 's1', cwd: '/repo', startedAt: new Date(1000).toISOString() })
+  expect(doc.rows).toEqual([
+    { at: new Date(1000).toISOString(), turnId: 'sub1', agentId: 'a1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: expect.any(Number) },
+    { at: new Date(1000).toISOString(), turnId: 't1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null },
+    { at: new Date(1000).toISOString(), turnId: 't1', lane: 'main session', model: 'claude-sonnet-5-5', inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 3 },
+  ])
+  // the same numbers as the pane's totals
+  const t = (await probe($)).totals!
+  for (const r of doc.rows) {
+    const lane = t[r.lane as string]!
+    expect(r.inputTokens).toBe(lane.inputTokens)
+    expect(r.outputTokens).toBe(lane.outputTokens)
+    expect(r.costUsd).toBe(lane.costUsd)
+  }
+})
+
+test('a turn with no usage (interrupted, refused, an API error) writes no row; a failing write leaves the totals alone', { plugins: [probePlugin] }, async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  const { world, spendWrites, lastDoc } = spendWorld(on)
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: true, reason: 'aborted' })
+  await $.turn.start({ text: 'go', turnId: 't2' })
+  await $.turn.complete({ turnId: 't2', answer: '', durationMs: 1, isAborted: false, reason: 'refusal', refusal: { category: null, explanation: null } })
+  await $.turn.start({ text: 'go', turnId: 't3' })
+  await $.turn.complete({ turnId: 't3', answer: '', durationMs: 1, isAborted: false, reason: 'error' })
+  expect(spendWrites()).toEqual([])
+  expect((await probe($)).totals ?? {}).toEqual({})
+
+  world.isWriteBroken = true
+  await $.turn.start({ text: 'go', turnId: 't4' })
+  await $.turn.complete({ turnId: 't4', ...DONE })
+  expect((await probe($)).totals?.['main session']?.turns).toBe(1)
+  // the row stays in memory and lands with the next write that goes through
+  world.isWriteBroken = false
+  await $.turn.start({ text: 'go', turnId: 't5' })
+  await $.turn.complete({ turnId: 't5', ...DONE })
+  expect(lastDoc()?.rows.map(r => r.turnId)).toEqual(['t4', 't5'])
+})
+
+test('a resumed session keeps the rows its file already holds', async ($, on) => {
+  mock.clock(on, { now: 5000 })
+  const old = JSON.stringify({ sessionId: 's1', cwd: '/old', startedAt: '2026-10-01T00:00:00.000Z', rows: [{ at: '2026-10-01T00:00:01.000Z', turnId: 't0', lane: 'main session', model: 'm', inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null }] })
+  const { lastDoc } = spendWorld(on, old)
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  const doc = lastDoc()!
+  expect(doc.startedAt).toBe('2026-10-01T00:00:00.000Z')
+  expect(doc.cwd).toBe('/old')
+  expect(doc.rows.map(r => r.turnId)).toEqual(['t0', 't1'])
+})
+
+test('/spick spend prints what spend.py prints for the last seven days; a failure is one spick: line', async ($, on) => {
+  mock.clock(on)
+  mock.env(on, { HOME: '/h' })
+  const calls: string[][] = []
+  let exitCode = 0
+  on('process.run', async (_$, e) => {
+    calls.push([...e.argv])
+    return { value: exitCode === 0
+      ? { exitCode, stdout: 'spick spend: last 7 days, by lane\nmain session  1\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+      : { exitCode, stdout: '', stderr: '\nspend.py: boom\nmore\n', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  expect((await $.command.run({ command: 'spick', args: 'spend', ...RUN })).text).toBe('spick spend: last 7 days, by lane\nmain session  1')
+  expect(calls).toEqual([['python3', '/h/.claude/skills/spick/scripts/spend.py', '--days', '7']])
+  exitCode = 2
+  expect((await $.command.run({ command: 'spick', args: 'spend', ...RUN })).text).toBe('spick: spend.py: boom')
 })

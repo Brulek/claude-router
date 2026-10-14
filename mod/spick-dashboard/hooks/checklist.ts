@@ -131,9 +131,10 @@ export type SpickCommand =
   | LaneCommand
   | { kind: 'band'; hidden: boolean }
   | { kind: 'quota' }
+  | { kind: 'spend' }
   | { kind: 'usage' }
 
-export const ARGUMENT_HINT = '[on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota]'
+export const ARGUMENT_HINT = '[on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend]'
 export const USAGE = `spick: usage /spick ${ARGUMENT_HINT}`
 
 /**
@@ -164,6 +165,7 @@ export function parseSpick(args: string): SpickCommand {
   if (w.length === 1 && a === 'auto') return { kind: 'routing', value: 'on' }
   if (w.length === 1 && (a === 'hide' || a === 'show')) return { kind: 'band', hidden: a === 'hide' }
   if (w.length === 1 && a === 'quota') return { kind: 'quota' }
+  if (w.length === 1 && a === 'spend') return { kind: 'spend' }
   if (w.length === 2 && a === 'review' && (b === 'on' || b === 'off')) return { kind: 'review', value: b === 'on' ? 'auto' : 'off' }
   if (w.length === 2 && a === 'gate' && (b === 'on' || b === 'off')) return { kind: 'gate', value: b }
   if (w.length === 2 && a === 'guard' && (b === 'on' || b === 'off')) return { kind: 'guard', value: b }

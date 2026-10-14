@@ -306,6 +306,41 @@ class TestUninstall(Base):
         self.assertFalse(os.path.exists(self.path("spick-spend")))
         self.assertTrue(os.path.isdir(self.path("spick-backup")))
 
+    def test_purge_removes_spend_records_in_both_places(self):
+        # CLAUDE_CONFIG_DIR and HOME/.claude differ: the mod's HOME/.claude/spick-spend and CLAUDE_DIR/spick-spend
+        in_config = self.path("spick-spend")
+        in_home = self.path(".claude", "spick-spend")
+        for d in (in_config, in_home):
+            os.makedirs(d)
+            with open(os.path.join(d, "s1.json"), "w") as f:
+                f.write("{}")
+        r = self.run_uninstall()
+        self.assertTrue(os.path.isdir(in_config) and os.path.isdir(in_home))
+        self.assertIn(f"  keep   {in_config} (--purge to remove)\n", r.stdout)
+        self.assertIn(f"  keep   {in_home} (--purge to remove)\n", r.stdout)
+        r = self.run_uninstall("--purge")
+        self.assertFalse(os.path.exists(in_config))
+        self.assertFalse(os.path.exists(in_home))
+        self.assertEqual(r.stdout.count(f"  removed {in_config} (--purge)\n"), 1)
+        self.assertEqual(r.stdout.count(f"  removed {in_home} (--purge)\n"), 1)
+
+    def test_purge_removes_spend_records_once_when_both_are_one_path(self):
+        # CLAUDE_CONFIG_DIR unset in real life means $HOME/.claude: the two paths are one
+        home = self.path("home")
+        claude = os.path.join(home, ".claude")
+        spend_dir = os.path.join(claude, "spick-spend")
+        os.makedirs(spend_dir)
+        with open(os.path.join(spend_dir, "s1.json"), "w") as f:
+            f.write("{}")
+        self.env = dict(self.env, HOME=home, CLAUDE_CONFIG_DIR=claude)
+        r = self.run_uninstall()
+        self.assertTrue(os.path.isdir(spend_dir))
+        self.assertEqual(r.stdout.count("spick-spend"), 1)
+        r = self.run_uninstall("--purge")
+        self.assertFalse(os.path.exists(spend_dir))
+        self.assertEqual(r.stdout.count("spick-spend"), 1)
+        self.assertIn(f"  removed {spend_dir} (--purge)\n", r.stdout)
+
     def test_uninstall_writes_its_own_backup_manifest(self):
         self.run_setup()
         before_md = self.read("CLAUDE.md")

@@ -8,6 +8,8 @@ import { EDIT_CAP, UNCHECKED_RE, editCapReason, isCheckCommand, uncheckedReason 
 import { findHints, gateReason, lineOf } from './hint'
 import type { Hint } from './hint'
 import { readQuota } from './quota'
+import { parseSpendFile, spendFileText, spendPath, spendRow } from './spend'
+import type { SpendFile, SpendRow } from './spend'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
 
 const P = 'spick-dashboard'
@@ -191,6 +193,63 @@ async function submitLaneEdit($: EngineInterface, text: string): Promise<void> {
   }
   const r = await editLane($, cmd.lane, cmd.field, cmd.value)
   if (r.ok) await update($, editSeq, n => n + 1)
+}
+
+// --- spend: one file per session under ~/.claude/spick-spend/ (spend.ts); scripts/spend.py reports on them ---------------
+
+/** the session's spend record, kept in memory and written whole at every row; `chain` puts the writes in order */
+type SpendState = SpendFile & { chain: Promise<void> }
+
+/**
+ * A session starts: its id and directory, and the rows its file already holds when it is a resumed one (the file is
+ * rewritten whole, so a resume must not start from nothing).
+ */
+async function startSpend($: EngineInterface, s: SpendState, cwd: string): Promise<void> {
+  s.sessionId = ''
+  s.rows = []
+  s.cwd = cwd
+  s.startedAt = new Date(await $.clock.now()).toISOString()
+  s.sessionId = await $.session.id()
+  const home = await $.env.get('HOME')
+  if (!home || !s.sessionId) return
+  try {
+    const prev = parseSpendFile(await $.fs.read(spendPath(home, s.sessionId)), s.sessionId)
+    if (prev) {
+      s.rows = [...prev.rows, ...s.rows]
+      s.startedAt = prev.startedAt || s.startedAt
+      s.cwd = prev.cwd || s.cwd
+    }
+  } catch {}
+}
+
+/** Add a row and write the session's file again; the writes go one after another, each with every row so far. */
+async function addSpend($: EngineInterface, s: SpendState, row: SpendRow): Promise<void> {
+  s.rows.push(row)
+  const run = s.chain.then(async () => {
+    // no session.start seen (a mod loaded mid-session): ask now
+    if (!s.sessionId) s.sessionId = await $.session.id()
+    if (!s.startedAt) s.startedAt = row.at
+    const home = await $.env.get('HOME')
+    if (!home || !s.sessionId) return
+    await $.fs.write(spendPath(home, s.sessionId), spendFileText(s))
+  })
+  s.chain = run.catch(() => undefined)
+  await run
+}
+
+const SPEND = '.claude/skills/spick/scripts/spend.py'
+
+/** `/spick spend`: the last seven days as scripts/spend.py sums them, or one line saying why not */
+async function spendReport($: EngineInterface): Promise<string> {
+  try {
+    const home = await $.env.get('HOME')
+    if (!home) return 'spick: HOME is not set'
+    const r = await $.process.run(['python3', `${home}/${SPEND}`, '--days', '7'])
+    if (r.exitCode === 0) return r.stdout.trimEnd() || 'spick spend: no records'
+    return `spick: ${firstLine(r.stderr) || `spend.py failed (exit ${r.exitCode})`}`
+  } catch {
+    return 'spick: could not run spend.py'
+  }
 }
 
 /** The session model, read fresh where the engine answers, else the last one read. */
@@ -433,6 +492,8 @@ export const register: Register = on => {
   let mainTurnId = ''
   /** the turn the gate or the guard's check already sent back once (one send-back per turn, for both) */
   let gateAskedTurn = ''
+  /** this session's spend record (~/.claude/spick-spend/<sessionId>.json) */
+  const spend: SpendState = { sessionId: '', cwd: '', startedAt: '', rows: [], chain: Promise.resolve() }
   /** the guard's per-turn state, cleared at turn.start */
   const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), checkRan: false }
   let mainModel = ''
@@ -466,11 +527,12 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     try {
-      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, gate, guard, lanes, band, quota', argumentHint: ARGUMENT_HINT, immediate: true })
+      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, gate, guard, lanes, band, quota, spend', argumentHint: ARGUMENT_HINT, immediate: true })
       void refreshQuota($).catch(() => undefined)
     } catch {}
     try { await loadControls($) } catch {}
     try { await readSessionModel($) } catch {}
+    try { await startSpend($, spend, e.cwd) } catch {}
     // unawaited: a slow write must not hold the session's start
     try {
       markerAt = await $.clock.now()
@@ -667,6 +729,8 @@ export const register: Register = on => {
           const cur = t[cli.lane] ?? ZERO_TOTALS
           return { ...t, [cli.lane]: { ...cur, turns: cur.turns + 1 } }
         })
+        // and record it: tokens 0, costUsd null
+        try { await addSpend($, spend, spendRow({ at: await $.clock.now(), turnId: mainTurnId, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, usage: null, costUsd: null })) } catch {}
       }
     } catch {}
     try {
@@ -753,6 +817,13 @@ export const register: Register = on => {
             costUsd: cost === null ? cur.costUsd : (cur.costUsd ?? 0) + cost,
           } }
         })
+        // the same turn, one row in the session's spend file; a turn with no usage (an interrupt, an API error) has no row,
+        // as it adds nothing to the totals
+        try {
+          const call = e.agentId ? callOfAgent.get(e.agentId) : undefined
+          const effort = e.agentId ? (call !== undefined ? inFlight.get(call)?.effort : undefined) : mainEffort
+          await addSpend($, spend, spendRow({ at: await $.clock.now(), turnId: e.turnId, agentId: e.agentId, lane, model: usage.model, effort, usage, costUsd: cost }))
+        } catch {}
       }
       if (e.agentId) {
         laneOfAgent.delete(e.agentId)
@@ -823,6 +894,8 @@ export const register: Register = on => {
         return { text: (await editLane($, cmd.lane, cmd.field, cmd.value)).text }
       case 'quota':
         return { text: await quotaLine($, true).catch(() => 'spick: quota not read') }
+      case 'spend':
+        return { text: await spendReport($) }
       case 'usage':
         return { text: USAGE }
       case 'open': {

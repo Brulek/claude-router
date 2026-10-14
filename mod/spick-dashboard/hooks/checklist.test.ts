@@ -109,7 +109,8 @@ test('/spick arguments parse; anything else is usage', () => {
   expect(parseSpick('hide')).toEqual({ kind: 'band', hidden: true })
   expect(parseSpick('show')).toEqual({ kind: 'band', hidden: false })
   expect(parseSpick('quota')).toEqual({ kind: 'quota' })
-  for (const bad of ['lane', 'lane   ', 'lane glm tags', 'review', 'on now', 'details']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
+  expect(parseSpick(' Spend ')).toEqual({ kind: 'spend' })
+  for (const bad of ['lane', 'lane   ', 'lane glm tags', 'review', 'on now', 'details', 'spend 30']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
 })
 
 test('with every switch at its default the block is the bash hook\'s text, word for word', () => {
@@ -247,5 +248,5 @@ test('the guard switch parses and defaults to on', () => {
   expect(parseSpick(' Guard ON ')).toEqual({ kind: 'guard', value: 'on' })
   for (const bad of ['guard', 'guard maybe', 'guard on now']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
   expect(ARGUMENT_HINT).toContain('guard on|off')
-  expect(USAGE).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota]')
+  expect(USAGE).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend]')
 })

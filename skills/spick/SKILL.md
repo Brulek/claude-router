@@ -230,6 +230,7 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 | `/spick lane <id> <field> <value>` / `/spick lane <id>` | (dashboard mod) changes one field through `scripts/set_lane.py` (any field; secrets and unknown ids refused) / shows the lane's record. The pane's lanes page (`l`) does the same |
 | `/spick hide` / `show` | (dashboard mod) band visibility, this session only |
 | `/spick quota` | (dashboard mod) refreshes quota now and prints the meters |
+| `/spick spend` | (dashboard mod) prints `scripts/spend.py --days 7`: the last seven days' cost by lane, from `~/.claude/spick-spend/` |
 
 ## Files in this skill
 
@@ -243,4 +244,5 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/triage_hint.py` - the Hint line: the keywords of a prompt and the default route they imply (`--stdin-json` from the hook, `--text` by hand); table in `assets/triage-hints.json`, twin in the dashboard mod's `hint.ts`.
 - `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection, install, uninstall and backup (every install or uninstall first copies CLAUDE.md, settings.json and spick.json into `~/.claude/spick-backup/<timestamp>/` with a `manifest.json`).
+- `scripts/spend.py` - what the sessions cost, from the per-session files the dashboard mod writes to `~/.claude/spick-spend/` (`--days N`, `--by lane|day|session`, `--json`); a row per turn with usage and per outside CLI call (unpriced). No mod, no records.
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.
