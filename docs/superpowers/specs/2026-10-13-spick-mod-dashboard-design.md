@@ -187,7 +187,7 @@ A click on a value sets it. `r` moves routing on `on -> force -> off -> on`, `v`
 
 ### Band
 
-The routing switch sits on the band, after the wordmark: one plain Button that reads the setting, `SPICK  on   Idle · last turn: …` (`force`, `off`; `on` while it routes nothing, as on a model that is not Haiku, reads `on (not Haiku)` with ` (not Haiku)` in `warning`), and moves it on when clicked, `on -> force -> off -> on`, as `/spick on|force|off` does. Key `band-routing`, no hotkey (the band seldom holds the focus; `r` is the pane's). The value is bold in its colour (`on` `success`, `force` brand, `off` `subtle`); a desktop draws a Button's label without that colour, so while routing is off the Button is also `dimColor`. Its width is taken from the band before the segments are fitted (the width tiers still go by `bodyColumns`), and the wordmark no longer says `off`. Before the first turn the band is the wordmark and the switch. Command replies and toasts keep the lowercase `spick:` prefix. (Changed 2026-10-14 at the user's request: the band had no buttons and routing off showed on the wordmark; a first try put the pane's radio buttons there, too large for one line. The same day the values were renamed: `auto` is `on`, the old `on` is `force`.)
+The routing switch sits on the band, after the wordmark: one plain Button that reads the setting, `SPICK on   Idle · last turn: …` (`force`, `off`; `on` while it routes nothing, as on a model that is not Haiku, reads `on (not Haiku)` with ` (not Haiku)` in `warning`), and moves it on when clicked, `on -> force -> off -> on`, as `/spick on|force|off` does. ` (not Haiku)` sits outside the Button; on a desktop the band reserves `BAND_BUTTON_CHROME` cells for the Button's frame. Key `band-routing`, no hotkey (the band seldom holds the focus; `r` is the pane's). The value is bold in its colour (`on` `success`, `force` brand, `off` `subtle`); a desktop draws a Button's label without that colour, so while routing is off the Button is also `dimColor`. Its width is taken from the band before the segments are fitted (the width tiers still go by `bodyColumns`), and the wordmark no longer says `off`. Before the first turn the band is the wordmark and the switch. Command replies and toasts keep the lowercase `spick:` prefix. (Changed 2026-10-14 at the user's request: the band had no buttons and routing off showed on the wordmark; a first try put the pane's radio buttons there, too large for one line. The same day the values were renamed: `auto` is `on`, the old `on` is `force`.)
 
 ### State
 
@@ -195,7 +195,7 @@ The routing switch sits on the band, after the wordmark: one plain Button that r
 
 ### Verification additions
 
-8. `/spick off` then a code request: the model does the work itself and the band reads `SPICK  off`; `/spick on` (in a Haiku session) or `/spick force` restores the checklist.
+8. `/spick off` then a code request: the model does the work itself and the band reads `SPICK off`; `/spick on` (in a Haiku session) or `/spick force` restores the checklist.
 9. `/model opus` in a Haiku session: toast appears, pane says `routes nothing (model selected manually)`, `/spick on` returns to on.
 10. `/spick lane gemini off`, then a web lookup: the checklist names Grok as the search lane; the preference survives a new session.
 11. With the mod loaded, the bash hook prints nothing (marker fresh); after uninstalling the mod, the hook resumes within 24 hours.

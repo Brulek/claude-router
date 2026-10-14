@@ -1,6 +1,7 @@
 import { test, expect, mock } from 'claude-code/testing'
 import type { Engine, TestBody } from 'claude-code/testing'
 import { LANES as LANE_ROWS, SCRIPT, fakeSetLane } from './fakelane'
+import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP } from './format'
 
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 1, bodyColumns: 80, scroll: { offset: 0, bodyRows: 1 }, view: {} }
@@ -91,6 +92,9 @@ const paneLinesAt = async ($: Engine, columns = 80, surface: 'terminal' | 'deskt
 }
 
 for (const surface of ['terminal', 'desktop'] as const) {
+  /** the band's start as the test tools lay it out: the wordmark, the surface's gap, the routing value */
+  const head = (v: string) => `SPICK${' '.repeat(BAND_SWITCH_GAP[surface])}${v}`
+
   test(`band draws the last turn, dim, on ${surface}`, async ($, on) => {
     const clock = mock.clock(on, { now: 1000 })
     on('turn.start', async ($, e) => ({ turnId: e.turnId }))
@@ -106,7 +110,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(line).toContain('Idle')
     expect(line).toContain('last turn:')
     // the routing switch after the wordmark: the setting (the session model unknown: on, nothing more to say)
-    expect(line).toBe('SPICK  on   Idle · last turn: main session')
+    expect(line).toBe(`${head('on')}   Idle · last turn: main session`)
     expect(line).not.toContain('took')
     expect(line).not.toMatch(/\d+s/)
     expect(texts[0]?.props).toMatchObject({ bold: true, color: 'claude' })
@@ -125,7 +129,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(line.startsWith('SPICK')).toBe(true)
     expect(line).toContain('Working')
     // the hint keeps its tier (100 columns) and its place at the right edge, the switch beside the wordmark
-    expect(line).toMatch(/^SPICK {2}on {3}Working · 0s +\/spick for details$/)
+    expect(line).toMatch(new RegExp(`^${head('on')} {3}Working · 0s +/spick for details$`))
     expect(line).toHaveLength(WIDE.bodyColumns)
     expect((await ui.find({ type: 'Text', text: 'Working' }))?.props).toMatchObject({ bold: true, wrap: 'truncate-end' })
     expect((await ui.find({ type: 'Text', text: '/spick for details' }))?.props).toMatchObject({ color: 'subtle' })
@@ -183,7 +187,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     for (let i = 0; i < 50 && !all.some(t => t.startsWith('codex')); i++) { await tick(); all = await pane() }
     expect(all.some(t => t.startsWith('codex'))).toBe(true)
     const line = await bandOf(await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 120 } }), 120)
-    expect(line).toBe('SPICK  on   Idle · last turn: main session')
+    expect(line).toBe(`${head('on')}   Idle · last turn: main session`)
     expect(line).not.toMatch(/[▰▱%]|claude|codex|quota|took|effort/)
   })
 
@@ -194,7 +198,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.turn.start({ text: 'hi', turnId: 't1' })
     await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
     const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 120 } })
-    expect(await bandOf(ui, 120)).toBe('SPICK  on   Idle · last turn: main session')
+    expect(await bandOf(ui, 120)).toBe(`${head('on')}   Idle · last turn: main session`)
   })
 
   test(`pane draws the sections and toggles the band from the title row on ${surface}`, async ($, on) => {
@@ -387,7 +391,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
 
     const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: BAND })
-    expect(await bandOf(ui, 80)).toBe('SPICK  on   Idle · last turn: main session')
+    expect(await bandOf(ui, 80)).toBe(`${head('on')}   Idle · last turn: main session`)
     // one plain Button, no hotkey (the pane's r is the pane's); a desktop draws its label: the setting
     const buttons = await ui.findAll({ type: 'Button' })
     expect(buttons.map(b => b.props.key)).toEqual(['band-routing'])
@@ -398,21 +402,21 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     // a click moves it on, as /spick on|force|off: the band and the pane both read it
     await ui.press({ key: 'band-routing' })
-    expect(await bandOf(ui, 80)).toBe('SPICK  force   Idle · last turn: main session')
+    expect(await bandOf(ui, 80)).toBe(`${head('force')}   Idle · last turn: main session`)
     expect(await value('force')).toEqual({ bold: true, color: 'claude', wrap: 'truncate-end' })
     expect(await paneLinesAt($, 80, surface)).toContain('Routing      ○ on     ● force  r: ○ off')
     await ui.press({ key: 'band-routing' })
-    expect(await bandOf(ui, 80)).toBe('SPICK  off   Idle · last turn: main session')
+    expect(await bandOf(ui, 80)).toBe(`${head('off')}   Idle · last turn: main session`)
     expect(await value('off')).toEqual({ bold: true, color: 'subtle', wrap: 'truncate-end' })
     // routing off: drawn dim as well, since a desktop draws the label without its colour
     expect((await ui.find({ type: 'Button', key: 'band-routing' }))?.props).toMatchObject({ label: 'off', dimColor: true })
     await ui.press({ key: 'band-routing' })
-    expect(await bandOf(ui, 80)).toBe('SPICK  on   Idle · last turn: main session')
+    expect(await bandOf(ui, 80)).toBe(`${head('on')}   Idle · last turn: main session`)
 
     // a narrow band keeps the switch; the sentence gives way around it
     const narrow = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: 36 } })
     const line = await bandOf(narrow, 36)
-    expect(line.startsWith('SPICK  on')).toBe(true)
+    expect(line.startsWith(head('on'))).toBe(true)
     expect(line.length).toBeLessThanOrEqual(36)
   })
 
@@ -429,14 +433,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
 
     const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: BAND })
-    expect(await bandOf(ui, 80)).toMatch(/^SPICK {2}on \(not Haiku\) {3}Idle · last turn: /)
+    expect(await bandOf(ui, 80)).toMatch(new RegExp(`^${head('on')} \\(not Haiku\\) {3}Idle · last turn: `))
     expect((await ui.find({ type: 'Text', text: ' (not Haiku)' }))?.props).toMatchObject({ color: 'warning' })
-    expect((await ui.find({ type: 'Button', key: 'band-routing' }))?.props).toMatchObject({ label: 'on (not Haiku)', dimColor: true })
+    expect((await ui.find({ type: 'Button', key: 'band-routing' }))?.props).toMatchObject({ label: 'on', dimColor: true })
+    // the Button holds the value alone; the note is drawn beside it, not inside it
+    const routingButton = (await ui.find({ type: 'Button', key: 'band-routing' }))!
+    expect(routingButton.children.map(c => inlineText(c, 80))).toEqual(['on'])
+    expect((routingButton.children[0] as Exclude<Drawn, string>).type).toBe('Text')
+    expect(routingButton.children.map(c => inlineText(c, 80)).join('')).not.toContain(' (not Haiku)')
     // the wordmark does not say off as well
     expect((await ui.findAll({ type: 'Text', text: /^ off$/ }))).toEqual([])
     // force routes here: no note, not dim
     await ui.press({ key: 'band-routing' })
-    expect(await bandOf(ui, 80)).toMatch(/^SPICK {2}force {3}Idle · last turn: /)
+    expect(await bandOf(ui, 80)).toMatch(new RegExp(`^${head('force')} {3}Idle · last turn: `))
     expect((await ui.find({ type: 'Button', key: 'band-routing' }))?.props).toMatchObject({ label: 'force', dimColor: false })
   })
 
@@ -444,9 +453,9 @@ for (const surface of ['terminal', 'desktop'] as const) {
     mock.clock(on, { now: 1000 })
     mock.store(on)
     const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: BAND })
-    expect(await bandOf(ui, 80)).toBe('SPICK  on')
+    expect(await bandOf(ui, 80)).toBe(head('on'))
     await ui.press({ key: 'band-routing' })
-    expect(await bandOf(ui, 80)).toBe('SPICK  force')
+    expect(await bandOf(ui, 80)).toBe(head('force'))
   })
 }
 
@@ -485,6 +494,24 @@ const bandLine = async ($: Engine) => {
   await ui.unmount()
   return line
 }
+// The band fits its columns with the switch's frame counted. The test tools cannot measure a native desktop
+// Button's width: BAND_BUTTON_CHROME stands in for it, so this checks the reservation, not the desktop's paint.
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`a working coder's band fits 36 and 60 columns with the switch's frame counted, on ${surface}`, async ($, on) => {
+    const clock = agentHooks(on)
+    await spawnCoders($, clock, 1)
+    await clock.advance(4000)
+    await $.tool.call({ tool: 'Read' as const, tool_use_id: 'r1', file_path: '/repo/a.py' })
+    for (const columns of [36, 60]) {
+      const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'AbovePrompt', props: { ...BAND, bodyColumns: columns } })
+      const line = await bandOf(ui, columns)
+      await ui.unmount()
+      expect(line).toContain('coder')
+      expect(line.length + BAND_BUTTON_CHROME[surface]).toBeLessThanOrEqual(columns)
+    }
+  })
+}
+
 const paneTexts = async ($: Engine) => paneLinesAt($, 80)
 const hasRunning = (lines: string[]) => lines.some(l => l.startsWith('Running'))
 
@@ -496,7 +523,7 @@ test('12 concurrent coders: the band reads coder ×12 with the oldest one\'s tim
 
   // the oldest coder began at 2000: 201s
   const line = await bandLine($)
-  expect(line.startsWith('SPICK  on   coder ×12 working · Sonnet 5.5 · 3m 21s')).toBe(true)
+  expect(line.startsWith('SPICK on   coder ×12 working · Sonnet 5.5 · 3m 21s')).toBe(true)
   expect(line).not.toContain('agent ')
   expect(line).not.toContain('Idle')
 
@@ -520,7 +547,7 @@ test('one background coder: the band reads exactly as before (no ×1), the pane 
   await clock.advance(4000)
   await $.tool.call({ tool: 'Read' as const, tool_use_id: 'r1', file_path: '/repo/a.py' })
 
-  expect(await bandLine($)).toMatch(/^SPICK {2}on {3}coder is working · Sonnet 5\.5 · 5s +\/spick for details$/)
+  expect(await bandLine($)).toMatch(/^SPICK on {3}coder is working · Sonnet 5\.5 · 5s +\/spick for details$/)
   const all = await paneTexts($)
   expect(hasRunning(all)).toBe(true)
   expect(all.filter(l => /^Running {3}coder +Sonnet 5\.5 +4s$/.test(l))).toHaveLength(1)

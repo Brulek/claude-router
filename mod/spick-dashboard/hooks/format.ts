@@ -267,6 +267,10 @@ export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
 export const LABEL_W = 10
 /** what the engine draws in front of a plain Button's label: its hotkey and a colon, as `r: ` */
 export const HOTKEY_W = 3
+/** the band: spaces between the SPICK wordmark and the routing switch's value, per surface */
+export const BAND_SWITCH_GAP = { terminal: 1, desktop: 0 } as const
+/** the band: cells a native desktop Button takes beyond its label (its frame); a first estimate, to be calibrated */
+export const BAND_BUTTON_CHROME = { terminal: 0, desktop: 2 } as const
 /** below this many columns the label sits on its own line, the content is indented two, and the lists shorten */
 export const NARROW_BELOW = 64
 /** the most Recent rows on a narrow pane (the state keeps 50) */

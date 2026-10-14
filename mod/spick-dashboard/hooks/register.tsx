@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
-import { HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
+import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
 import { EDIT_CAP, UNCHECKED_RE, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 import { findHints, gateReason, lineOf } from './hint'
@@ -928,26 +928,29 @@ export const register: Register = on => {
     const model = (await read($, sessionModel)) || mainModel
     const routingOff = (model !== '' || ctl.routing !== 'on' || ctl.manualModel) && !effectiveRouting(ctl, model).on
     const shownRouting: Routing = ctl.manualModel ? 'off' : ctl.routing
-    // The routing switch: one plain Button after the wordmark that reads the setting (`on`, `force`, `off`; on that
-    // routes nothing, `on (not Haiku)`) and moves it on when clicked, on -> force -> off -> on. A desktop draws a
-    // Button's label without the colour of its text, so routing off is also drawn dim there (dimColor). Its width is
+    // The routing switch: one plain Button after the wordmark that reads the setting (`on`, `force`, `off`) and moves
+    // it on when clicked, on -> force -> off -> on. `on` while it routes nothing is followed by ` (not Haiku)`, outside
+    // the Button. A desktop draws a Button's label without the colour of its text, so routing off is also drawn dim there
+    // (dimColor). Its width (the gap after the wordmark, the value, the note, and on a desktop the Button's frame) is
     // taken from the band before the segments are fitted; the width tiers still go by the band's columns.
+    const s = e.surface === 'desktop' ? 'desktop' : 'terminal'
     const offNote = shownRouting === 'on' && routingOff
-    const switchW = 2 + shownRouting.length + (offNote ? NOT_HAIKU_NOTE.length : 0)
+    const switchW = BAND_SWITCH_GAP[s] + shownRouting.length + (offNote ? NOT_HAIKU_NOTE.length : 0) + BAND_BUTTON_CHROME[s]
     const { left, right } = view
       ? bandSegments(view, e.props.bodyColumns, switchW)
       // before the first turn: the wordmark and the switch
       : { left: [{ text: 'SPICK', style: 'brand' } as Seg], right: [] as Seg[] }
     const { Box, Text, Button } = $.ui.resolve(e)
     const routingSwitch: RenderElement[] = [
-      <Box width={2} flexShrink={0} />,
+      ...(BAND_SWITCH_GAP[s] > 0 ? [<Box width={BAND_SWITCH_GAP[s]} flexShrink={0} />] : []),
       <Button key="band-routing" plain dimColor={routingOff} onPress={() => {
         // as /spick on|force|off: the user has decided, a /model still pending comparison no longer counts
         modelBeforePick = null
         void setControls($, c => ({ ...c, routing: nextRouting(shownRouting), manualModel: false })).catch(() => undefined)
       }}>
-        {[<Text bold color={VALUE_COLORS[shownRouting] ?? 'claude'} wrap="truncate-end">{shownRouting}</Text>, ...(offNote ? [<Text color="warning" wrap="truncate-end">{NOT_HAIKU_NOTE}</Text>] : [])]}
+        <Text bold color={VALUE_COLORS[shownRouting] ?? 'claude'} wrap="truncate-end">{shownRouting}</Text>
       </Button>,
+      ...(offNote ? [<Text color="warning" wrap="truncate-end">{NOT_HAIKU_NOTE}</Text>] : []),
     ]
     const paint = (s: Seg) => {
       switch (s.style) {

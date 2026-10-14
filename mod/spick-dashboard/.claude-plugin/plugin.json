@@ -1,6 +1,6 @@
 {
   "name": "spick-dashboard",
-  "version": "0.13.0",
+  "version": "0.13.1",
   "description": "Shows who is working now (lane, model) above the prompt, and a /spick pane with switches (routing, review, gate, guard, lanes, band), lane totals, local quota and recent turns. The switches shape the per-prompt triage checklist, which carries a keyword Hint line per prompt. The gate and the guard are the mod's only two interventions: the gate sends a hinted verdict the main session kept back once at stop time; the guard caps the main session's own source edits at 3 files per turn and sends a turn that edited source without running a check back once at stop time. Each session's cost (one row per turn with usage, one per outside CLI call, unpriced) is written to ~/.claude/spick-spend/<session>.json; /spick spend reports the last seven days.",
   "author": { "name": "Brulek" },
   "types": "./types/index.d.ts"
