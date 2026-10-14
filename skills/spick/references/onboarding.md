@@ -54,3 +54,4 @@ Say, in the user's language:
 - Desktop app users: pick Haiku once in the model menu.
 - Three self-tests to try in a new session: a web lookup (should go to a lane tagged `search`, Gemini by default), a small code change (should route to `coder`), "review what you just changed" (should trigger Codex review if the triggers match, otherwise say "not reviewed").
 - `spick doctor` re-checks tools; `spick quota` shows usage.
+- `spick uninstall` (`setup.sh --uninstall [--purge] [--force]`) removes only what this install wrote and keeps anything the user changed since; `spick-backup/` stays.

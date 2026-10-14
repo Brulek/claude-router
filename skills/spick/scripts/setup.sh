@@ -3,6 +3,7 @@
 # Usage:
 #   setup.sh --check
 #   setup.sh --install [--lanes gemini,grok,codex] [--model haiku|sonnet|opus] [--effort low|medium|high] [--force]
+#   setup.sh --uninstall [--purge] [--force]
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$HERE")"
@@ -248,8 +249,199 @@ PY
   echo "Desktop app users: pick the main model once in the composer's model menu (the app remembers its own choice)."
 }
 
+# uninstall: remove only what --install wrote; anything changed since is kept. No snapshot is
+# restored (spick-backup/ is for rolling back by hand and is never removed).
+uninstall() {
+  local purge=0 force=0
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --purge) purge=1; shift;;
+      --force) force=1; shift;;
+      *) shift;;
+    esac
+  done
+  backup uninstall
+
+  echo "== CLAUDE.md block =="
+  local md="$CLAUDE_DIR/CLAUDE.md"
+  if [ ! -f "$md" ]; then
+    echo "  none   $md does not exist"
+  elif [ -n "$PY" ]; then
+    py "$md" <<'PY'
+import sys, re
+md = sys.argv[1]
+start, end = "<!-- spick:start -->", "<!-- spick:end -->"
+cur = open(md).read()
+m = re.search(re.escape(start) + r".*?" + re.escape(end), cur, flags=re.S)
+if not m:
+    print(f"  none   no spick block in {md}")
+    sys.exit(0)
+pre = cur[:m.start()].rstrip("\n")
+post = cur[m.end():]
+if post.startswith("\n"):
+    post = post[1:]
+if pre and post.strip():
+    out = pre + "\n" + post
+elif pre:
+    out = pre + "\n"
+else:
+    out = post.lstrip("\n") if post.strip() else ""
+if out:
+    atomic_write(md, out)
+    print(f"  removed block from {md}")
+elif os.path.islink(md):
+    atomic_write(md, "")
+    print(f"  removed block from {md} (now empty; the symlink and its target are kept)")
+else:
+    os.unlink(md)
+    print(f"  removed {md} (only the block was in it)")
+PY
+  else
+    echo "  python not found; delete the spick:start..spick:end block from $md by hand"
+  fi
+
+  echo "== settings.json =="
+  if [ ! -f "$CLAUDE_DIR/settings.json" ]; then
+    echo "  none   $CLAUDE_DIR/settings.json does not exist"
+  elif [ -n "$PY" ]; then
+    py "$CLAUDE_DIR/settings.json" "$CLAUDE_DIR/spick-backup" "$BACKUP_DIR" "$MANIFEST" <<'PY'
+import sys, re
+p, base, this_run, man = sys.argv[1:5]
+try:
+    d = json.load(open(p))
+    if not isinstance(d, dict): raise ValueError("not an object")
+except Exception as e:
+    print(f"  skip   {p} is not valid JSON ({e}); fix it by hand")
+    sys.exit(0)
+changed = False
+
+# 1. the triage hook
+hooks = d.get("hooks")
+lst = hooks.get("UserPromptSubmit") if isinstance(hooks, dict) else None
+removed = 0
+if isinstance(lst, list):
+    keep = []
+    for e in lst:
+        hs = e.get("hooks") if isinstance(e, dict) else None
+        if isinstance(hs, list):
+            rest = [h for h in hs if not (isinstance(h, dict) and "spick/scripts/triage-hook.sh" in str(h.get("command", "")))]
+            removed += len(hs) - len(rest)
+            if not rest and hs:
+                continue
+            if len(rest) != len(hs):
+                e = dict(e, hooks=rest)
+        keep.append(e)
+    if removed:
+        changed = True
+        if keep:
+            hooks["UserPromptSubmit"] = keep
+        else:
+            del hooks["UserPromptSubmit"]
+            if not hooks:
+                del d["hooks"]
+print(f"  removed UserPromptSubmit hook" if removed else "  none   no spick hook")
+
+# 2. model / effortLevel: undo only what the installs since the last uninstall set and nobody changed.
+# Walk those install manifests newest first; while an install found the value the previous one left,
+# keep going back, so a re-install does not hide the value from before spick.
+def key(name):
+    m = re.match(r"^(\d{8}-\d{6})(?:-(\d+))?$", name)
+    return (m.group(1), int(m.group(2) or 1)) if m else None
+runs = []
+if os.path.isdir(base):
+    for name in os.listdir(base):
+        k = key(name)
+        path = os.path.join(base, name)
+        if k is None or os.path.realpath(path) == os.path.realpath(this_run):
+            continue
+        try:
+            mf = json.load(open(os.path.join(path, "manifest.json")))
+        except Exception:
+            continue
+        if isinstance(mf, dict):
+            runs.append((k, mf))
+runs.sort(key=lambda r: r[0])
+installs = []
+for _, mf in runs:
+    if mf.get("action") == "uninstall":
+        installs = []
+    elif mf.get("action") == "install":
+        installs.append(mf)
+for k in ("model", "effortLevel"):
+    seq = [mf.get("settings", {}).get(k) for mf in installs]
+    seq = [s for s in seq if isinstance(s, dict) and "before" in s and "after" in s]
+    cur = d.get(k)
+    if not seq:
+        print(f"  keep   {k}={cur} (no install record since the last uninstall)")
+        continue
+    after = seq[-1]["after"]
+    before = seq[-1]["before"]
+    for prev in reversed(seq[:-1]):
+        if prev["after"] != before:
+            break
+        before = prev["before"]
+    if cur != after:
+        print(f"  keep   {k}={cur} (changed since install)")
+    elif before == after:
+        print(f"  keep   {k}={cur} (install did not change it)")
+    else:
+        if before is None:
+            d.pop(k, None)
+        else:
+            d[k] = before
+        changed = True
+        print(f"  restored {k}={before}")
+if changed:
+    atomic_write(p, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+if man and os.path.exists(man):
+    with open(man) as f:
+        s = json.load(f)["settings"]
+    for k in ("model", "effortLevel"):
+        s[k]["after"] = d.get(k)
+    note(man, "settings", s)
+PY
+  else
+    echo "  python not found; remove the triage-hook.sh entry from $CLAUDE_DIR/settings.json by hand"
+  fi
+
+  echo "== agents =="
+  local f dst
+  for f in "$SKILL_DIR"/assets/agents/*.md; do
+    dst="$CLAUDE_DIR/agents/$(basename "$f")"
+    if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then
+      echo "  none   $dst"
+    elif cmp -s "$f" "$dst"; then
+      rm -f "$dst" && echo "  removed $dst"
+    elif [ "$force" = 1 ]; then
+      rm -f "$dst" && echo "  removed $dst (changed since install; --force)"
+    else
+      echo "  keep   $dst (changed since install; --force to remove)"
+    fi
+  done
+
+  echo "== state files =="
+  local p
+  for p in "$CLAUDE_DIR/.spick-mod-active" "$HOME/.claude/.spick-mod-active" "$CLAUDE_DIR/spick-quota.json"; do
+    if [ -e "$p" ]; then rm -f "$p" && echo "  removed $p"; fi
+  done
+  if [ "$purge" = 1 ]; then
+    for p in "$CONFIG" "$CLAUDE_DIR/spick-quota.json" "$CLAUDE_DIR/spick-spend"; do
+      if [ -e "$p" ]; then rm -rf "$p" && echo "  removed $p (--purge)"; fi
+    done
+  else
+    [ -e "$CONFIG" ] && echo "  keep   $CONFIG (--purge to remove)"
+  fi
+  echo "  keep   $CLAUDE_DIR/spick-backup (never removed)"
+
+  echo
+  echo "done. Two things this script does not do:"
+  echo "  claude plugin uninstall spick-dashboard"
+  echo "  rm -rf ~/.claude/skills/spick"
+}
+
 case "${1:-}" in
   --check) check;;
   --install) shift; install "$@";;
-  *) echo "usage: setup.sh --check | --install [--lanes a,b] [--model m] [--effort e] [--force]"; exit 2;;
+  --uninstall) shift; uninstall "$@";;
+  *) echo "usage: setup.sh --check | --install [--lanes a,b] [--model m] [--effort e] [--force] | --uninstall [--purge] [--force]"; exit 2;;
 esac

@@ -1,4 +1,5 @@
-"""setup.sh --install: backup before every write, manifest, atomic writes.
+"""setup.sh --install: backup before every write, manifest, atomic writes. setup.sh --uninstall: removes
+only what install wrote, keeps what the user changed.
 
 Every run goes through Base.run_setup, which points CLAUDE_CONFIG_DIR and HOME at a temp dir and fails
 the test before running anything if either is not under the temp prefix, so the real ~/.claude is
@@ -26,16 +27,21 @@ class Base(unittest.TestCase):
         self.dir = self.tmp.name
         self.env = dict(os.environ, CLAUDE_CONFIG_DIR=self.dir, HOME=self.dir)
 
-    def run_setup(self, *extra):
+    def _run(self, *args):
         prefix = tempfile.gettempdir()
         for key in ("CLAUDE_CONFIG_DIR", "HOME"):
             val = self.env[key]
             if not val.startswith(prefix) or os.path.realpath(val).startswith(REAL_CLAUDE):
                 self.fail(f"{key}={val!r} is not under the temp prefix {prefix!r}; refusing to run setup.sh")
-        r = subprocess.run(["bash", SETUP, "--install", "--lanes", "gemini", "--model", "haiku", "--effort", "medium",
-                            *extra], env=self.env, capture_output=True, text=True, timeout=60)
+        r = subprocess.run(["bash", SETUP, *args], env=self.env, capture_output=True, text=True, timeout=60)
         self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
+
+    def run_setup(self, *extra):
+        return self._run("--install", "--lanes", "gemini", "--model", "haiku", "--effort", "medium", *extra)
+
+    def run_uninstall(self, *extra):
+        return self._run("--uninstall", *extra)
 
     def path(self, *parts):
         return os.path.join(self.dir, *parts)
@@ -170,6 +176,161 @@ class TestAtomicWrite(Base):
         self.assertEqual(stat.S_IMODE(os.stat(self.path("settings.json")).st_mode), 0o600)
         left = [p for p in glob.glob(os.path.join(self.dir, "**", "*"), recursive=True) if p.endswith(".spick-tmp")]
         self.assertEqual(left, [])
+
+
+class TestUninstall(Base):
+    def settings(self):
+        with open(self.path("settings.json")) as f:
+            return json.load(f)
+
+    def test_claude_md_without_a_block_comes_back_byte_for_byte(self):
+        user_md = "# 我的规则\n\nKeep answers short.\n"
+        self.put("CLAUDE.md", user_md)
+        self.run_setup()
+        self.run_uninstall()
+        with open(self.path("CLAUDE.md"), "rb") as f:
+            self.assertEqual(f.read(), user_md.encode())
+
+    def test_claude_md_holding_only_the_block_is_removed(self):
+        self.run_setup()
+        self.assertTrue(os.path.exists(self.path("CLAUDE.md")))
+        self.run_uninstall()
+        self.assertFalse(os.path.exists(self.path("CLAUDE.md")))
+
+    def test_text_added_after_the_block_is_kept(self):
+        self.put("CLAUDE.md", "top\n")
+        self.run_setup()
+        with open(self.path("CLAUDE.md"), "a") as f:
+            f.write("\nadded later\n")
+        self.run_uninstall()
+        md = self.read("CLAUDE.md")
+        self.assertNotIn(START, md)
+        self.assertNotIn(END, md)
+        self.assertTrue(md.startswith("top\n"))
+        self.assertTrue(md.endswith("added later\n"))
+
+    def test_symlinked_claude_md_stays_a_link(self):
+        os.mkdir(self.path("sync"))
+        target = self.path("sync", "CLAUDE.md")
+        with open(target, "w") as f:
+            f.write("synced rules\n")
+        os.symlink(target, self.path("CLAUDE.md"))
+        self.run_setup()
+        self.run_uninstall()
+        self.assertTrue(os.path.islink(self.path("CLAUDE.md")))
+        with open(target) as f:
+            self.assertEqual(f.read(), "synced rules\n")
+
+    def test_settings_hook_gone_model_back_other_keys_kept(self):
+        other = {"hooks": [{"type": "command", "command": "echo mine"}]}
+        self.put("settings.json", json.dumps({"model": "sonnet", "theme": "dark",
+                                              "hooks": {"UserPromptSubmit": [other]}}))
+        self.run_setup()
+        self.run_uninstall()
+        d = self.settings()
+        self.assertEqual(d["model"], "sonnet")
+        self.assertNotIn("effortLevel", d)  # it was not set before install
+        self.assertEqual(d["theme"], "dark")
+        self.assertEqual(d["hooks"]["UserPromptSubmit"], [other])
+        self.assertEqual(self.spick_hooks(), [])
+
+    def test_empty_hook_list_and_hooks_key_are_dropped(self):
+        self.run_setup()
+        self.run_uninstall()
+        d = self.settings()
+        self.assertNotIn("hooks", d)
+        self.assertNotIn("model", d)
+        self.assertNotIn("effortLevel", d)
+
+    def test_model_changed_by_hand_is_kept(self):
+        self.put("settings.json", json.dumps({"model": "sonnet"}))
+        self.run_setup()
+        d = self.settings()
+        d["model"] = "opus"
+        self.put("settings.json", json.dumps(d))
+        r = self.run_uninstall()
+        self.assertEqual(self.settings()["model"], "opus")
+        self.assertIn("keep   model=opus (changed since install)", r.stdout)
+        self.assertNotIn("effortLevel", self.settings())
+
+    def test_reinstall_then_uninstall_restores_the_value_from_before_spick(self):
+        self.put("settings.json", json.dumps({"model": "sonnet"}))
+        self.run_setup()
+        self.run_setup()
+        self.run_uninstall()
+        self.assertEqual(self.settings()["model"], "sonnet")
+
+    def test_install_without_manifest_still_removes_the_rest(self):
+        # an install made before backups existed: no spick-backup/ at all
+        self.put("settings.json", json.dumps({"model": "sonnet"}))
+        self.run_setup()
+        for b in self.backups():
+            os.unlink(os.path.join(b, "manifest.json"))
+        r = self.run_uninstall()
+        self.assertEqual(self.settings()["model"], "haiku")
+        self.assertIn("keep   model=haiku (no install record", r.stdout)
+        self.assertEqual(self.spick_hooks(), [])
+        self.assertFalse(os.path.exists(self.path("CLAUDE.md")))
+        for a in AGENTS:
+            self.assertFalse(os.path.exists(self.path("agents", a)))
+
+    def test_agents_removed_hand_edited_kept_unless_force(self):
+        self.run_setup()
+        edited = self.path("agents", AGENTS[0])
+        with open(edited, "a") as f:
+            f.write("\nmy own note\n")
+        r = self.run_uninstall()
+        self.assertTrue(os.path.exists(edited))
+        self.assertIn(f"keep   {edited} (changed since install; --force to remove)", r.stdout)
+        for a in AGENTS[1:]:
+            self.assertFalse(os.path.exists(self.path("agents", a)))
+        self.run_uninstall("--force")
+        self.assertFalse(os.path.exists(edited))
+
+    def test_state_files_and_purge(self):
+        self.run_setup()
+        os.makedirs(self.path(".claude"))
+        for p in (self.path(".spick-mod-active"), self.path(".claude", ".spick-mod-active"),
+                  self.path("spick-quota.json")):
+            with open(p, "w") as f:
+                f.write("x")
+        self.run_uninstall()
+        self.assertFalse(os.path.exists(self.path(".spick-mod-active")))
+        self.assertFalse(os.path.exists(self.path(".claude", ".spick-mod-active")))
+        self.assertFalse(os.path.exists(self.path("spick-quota.json")))
+        self.assertTrue(os.path.exists(self.path("spick.json")))
+        os.makedirs(self.path("spick-spend"))
+        self.put(os.path.join("spick-spend", "s1.json"), "{}")
+        self.run_uninstall("--purge")
+        self.assertFalse(os.path.exists(self.path("spick.json")))
+        self.assertFalse(os.path.exists(self.path("spick-spend")))
+        self.assertTrue(os.path.isdir(self.path("spick-backup")))
+
+    def test_uninstall_writes_its_own_backup_manifest(self):
+        self.run_setup()
+        before_md = self.read("CLAUDE.md")
+        self.run_uninstall()
+        dirs = self.backups()
+        self.assertEqual(len(dirs), 2)
+        m = self.manifest(dirs[1])
+        self.assertEqual(m["action"], "uninstall")
+        self.assertEqual(m["settings"]["model"], {"before": "haiku", "after": None})
+        with open(os.path.join(dirs[1], "CLAUDE.md")) as f:
+            self.assertEqual(f.read(), before_md)
+
+    def test_uninstall_twice_is_harmless(self):
+        self.put("settings.json", json.dumps({"model": "sonnet"}))
+        self.run_setup()
+        self.run_uninstall()
+        r = self.run_uninstall()
+        self.assertEqual(self.settings()["model"], "sonnet")
+        self.assertIn("no install record since the last uninstall", r.stdout)
+        self.assertEqual(len(self.backups()), 3)
+
+    def test_uninstall_on_a_fresh_dir(self):
+        r = self.run_uninstall()
+        self.assertIn("does not exist", r.stdout)
+        self.assertEqual(len(self.backups()), 1)
 
 
 if __name__ == "__main__":

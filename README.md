@@ -113,6 +113,14 @@ Run in a terminal:
 
 While the band is displayed, replies omit the label line.
 
+### Uninstall
+
+```bash
+bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
+```
+
+It backs up first, like `--install`, then removes only what the install wrote: the block between the spick markers in `CLAUDE.md`, the checklist hook in `settings.json`, and the three subagents. `model` and `effortLevel` go back to their value from before the install only if they still hold the value the install set. A subagent file you edited is kept unless you pass `--force`. `spick.json` is kept unless you pass `--purge`, which also removes `spick-quota.json` and `spick-spend/`. `spick-backup/` is never removed. Two steps remain for you: `claude plugin uninstall spick-dashboard` and deleting `~/.claude/skills/spick`.
+
 ## Commands
 
 | Command | Effect |

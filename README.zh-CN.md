@@ -115,6 +115,14 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 
 状态带显示期间，回复不附标注行。
 
+### 卸载
+
+```bash
+bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
+```
+
+它和 `--install` 一样先做备份，然后只移除安装时写入的内容：`CLAUDE.md` 里 spick 标记之间的块、`settings.json` 里的清单钩子、三个子代理。`model` 与 `effortLevel` 只有仍是安装时设的值，才恢复为安装前的值。你改过的子代理文件会保留，加 `--force` 才删除。`spick.json` 默认保留，加 `--purge` 才删除，同时删除 `spick-quota.json` 与 `spick-spend/`。`spick-backup/` 永远保留。剩下两步需要你自己做：`claude plugin uninstall spick-dashboard`，以及删除 `~/.claude/skills/spick`。
+
 ## 命令
 
 | 命令 | 作用 |

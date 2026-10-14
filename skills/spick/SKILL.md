@@ -220,6 +220,7 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 | `spick setup` | Follow `references/onboarding.md` from the top; for API services follow "Adding an outside AI" |
 | `spick doctor` | `bash scripts/setup.sh --check` and report the table |
 | `spick quota` | `bash scripts/quota.sh` and report |
+| `spick uninstall` | `bash scripts/setup.sh --uninstall` (add `--purge` only if the user asks to drop `spick.json` too, `--force` only if they want hand-edited subagents removed) and report what it removed and kept, plus the two steps it leaves to the user |
 | `/spick` | (dashboard mod) opens the pane; with no UI it prints a one-paragraph status |
 | `/spick on` / `force` / `off` | (dashboard mod) routing switch, remembered: `on` routes in a Haiku session only (a stronger model does the work itself), `force` routes on any model, `off` means do the work yourself, no Spick dispatch (`auto`, the old name of `on`, still works). A manual `/model` turns it off for the session |
 | `/spick review on` / `off` | (dashboard mod) Codex review step, remembered; when off write `Review: off` in the label line |
@@ -241,5 +242,5 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 - `scripts/invoke.py` - calls a registered lane (`--list-models`).
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/triage_hint.py` - the Hint line: the keywords of a prompt and the default route they imply (`--stdin-json` from the hook, `--text` by hand); table in `assets/triage-hints.json`, twin in the dashboard mod's `hint.ts`.
-- `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection, install and backup (every install first copies CLAUDE.md, settings.json and spick.json into `~/.claude/spick-backup/<timestamp>/` with a `manifest.json`).
+- `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection, install, uninstall and backup (every install or uninstall first copies CLAUDE.md, settings.json and spick.json into `~/.claude/spick-backup/<timestamp>/` with a `manifest.json`).
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.
