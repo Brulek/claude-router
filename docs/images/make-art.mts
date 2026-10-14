@@ -4,7 +4,7 @@
 // text below is hard-coded to match what the mod shows.
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { bandSegments, table, MAIN_LANE } from '../../mod/spick-dashboard/hooks/format.ts'
+import { bandSegments, quotaCells, recentLines, tagLine, usageLines, HOTKEY_W, LABEL_W, MAIN_LANE } from '../../mod/spick-dashboard/hooks/format.ts'
 import type { BandView, Seg } from '../../mod/spick-dashboard/hooks/format.ts'
 
 const OUT = fileURLToPath(new URL('.', import.meta.url))
@@ -97,62 +97,69 @@ const views: { caption: string; view: BandView }[] = [
   writeFileSync(OUT + 'band-states.svg', wrap(880, 430, 'Spick dashboard band in six states', parts.join('\n')))
 }
 
-// ---- pane.svg (720x400)
+// ---- pane.svg: the 80-column pane as plain text, from the mod's own layout helpers
 {
-  const p: string[] = []
-  const Y = (n: number) => n
-  // title row
-  p.push(mono(0, 44, 'SPICK', styleOf('brand'), 17))
-  p.push(`<rect x="${720 - 24 - 72}" y="26.5" width="72" height="26" rx="6" fill="${C.panel}" stroke="${C.line}"/>`)
-  p.push(`<text x="${720 - 24 - 36}" y="44" text-anchor="middle" font-family='${MONO}' font-size="15" fill="${C.text}">Close</text>`)
-
-  p.push(mono(0, 92, 'Controls', { fill: C.text, bold: true }))
-
-  const radio = (col: number, y: number, label: string, on: boolean): number => {
-    const w = (label.length + 4) * CELL
-    const x = gx(col)
-    p.push(`<rect x="${x + 0.5}" y="${y - 17.5}" width="${w - 1}" height="25" rx="6" fill="${on ? '#2b1d17' : C.panel}" stroke="${on ? C.brand : C.line}"/>`)
-    p.push(`<circle cx="${x + 15}" cy="${y - 5}" r="5" fill="none" stroke="${on ? C.brand : C.subtle}" stroke-width="1.5"/>`)
-    if (on) p.push(`<circle cx="${x + 15}" cy="${y - 5}" r="2.6" fill="${C.brand}"/>`)
-    p.push(mono(col + 3, y, label, { fill: C.text }))
-    return col + label.length + 4 + 1
+  const P = { x0: 24, step: 21, top: 40 }
+  const runs: string[] = []
+  const lines: string[] = []
+  type Run = [text: string, style: Style]
+  const T: Style = { fill: C.text }
+  const D: Style = { fill: C.subtle }
+  const B: Style = { fill: C.brand, bold: true }
+  const L: Style = { fill: C.text, bold: true }
+  /** one line of runs from column 0 of the content (the pane pads one column on each side) */
+  let row = 0
+  const put = (...rs: Run[]) => {
+    let col = 1
+    for (const [t, st] of rs) {
+      const lead = t.length - t.trimStart().length
+      if (t.trim()) runs.push(`<text x="${P.x0 + (col + lead) * CELL}" y="${P.top + row * P.step}" font-family='${MONO}' font-size="15" fill="${st.fill}"${st.bold ? ' font-weight="700"' : ''} xml:space="preserve">${esc(t.trim())}</text>`)
+      col += [...t].length
+    }
+    lines.push(rs.map(r => r[0]).join(''))
+    row++
   }
-  const plain = (col: number, y: number, label: string, on: boolean): number => {
-    const w = (label.length + 2) * CELL
-    const x = gx(col)
-    p.push(`<rect x="${x + 0.5}" y="${y - 17.5}" width="${w - 1}" height="25" rx="6" fill="${on ? '#2b1d17' : C.panel}" stroke="${on ? C.brand : C.line}"/>`)
-    p.push(mono(col + 1, y, label, { fill: C.text }))
-    return col + label.length + 2 + 1
-  }
-  const LABEL = 2, BTN = 12
-  const rows = [
-    { y: 128, name: 'Routing' }, { y: 160, name: 'Review' }, { y: 192, name: 'Lanes' }, { y: 224, name: 'Band' },
-  ]
-  for (const r of rows) p.push(mono(LABEL, r.y, r.name, { fill: C.text }))
-  let c = radio(BTN, 128, 'auto', true); c = radio(c, 128, 'on', false); c = radio(c, 128, 'off', false)
-  p.push(mono(c + 1, 128, 'on (Haiku 5.5 session)', styleOf('dim')))
-  c = radio(BTN, 160, 'auto', true); radio(c, 160, 'off', false)
-  c = plain(BTN, 192, 'Gemini on', true); c = plain(c, 192, 'Grok on', true); plain(c, 192, 'Codex on', true)
-  plain(BTN, 224, 'shown', true)
+  const blank = () => { lines.push(''); row++ }
+  const key = (k: string): Run => [k + ': ', B]
+  const pad = (n: number): Run => [' '.repeat(n), T]
+  const label = (name: string): Run => [name.padEnd(LABEL_W), L]
+  const none = pad(LABEL_W)
 
-  p.push(mono(0, 266, 'Recent turns', { fill: C.text, bold: true }))
-  const data = [
-    ['12:41', 'coder', 'Sonnet 5.5', 'medium', '44s'],
-    ['12:40', 'Gemini', 'gemini-3.8-flash', '', '31s'],
-    ['12:39', 'planner', 'Opus 5.5', 'high', '1m 12s'],
-    ['12:38', 'main session', 'Haiku 5.5', 'medium', '6s'],
-  ]
-  const align: ('l' | 'r')[] = ['l', 'l', 'l', 'l', 'r']
-  const lines = table(data, align)
-  const widths = data[0]!.map((_, i) => Math.max(...data.map(r => r[i]!.length)))
-  lines.forEach((line, ri) => {
-    let off = 0
-    widths.forEach((w, ci) => {
-      const cell = line.slice(off, off + w)
-      p.push(mono(LABEL + off, 298 + ri * 26, cell, ci === 0 || ci === 4 ? styleOf('dim') : { fill: C.text }))
-      off += w + 2
-    })
-    console.log('pane   ', line)
+  const W = 78
+  const left = 'SPICK  routing on · b: band shown'
+  put(['SPICK', B], ['  routing on · ', D], key('b'), ['band shown', D], pad(W - left.length - 8), key('x'), ['close', T])
+  blank()
+  put(label('Routing'), key('r'), ['auto', B], [' · on · off', D])
+  put(none, pad(HOTKEY_W), ['on (Haiku 5.5 session)', D])
+  put(label('Review'), key('v'), ['auto', B], [' · off', D])
+  blank()
+  const tags: Record<string, string[]> = { gemini: ['search', 'long-context', 'multimodal', 'image'], grok: ['x-data'], codex: ['code', 'review', 'image'] }
+  const names: [string, string, string][] = [['g', 'Gemini', 'gemini'], ['k', 'Grok', 'grok'], ['c', 'Codex', 'codex']]
+  names.forEach(([k, name, id], i) => {
+    put(i === 0 ? label('Lanes') : none, key(k), [name.padEnd(6) + '  ', T], ['on', B], ['   ' + tagLine(tags[id]!, W - LABEL_W - HOTKEY_W - 6 - 2 - 3 - 2), D])
   })
-  writeFileSync(OUT + 'pane.svg', wrap(720, 400, 'Spick dashboard pane: Controls and Recent turns', p.join('\n')))
+  put(none, key('l'), ['edit lanes', T], [' · every field, every declared lane', D])
+  blank()
+  const t = (turns: number, costUsd: number) => ({ turns, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd })
+  const usage = usageLines([['main session', t(52, 0.45)], ['coder', t(13, 9.39)], ['planner', t(4, 3.79)], ['deep', t(1, 0.46)]])
+  usage.forEach((l, i) => put(i === 0 ? label('Usage') : none, [l, i === 0 ? D : T]))
+  blank()
+  const q = [['claude', quotaCells({ fiveHour: 19, sevenDay: 9 }, 10)], ['codex', quotaCells({ sevenDay: 80 }, 10)]] as const
+  q.forEach(([name, cells], i) => put(i === 0 ? label('Quota') : none, [name.padEnd(8) + cells.join('   '), T]))
+  put(none, key('q'), ['refresh', T], [' · read just now', D])
+  blank()
+  const at = (h: number, m: number) => new Date(2026, 9, 14, h, m).getTime()
+  const turn = (h: number, m: number, lane: string, model: string, effort: string, secs: number) =>
+    ({ turnId: `${h}${m}`, startedAt: at(h, m), endedAt: at(h, m) + secs * 1000, lane, model, effort, agents: 0 })
+  const recent = recentLines([
+    turn(14, 52, 'coder', 'Sonnet 5.5', 'high', 221), turn(14, 47, MAIN_LANE, 'Haiku 5.5', 'low', 6), turn(14, 40, 'planner', 'Opus 5.5', 'high', 125),
+    turn(14, 31, 'deep', 'Opus 5.5', 'high', 112), turn(14, 22, 'coder', 'Sonnet 5.5', 'medium', 250),
+  ], false)
+  recent.forEach((l, i) => {
+    const clock = l.slice(0, 5)
+    put(i === 0 ? label('Recent') : none, [clock, D], [l.slice(5), T])
+  })
+  const h = P.top + row * P.step + 4
+  writeFileSync(OUT + 'pane.svg', wrap(768, h, 'Spick dashboard pane: switches, lanes, usage, quota and recent turns', runs.join('\n')))
+  for (const l of lines) console.log('pane   ', l)
 }

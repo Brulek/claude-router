@@ -86,38 +86,53 @@ The band never wraps: every `Text` in it has `wrap="truncate-end"`. Both groups'
 
 ## The pane
 
-Opened with `/spick` or the hint; title `SPICK`. The pane uses `e.props.scroll.bodyRows` to cap the history list so it never scrolls past the bottom. Sections stacked, separated by one blank line; the first is Controls (below), then:
+Opened with `/spick` or the hint; title `SPICK`. Plain text in two columns, no borders, no chips: a label column (`LABEL_W` = 10) and a value column. Sections are stacked and separated by one blank line. The pane uses `e.props.scroll.bodyRows` to cap the Recent list so it never scrolls past the bottom. At 80 columns (content width 78) it reads:
 
 ```
-SPICK                                                                  [ Close ]
+SPICK  routing on · b: band shown                                     x: close
 
-Controls
-  ...
+Routing   r: auto · on · off
+             on (Haiku 5.5 session)
+Review    v: auto · off
 
-This session    turns  at API rates
-  main session     11         $0.04
-  coder             3         $0.21
-  Gemini            2             —
-  total            16         $0.25
+Lanes     g: Gemini  on   search, long-context, multimodal, image
+          k: Grok    on   x-data
+          c: Codex   on   code, review, image
+          l: edit lanes · every field, every declared lane
 
-Quota  4m ago  [ Refresh ]
-  claude  5h  ▰▰▱▱▱▱▱▱▱▱   5%     7d  ▰▱▱▱▱▱▱▱▱▱   1%
-  codex   7d  ▰▰▰▱▱▱▱▱▱▱  30%
+Usage                   turns  at API rates
+          main session     52         $0.45
+          coder            13         $9.39
+          planner           4         $3.79
+          deep              1         $0.46
+          total            70        $14.09
 
-Recent turns
-  12:41  coder    Sonnet 5.5  medium   44s
-  12:38  main session  Haiku 5.5   low       6s
+Quota     claude  5h ▰▰▱▱▱▱▱▱▱▱  19%   7d ▰▱▱▱▱▱▱▱▱▱   9%
+          codex   7d ▰▰▰▰▰▰▰▰▱▱  80%
+          q: refresh · read just now
+
+Recent    14:52  coder         Sonnet 5.5  high    3m 41s
+          14:47  main session  Haiku 5.5   low         6s
+          14:40  planner       Opus 5.5    high     2m 5s
+          14:31  deep          Opus 5.5    high    1m 52s
+          14:22  coder         Sonnet 5.5  medium  4m 10s
 ```
 
 Rules:
 
-- The title row carries `SPICK` bold on the left and the `[ Close ]` button (hotkey `x`, role `dismiss`) on the right, `space-between`. No tagline.
-- `This session` is the table's heading and its column-header row at once. The total row appears only when more than one lane ran. No price note; the em dash marks "not priced" for outside lanes.
-- Table columns are padded with spaces to fixed widths computed from the longest value in the column; costs are right-aligned to two decimals.
-- The cost column header reads `at API rates`: it names the unit (API list rates), so a subscriber does not read the figure as a bill.
-- Quota: title row `Quota  <age>  [ Refresh ]` (`Refresh` keeps hotkey `q`). Age reads `just now` under a minute, then `4m ago`, `2h ago`. Only `claude` and `codex` get rows, and a provider with no window data gets none; if neither has data the section shows one subtle `unknown` line; before the first read, one subtle `not read` line. Grok and Gemini have no rows. Bars are ten cells of `▰` (used) and `▱` (free), five cells when the pane is under 80 columns; the bar carries no warning color, the model judges the numbers. The Mod reads the two local files at most every ten minutes.
-- Recent turns shows the newest first, as many as the pane's rows allow after the other sections; the whole section is hidden when there are no turns; the trailing note column carries attention causes in their colors.
-- No borders inside the pane. Structure comes from spacing and weight, as in Claude Code's own panes.
+- Every row you can act on holds exactly one `Button` with `plain: true`. The engine draws a plain Button's hotkey itself, in front of its label (`r: `), so the pane draws no key hints, no help line listing keys, no brackets, no radio dots and no keycap chips. The nine Buttons and their hotkeys: `close` x, `band` b, `routing` r, `review` v, `lane-gemini` g, `lane-grok` k, `lane-codex` c, `edit-lanes` l, `refresh` q.
+- Title row: `SPICK` on the left, `routing on` (or `routing off`, in `warning`), ` · `, the band Button (`b: band shown` / `band hidden`); `x: close` at the right edge.
+- Colours: `SPICK`, the selected value of a choice and a lane that is `on` are brand bold (`claude`); unselected values, notes, tags, column heads and times are `subtle`; section labels are bold; `routing off` is `warning`.
+- Usage: `Usage` shares its row with the column heads (`turns`, `at API rates`, subtle); the lane names sit in the value column under it, most turns first. The total row appears only from two lanes up. Costs are right-aligned; the em dash marks "not priced" for outside lanes. `at API rates` names the unit (API list rates), so a subscriber does not read the figure as a bill. With no turns yet the section reads `none yet`.
+- Quota: only `claude` and `codex` get rows, a provider with no window data gets none; `5h` before `7d`. If neither has data one subtle `unknown` line; the refresh row reads `q: refresh · read just now` (`3m ago`, `2h ago`), or `q: refresh · not read` before the first read. Grok and Gemini have no rows. Bars are ten cells of `▰` (used) and `▱` (free), five when narrow; no warning colour, the model judges the numbers. The Mod reads the two local files at most every ten minutes.
+- Running sits between Lanes and Usage and is hidden when nothing runs: `lane  model  elapsed`, at most five rows, then `and N more`.
+- Recent: newest first, as many as the pane's rows allow (the state keeps 50); hidden with no turns; attention causes follow the row in their colours.
+- Tags in the Lanes rows come from `set_lane.py --list` (read when the pane opens): `tagLine(tags, width)` joins them with `, ` and ends with ` +N` when they do not fit.
+- Narrow (below 64 columns): the section label sits on its own line and the content is indented two; quota bars are five cells; Recent drops the effort column and shows at most five rows; the Edit lanes row drops its note.
+
+### The lanes page
+
+`l` (or the Edit lanes row) shows the lanes page in the same pane. Header: `SPICK  lanes` on the left, `back` and `close` at the right, plain Buttons without hotkeys (a letter typed into the field must not press anything). Then `Lanes` with subtle column heads (`lane`, `tags`, `data`, `enabled`) on the value column and one row per declared lane, the disabled ones too; `Edit` with the Input (`> <lane> <field> <value>`; on mobile, the line saying what to type) and the field help on two subtle lines; and a `Changed` line or a `Refused` line (error colour) with the last edit or refusal. Writes go through `set_lane.py` only.
 
 ## Controls (added 2026-10-13)
 
@@ -153,19 +168,21 @@ When the mod is loaded, it owns the per-prompt checklist: a `prompt.submit` hook
 
 Every change answers with one line of text and, when a pane is open, redraws it.
 
-### Pane: Controls section
+### Pane: Controls rows
 
-The pane's first section, under the title row:
+The first rows under the title row (see the sample above). Each is one plain Button; the hotkey is drawn by the engine:
 
 ```
-Controls
-  Routing   [ ◉ auto ] [ ○ on ] [ ○ off ]      on (Haiku 5.5 session)
-  Review    [ ◉ auto ] [ ○ off ]
-  Lanes     [ Gemini on ] [ Grok on ] [ Codex off ]
-  Band      [ shown ]
+Routing   r: auto · on · off
+             on (Haiku 5.5 session)
+Review    v: auto · off
+Lanes     g: Gemini  on   search, ...
+          k: Grok    on   x-data
+          c: Codex   on   code, ...
+          l: edit lanes · every field, every declared lane
 ```
 
-Buttons carry hotkeys: `r` cycles routing, `v` toggles review, `g` / `k` / `c` toggle the lanes, `b` the band, `q` refreshes quota (the Refresh button in the Quota title row), `x` or `Esc` closes (the Close button in the title row). The active value of a button group uses `variant: 'primary'`, the others `secondary`. The text after the routing group states the effective value for this session and why (`on (Haiku 5.5 session)`, `off (model selected manually)`, `off (Fable 5.1 is not Haiku)`); under 80 columns it sits on its own line under the routing row. No borders; same spacing rules as the other sections.
+`r` cycles routing `auto -> on -> off -> auto`, `v` toggles review `auto <-> off`, `g` / `k` / `c` toggle the three lanes (through `set_lane.py`), `b` the band (title row), `l` opens the lanes page, `q` refreshes the quota (Quota section), `x` or `Esc` closes (title row). The selected value is brand bold, the others subtle. The line under routing states the effective value for this session and why (`on (Haiku 5.5 session)`, `off (model selected manually)`, `off (Fable 5.1 is not Haiku)`), aligned with the value, subtle. Every command and reply keeps its text.
 
 ### Band
 
