@@ -36,6 +36,8 @@ class Stub(BaseHTTPRequestHandler):
             return self._send(200, {"balance_infos": [{"currency": "CNY", "total_balance": "12.4"}]})
         if p == "/credits":
             return self._send(200, {"data": {"total_credits": 10, "total_usage": 3.2}})
+        if p == "/key":
+            return self._send(200, {"data": {"usage": 3.2, "limit": None}})
         if p == "/e401":
             return self._send(401, b"")
         if p == "/e401body":  # an error body that echoes the credentials back
@@ -80,6 +82,11 @@ class MeterTest(unittest.TestCase):
         m = {"type": "usage-endpoint", "url": self.base + "/credits", "value_path": "data.total_usage",
              "total_path": "data.total_credits", "kind": "used-total", "currency": "USD"}
         self.assertEqual(quota.meter_http({"id": "t", "key_ref": "env:SPICK_TEST_KEY", "meter": m}), "used 3.20 of 10.00 USD")
+
+    def test_used_total_null_limit_is_no_cap(self):
+        m = {"type": "usage-endpoint", "url": self.base + "/key", "value_path": "data.usage",
+             "total_path": "data.limit", "kind": "used-total", "currency": "USD"}
+        self.assertEqual(quota.meter_http({"id": "t", "key_ref": "env:SPICK_TEST_KEY", "meter": m}), "used 3.20 USD (no cap)")
 
     def test_401(self):
         self.assertEqual(quota.meter_http(self.lane("/e401")), "unknown (HTTP 401)")
@@ -140,11 +147,16 @@ class MeterTest(unittest.TestCase):
         lane["meter"]["preset"] = "nope"
         self.assertEqual(quota.meter_http(lane), "unknown (unknown preset nope)")
 
-    def test_presets_are_all_unverified(self):
+    def test_preset_verification_flags(self):
         presets = lanes.meter_presets()
         self.assertEqual(sorted(presets), ["deepseek", "new-api", "one-api", "openrouter"])
-        for name, p in presets.items():
-            self.assertIs(p["verified"], False, name)
+        for name in ("deepseek", "openrouter"):
+            self.assertEqual(presets[name]["verified"], "docs", name)
+            self.assertIs(presets[name]["live"], False, name)
+        for name in ("new-api", "one-api"):
+            self.assertIs(presets[name]["verified"], False, name)
+            self.assertNotIn("url", presets[name])
+        self.assertEqual(presets["openrouter"]["url"], "https://openrouter.ai/api/v1/key")
 
     def test_local_file(self):
         with tempfile.TemporaryDirectory() as d:

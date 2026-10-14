@@ -486,7 +486,10 @@ def meter_fact_from(obj, m):
     if kind == "used-total":
         if not m.get("total_path"):
             raise _Unknown("meter has no total_path")
-        return "used %.2f of %.2f%s" % (value, _number(dig(obj, m["total_path"])), tail)
+        total = dig(obj, m["total_path"])
+        if total is None:  # the service reports no cap (OpenRouter: limit null)
+            return "used %.2f%s (no cap)" % (value, tail)
+        return "used %.2f of %.2f%s" % (value, _number(total), tail)
     raise _Unknown("unknown meter kind")
 
 
