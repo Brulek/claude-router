@@ -29,6 +29,20 @@ class Stub(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(raw)
 
+    def do_GET(self):
+        hdrs = {k.lower(): v for k, v in self.headers.items()}
+        RECEIVED.append((self.path, hdrs, None))
+        mode = self.path.split("/")[1]
+        if mode == "e401":
+            return self._send(401, {"error": "bad key"})
+        if mode == "echo":
+            return self._send(200, {"data": [{"id": "leak-" + str(hdrs.get("authorization"))}]})
+        if mode == "badjson":
+            return self._send(200, b"not json")
+        if self.path.endswith("/models"):
+            return self._send(200, {"object": "list", "data": [{"id": "model-a"}, {"id": "model-b", "object": "model"}, {"nope": 1}]})
+        self._send(404, {})
+
     def do_POST(self):
         body = json.loads(self.rfile.read(int(self.headers.get("Content-Length", 0))) or b"{}")
         hdrs = {k.lower(): v for k, v in self.headers.items()}
@@ -247,6 +261,55 @@ class Refusals(InvokeCase):
 
     def test_builtin_pointer_is_not_run_as_a_command(self):
         self.assertEqual(self.run_invoke({}, "--lane", "gemini").returncode, 2)
+
+
+class ListModels(InvokeCase):
+    def test_lists_ids_one_per_line_without_a_prompt_file(self):
+        r = self.run_invoke(self.api_lane(), "--lane", "t", "--list-models")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "model-a\nmodel-b\n")
+        self.assertEqual(RECEIVED[0][0], "/ok/models")
+
+    def test_auth_header_sent_and_key_never_printed(self):
+        r = self.run_invoke(self.api_lane(), "--lane", "t", "--list-models")
+        self.assertEqual(RECEIVED[0][1]["authorization"], "Bearer " + KEY)
+        self.assertNotIn(KEY, r.stdout + r.stderr)
+
+    def test_key_echoed_inside_an_id_is_redacted(self):
+        r = self.run_invoke(self.api_lane(mode="echo"), "--lane", "t", "--list-models")
+        self.assertNotIn(KEY, r.stdout + r.stderr)
+
+    def test_401_exits_3(self):
+        r = self.run_invoke(self.api_lane(mode="e401"), "--lane", "t", "--list-models")
+        self.assertEqual(r.returncode, 3)
+        self.assertEqual(r.stdout, "")
+        self.assertNotIn(KEY, r.stderr)
+
+    def test_missing_key_exits_3_without_a_request(self):
+        r = self.run_invoke(self.api_lane(), "--lane", "t", "--list-models", key=None)
+        self.assertEqual(r.returncode, 3)
+        self.assertEqual(RECEIVED, [])
+
+    def test_local_lane_without_key_sends_no_credentials(self):
+        reg = {"loc": {"kind": "local", "invoke": {"api": "openai-chat", "base_url": self.base("ok"), "model": "q"}}}
+        r = self.run_invoke(reg, "--lane", "loc", "--list-models", key=None)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertNotIn("authorization", RECEIVED[0][1])
+
+    def test_anthropic_lane_exits_2(self):
+        r = self.run_invoke(self.api_lane("anthropic-messages"), "--lane", "t", "--list-models")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(RECEIVED, [])
+
+    def test_bad_json_exits_5(self):
+        self.assertEqual(self.run_invoke(self.api_lane(mode="badjson"), "--lane", "t", "--list-models").returncode, 5)
+
+    def test_prompt_file_still_required_for_a_normal_call(self):
+        with open(os.path.join(self.tmp.name, "spick.json"), "w") as f:
+            json.dump({"lane_registry": self.api_lane()}, f)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.tmp.name, SPICK_TEST_KEY=KEY)
+        r = subprocess.run([sys.executable, INVOKE, "--lane", "t"], capture_output=True, text=True, env=env)
+        self.assertEqual(r.returncode, 2)
 
 
 class Contains(InvokeCase):

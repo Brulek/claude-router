@@ -4,6 +4,7 @@
 Usage:
   invoke.py --lane ID --prompt-file PATH [--system-file PATH] [--model M]
             [--max-tokens N] [--timeout S] [--contains public|text|code]
+  invoke.py --lane ID --list-models [--timeout S]     (openai-chat lanes: print model ids, one per line)
 
 stdout: the answer text only.  stderr: one fact line.
 Exit codes: 0 ok; 2 usage error or unknown lane; 3 web-only lane, missing key, or auth 401/403;
@@ -77,10 +78,11 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def post_json(url, headers, body, timeout, key):
-    data = json.dumps(body).encode("utf-8")
-    h = {"Content-Type": "application/json"}
+    """POST body as JSON; with body None, GET instead."""
+    data = json.dumps(body).encode("utf-8") if body is not None else None
+    h = {"Content-Type": "application/json"} if body is not None else {}
     h.update(headers)
-    req = urllib.request.Request(url, data=data, headers=h, method="POST")
+    req = urllib.request.Request(url, data=data, headers=h, method="POST" if body is not None else "GET")
     opener = urllib.request.build_opener(_NoRedirect)
     try:
         with opener.open(req, timeout=timeout) as resp:
@@ -175,15 +177,49 @@ def read_text(path, what):
         raise Fail(2, "cannot read %s file: %s" % (what, e.strerror or "error"))
 
 
-def run(a):
-    if a.contains is not None and a.contains not in lanes.DATA_LEVELS:
-        raise Fail(2, "--contains must be one of %s" % ", ".join(lanes.DATA_LEVELS))
+def find_lane(a):
     cfg = lanes.read_config()
     lane = next((l for l in lanes.load_effective(cfg) if l["id"] == a.lane), None)
     if lane is None:
         raise Fail(2, "unknown or disabled lane: %s" % a.lane)
     if lane.get("kind") == "web-only":
         raise Fail(3, "lane %s is web-only and cannot be called; paste the prompt into the site yourself" % a.lane)
+    return lane
+
+
+def list_models(a):
+    """GET {base_url}/models for an openai-chat lane and print the ids. Read-only; the key is never printed."""
+    lane = find_lane(a)
+    inv = lane.get("invoke") if isinstance(lane.get("invoke"), dict) else {}
+    base = inv.get("base_url")
+    if inv.get("api") != "openai-chat" or not isinstance(base, str) or not base:
+        raise Fail(2, "--list-models needs an openai-chat lane with invoke.base_url (lane %s)" % a.lane)
+    key, ref = None, lane.get("key_ref")
+    if ref:
+        key = read_key(ref)
+    elif lane.get("kind") != "local":
+        raise Fail(3, "key not found: lane %s has no key_ref" % a.lane)
+    try:
+        d = post_json(base.rstrip("/") + "/models", {"Authorization": "Bearer " + key} if key else {}, None, a.timeout, key)
+    except Fail as f:
+        raise Fail(f.code, scrub(f.msg, key))
+    items = d.get("data") if isinstance(d, dict) else None
+    ids = [m["id"] for m in items if isinstance(m, dict) and isinstance(m.get("id"), str)] if isinstance(items, list) else []
+    if not ids:
+        raise Fail(5, "no model list in response")
+    out = "\n".join(ids) + "\n"
+    sys.stdout.write(out.replace(key, "[redacted]") if key else out)
+    return 0
+
+
+def run(a):
+    if a.list_models:
+        return list_models(a)
+    if not a.prompt_file:
+        raise Fail(2, "--prompt-file is required")
+    if a.contains is not None and a.contains not in lanes.DATA_LEVELS:
+        raise Fail(2, "--contains must be one of %s" % ", ".join(lanes.DATA_LEVELS))
+    lane = find_lane(a)
     inv = lane.get("invoke") if isinstance(lane.get("invoke"), dict) else {}
     api, cli = inv.get("api"), inv.get("cli")
     if api not in APIS and not isinstance(cli, str):
@@ -232,11 +268,12 @@ def run(a):
 def main(argv):
     p = argparse.ArgumentParser(prog="invoke.py", description="Call one spick lane with a prompt file.")
     p.add_argument("--lane", required=True)
-    p.add_argument("--prompt-file", required=True)
+    p.add_argument("--prompt-file")
     p.add_argument("--system-file")
     p.add_argument("--model")
     p.add_argument("--max-tokens", type=int)
     p.add_argument("--timeout", type=float, default=300)
+    p.add_argument("--list-models", action="store_true", help="print the lane's model ids (openai-chat only) and exit")
     p.add_argument("--contains", help="self-report of the most the prompt holds: public, text or code")
     a = p.parse_args(argv)
     try:
