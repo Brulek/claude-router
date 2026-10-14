@@ -100,7 +100,7 @@ Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`.
 | `prefer` | the tags the user wants this lane picked for first |
 | `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data: unset` and nothing is blocked |
 | `price` | free-form object; built-ins use `{"model": "subscription"}`; the plan and price from `subscriptions` are folded in |
-| `meter` | `{"type": ...}` with `none`, `builtin` (+ `collector`), `local-file`, `balance-endpoint` or `usage-endpoint`; an optional `health_url` adds one GET-status fact. Only `none`, `builtin` and `health_url` are collected today |
+| `meter` | `{"type": ...}` with `none`, `builtin` (+ `collector`), `local-file`, `balance-endpoint` or `usage-endpoint`; an optional `health_url` adds one GET-status fact. See Meters below |
 | `key_ref` | where the key lives: `keychain:<name>` or `env:<VAR>`; never the key itself, never printed |
 | `invoke` | how to call it; built-ins point here (`see references/providers.md`) |
 | `notes` | free text for the model; never printed in the checklist |
@@ -117,6 +117,30 @@ Example:
                  "meter": {"type": "none", "health_url": "http://127.0.0.1:11434/api/tags"}}
 }
 ```
+
+### Meters
+
+A lane's `meter` says where its balance or usage can be read. The program reads one number (or a used/total pair), prints it as a fact and judges nothing.
+
+| `meter.type` | Needs | Fact it produces |
+|---|---|---|
+| `none` | nothing | `no meter (declared plan only)` |
+| `balance-endpoint` | `preset` or `url`, plus `value_path` | `balance 12.40 CNY` |
+| `usage-endpoint` | `preset` or `url`, plus `value_path` and `total_path` | `used 3.20 of 10.00 USD` |
+| `local-file` | `path` to a JSON file, plus `value_path` | the same two strings, read from the file |
+
+Endpoint meters make one `GET` with `Authorization: Bearer <key>` (key from the lane's `key_ref`, 10 s timeout, no retry, redirects not followed). Fields: `url`, `value_path`, `total_path`, `currency_path` (dotted, a number segment indexes a list), `currency` (a fixed code when the response has none), `kind` (`balance` or `used-total`; defaults to the type's usual one). Numbers print with two decimals; a numeric string is accepted. Fields written on the meter win over the preset's. `lanes.py --validate` requires `preset` or `url` for the endpoint types and `path` for `local-file`, and nothing more.
+
+Failures print as facts, never as a guess: `unknown (HTTP 401)` (with at most 80 characters of the response, key and Bearer tokens replaced by `***`), `unknown (key not found: keychain <name>)` / `env <VAR>`, `unknown (unexpected response)` when the path is missing or not a number, `unknown (unreachable (...))`, `unknown (file not found)`. The key is never printed, cached or logged.
+
+Presets are in `assets/meter-presets.json`: `deepseek`, `openrouter`, and note-only `new-api` / `one-api` (two calls needed; no collector in v1, shown as `unknown (preset has no collector)`). **Every preset is unverified** (`"verified": false`): the endpoints and field names were written from memory of each service's docs and have not been called with a key. A fact from an unverified preset still prints, so check one before you trust it. With your own key, set locally and never pasted into chat or a file:
+
+```
+read -s KEY && export KEY      # then
+curl -s -H "Authorization: Bearer $KEY" https://api.deepseek.com/user/balance
+```
+
+Compare the JSON with the preset's `value_path` / `total_path` / `currency_path`; if they match, the preset works for you. If not, override the paths on the meter. Volcano Engine (Ark) needs AK/SK request signing and Zhipu has no public balance endpoint known to us, so both show `no meter` for now.
 
 ### Calling a registry lane
 
