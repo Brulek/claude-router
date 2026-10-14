@@ -1,4 +1,5 @@
 import { test, expect, mock } from 'claude-code/testing'
+import type { Engine, TestBody } from 'claude-code/testing'
 
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 1, bodyColumns: 80, scroll: { offset: 0, bodyRows: 1 }, view: {} }
@@ -274,3 +275,120 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(back.map(t => t.text).join('')).toBe('SPICK   Idle · last turn: main session')
   })
 }
+
+// --- many concurrent subagents ------------------------------------------------
+
+const bgCall = (id: string, subagent_type = 'coder') =>
+  ({ tool: 'Agent' as const, tool_use_id: id, prompt: 'p', description: 'd', run_in_background: true, subagent_type, model: 'sonnet' as const })
+const bgSpawn = (id: string) =>
+  ({ tool_use_id: id, prompt: 'p', description: 'd', subagentType: 'coder', provider: { plugin: 'engine', tier: 'core' as const }, parentModel: 'claude-opus-5-5', background: true, fork: false })
+const SUB_DONE = { answer: 'ok', durationMs: 1, isAborted: false, reason: 'answer' as const, usage: USAGE }
+
+function agentHooks(on: Parameters<TestBody>[1]) {
+  const clock = mock.clock(on, { now: 1000 })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('agent.spawn', async (_$, e) => ({ model: 'claude-sonnet-5-5', agentId: `a-${e.tool_use_id}` }))
+  on('tool.call', async () => ({ result: {} as never }))
+  on('prompt.submit', async (_$, e) => ({ text: e.text, context: e.context }))
+  return clock
+}
+
+/** n background coders, one second apart, then the main turn completes; the clock ends at 1000 + n * 1000 */
+async function spawnCoders($: Engine, clock: { advance: (ms: number) => Promise<void> }, n: number) {
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  for (let i = 1; i <= n; i++) {
+    await clock.advance(1000)
+    await $.tool.call(bgCall(`bg${i}`))
+    await $.agent.spawn(bgSpawn(`bg${i}`))
+  }
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
+}
+
+const textsOf = async ($: Engine, mount: Record<string, unknown>) => {
+  const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface: 'terminal', ...mount } as never)
+  const out = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+  await ui.unmount()
+  return out
+}
+const bandLine = async ($: Engine) => (await textsOf($, { component: 'AbovePrompt', props: WIDE })).join('')
+const paneTexts = async ($: Engine) =>
+  textsOf($, { component: 'Pane', requestId: 'spick', props: PANE, viewport: { columns: 82, rows: 40 } })
+
+test('12 concurrent coders: the band reads coder ×12 with the oldest one\'s time; the pane lists 5 rows and "and 7 more"', async ($, on) => {
+  const clock = agentHooks(on)
+  await spawnCoders($, clock, 12)
+  await clock.advance(190_000)
+  await $.tool.call({ tool: 'Read' as const, tool_use_id: 'r1', file_path: '/repo/a.py' })   // a tick: the clock is now 203000
+
+  // the oldest coder began at 2000: 201s
+  const line = await bandLine($)
+  expect(line.startsWith('SPICK   coder ×12 working · Sonnet 5.5 · 3m 21s')).toBe(true)
+  expect(line).not.toContain('agent ')
+  expect(line).not.toContain('Idle')
+
+  const all = await paneTexts($)
+  expect(all).toContain('Running')
+  const rows = all.filter(t => /^coder +Sonnet 5\.5 +\d+m \d+s$/.test(t))
+  expect(rows).toHaveLength(5)
+  expect(rows[0]).toBe('coder  Sonnet 5.5  3m 21s')
+  expect(rows[4]).toBe('coder  Sonnet 5.5  3m 17s')
+  expect(all).toContain('and 7 more')
+})
+
+test('one background coder: the band reads exactly as before (no ×1), the pane has one row and no "more"', async ($, on) => {
+  const clock = agentHooks(on)
+  await spawnCoders($, clock, 1)
+  await clock.advance(4000)
+  await $.tool.call({ tool: 'Read' as const, tool_use_id: 'r1', file_path: '/repo/a.py' })
+
+  expect(await bandLine($)).toBe('SPICK   coder is working · Sonnet 5.5 · 5s/spick for details')
+  const all = await paneTexts($)
+  expect(all).toContain('Running')
+  expect(all.filter(t => /^coder +Sonnet 5\.5 +4s$/.test(t))).toHaveLength(1)
+  expect(all.some(t => t.startsWith('and '))).toBe(false)
+})
+
+test('the pane has no Running section while nothing runs, and loses it when the last agent finishes', async ($, on) => {
+  const clock = agentHooks(on)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  expect(await paneTexts($)).not.toContain('Running')
+  await spawnCoders($, clock, 1).catch(() => undefined)
+  expect(await paneTexts($)).toContain('Running')
+  await $.turn.complete({ turnId: 'sub', agentId: 'a-bg1', ...SUB_DONE })
+  expect(await paneTexts($)).not.toContain('Running')
+  expect(await bandLine($)).toContain('Idle')
+})
+
+test('a subagent with no completion signal for 30 minutes leaves the running state, reads "timed out" in the pane, and goes at the next prompt', async ($, on) => {
+  const clock = agentHooks(on)
+  await spawnCoders($, clock, 1)
+  await clock.advance(29 * 60_000)
+  await $.tool.call({ tool: 'Read' as const, tool_use_id: 'r1', file_path: '/repo/a.py' })
+  // 29 minutes: still running
+  expect(await bandLine($)).toContain('coder is working')
+
+  await clock.advance(2 * 60_000)
+  await $.tool.call({ tool: 'Read' as const, tool_use_id: 'r2', file_path: '/repo/a.py' })
+  // 31 minutes: off the band, on in the pane with the reason
+  expect(await bandLine($)).toContain('Idle')
+  let all = await paneTexts($)
+  expect(all).toContain('Running')
+  expect(all).toContain('coder  Sonnet 5.5  timed out, no completion signal')
+
+  // the next prompt drops it
+  await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
+  all = await paneTexts($)
+  expect(all).not.toContain('Running')
+  expect(all.some(t => t.includes('timed out'))).toBe(false)
+})
+
+test('a subagent that finishes after its timeout loses its "timed out" row', async ($, on) => {
+  const clock = agentHooks(on)
+  await spawnCoders($, clock, 1)
+  await clock.advance(31 * 60_000)
+  await $.tool.call({ tool: 'Read' as const, tool_use_id: 'r1', file_path: '/repo/a.py' })
+  expect((await paneTexts($)).some(t => t.includes('timed out'))).toBe(true)
+  await $.turn.complete({ turnId: 'sub', agentId: 'a-bg1', ...SUB_DONE })
+  expect((await paneTexts($)).some(t => t.includes('timed out'))).toBe(false)
+})

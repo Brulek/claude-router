@@ -1,14 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
-import type { Controls, LaneInfo, LaneKey, LaneTotals, Quota, QuotaWindows, Review, Routing, TurnRecord } from '../types'
+import type { Controls, LaneInfo, LaneKey, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
-import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, table } from './format'
+import { MAIN_LANE, STALE_MS, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, runningLines, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
 
 const P = 'spick-dashboard'
 const current = atom({ plugin: 'spick-dashboard', key: 'current' } as const, null)
+const running = atom({ plugin: 'spick-dashboard', key: 'running' } as const, [])
 const last = atom({ plugin: 'spick-dashboard', key: 'last' } as const, null)
 const turns = atom({ plugin: 'spick-dashboard', key: 'turns' } as const, [])
 const totals = atom({ plugin: 'spick-dashboard', key: 'totals' } as const, {})
@@ -156,7 +157,14 @@ async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promi
 }
 
 /** who works on the band: the main session, a subagent call or a CLI call */
-type Lane = { lane: string; model: string; effort?: string; agentIndex?: number; isReview?: boolean }
+type Lane = {
+  lane: string; model: string; effort?: string; agentIndex?: number; isReview?: boolean
+  /** when the call began; set on every call in flight */
+  startedAt?: number
+  /** on the lane `showing` returns: how many calls of that lane run, and when the oldest began */
+  count?: number
+  since?: number
+}
 
 /**
  * Put a lane on the current turn. `pick` runs inside the update, so calls that
@@ -166,8 +174,45 @@ async function showLane($: EngineInterface, pick: () => Lane, extra: (c: TurnRec
   await update($, current, c => {
     if (!c) return c
     const l = pick()
-    return { ...c, ...extra(c), lane: l.lane, model: l.model, effort: l.effort, agentIndex: l.agentIndex, isReview: l.isReview }
+    return { ...c, ...extra(c), lane: l.lane, model: l.model, effort: l.effort, agentIndex: l.agentIndex, isReview: l.isReview, laneCount: l.count, laneSince: l.since }
   })
+}
+
+/** The Running section's state: the calls in flight (oldest first), then those that timed out. */
+async function publishRunning($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>): Promise<void> {
+  const live: RunningAgent[] = [...inFlight].map(([id, l]) => ({ id, lane: l.lane, model: l.model, effort: l.effort, startedAt: l.startedAt ?? 0 }))
+  await update($, running, () => [...live, ...timedOut.values()])
+}
+
+/** What the band bookkeeping reads: the calls in flight, the timed-out ones, who shows now, whether the main turn is open. */
+type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean }
+
+/** put the lane that works now on the band and publish the Running list */
+async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecord) => Partial<TurnRecord>): Promise<void> {
+  await showLane($, t.showing, extra)
+  await publishRunning($, t.inFlight, t.timedOut)
+}
+
+/** Move calls with no completion signal for STALE_MS out of flight into `timedOut`. True when any moved. */
+async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>): Promise<boolean> {
+  const now = await $.clock.now()
+  let moved = false
+  for (const [id, l] of [...inFlight]) {
+    if (l.startedAt === undefined || now - l.startedAt < STALE_MS) continue
+    inFlight.delete(id)
+    timedOut.set(id, { id, lane: l.lane, model: l.model, effort: l.effort, startedAt: l.startedAt, timedOutAt: now })
+    moved = true
+  }
+  return moved
+}
+
+/** Drop calls that have gone 30 minutes without a completion signal; the band follows. */
+async function sweep($: EngineInterface, t: Tracker): Promise<void> {
+  if (!(await sweepStale($, t.inFlight, t.timedOut))) return
+  // nothing left running after the main turn ended: the band goes idle
+  if (!t.isMainTurnOpen() && t.inFlight.size === 0) await update($, current, () => null)
+  else await showLane($, t.showing)
+  await publishRunning($, t.inFlight, t.timedOut)
 }
 
 /**
@@ -241,8 +286,20 @@ export const register: Register = on => {
   const showing = (): Lane => {
     let top: Lane | undefined
     for (const l of inFlight.values()) top = l
-    return top ?? mainLane()
+    if (!top) return mainLane()
+    // calls of the same lane aggregate: how many run, and when the oldest began
+    let count = 0
+    let since: number | undefined
+    for (const l of inFlight.values()) {
+      if (l.lane !== top.lane) continue
+      count++
+      if (l.startedAt !== undefined) since = since === undefined ? l.startedAt : Math.min(since, l.startedAt)
+    }
+    return { ...top, count, since }
   }
+  /** calls that timed out (no completion signal for 30 minutes), listed in the pane until the next prompt drops them */
+  const timedOut = new Map<string, RunningAgent>()
+  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen }
 
   on('session.start', async ($, e, next) => {
     try {
@@ -266,6 +323,9 @@ export const register: Register = on => {
     let block: string | null = null
     try {
       if (!isDelivery(e.origin.kind)) {
+        // rows that timed out before this prompt leave the pane now; any that time out from here on stay one more prompt
+        if (timedOut.size > 0) { timedOut.clear(); await publishRunning($, inFlight, timedOut) }
+        await sweep($, tracker)
         // an unreadable model ('') falls back to the last one read, then the main loop's
         const fresh = await modelNow($)
         if (fresh) await update($, sessionModel, () => fresh)
@@ -336,6 +396,8 @@ export const register: Register = on => {
       agentsThisTurn = 0
       lastTickMs = startedAt
       await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0 }))
+      await sweep($, tracker)
+      await refreshBand($, tracker)
       // the TTL gates it: at most one read per ten minutes, so the band's quota meters stay current
       void refreshQuota($).catch(() => undefined)
     } catch {}
@@ -348,7 +410,8 @@ export const register: Register = on => {
       if (!e.agentId) {
         mainModel = e.model
         mainEffort = typeof e.effort === 'string' ? e.effort : undefined
-        await showLane($, showing)
+        await sweep($, tracker)
+        await refreshBand($, tracker)
       }
     } catch {}
     const stream = next(e)
@@ -362,16 +425,17 @@ export const register: Register = on => {
   // any tool call, from any loop, ticks the elapsed time
   on('tool.call', async ($, e, next) => {
     try { lastTickMs = Math.max(lastTickMs, await tick($, lastTickMs)) } catch {}
+    try { await sweep($, tracker) } catch {}
     return next(e)
   }).catch(passThrough)
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
     const id = e.tool_use_id
     try {
-      const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn }
+      const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn, startedAt: await $.clock.now() }
       inFlight.set(id, entry)
       delegate = entry
-      await showLane($, showing, () => ({ agents: agentsThisTurn }))
+      await refreshBand($, tracker, () => ({ agents: agentsThisTurn }))
     } catch {}
     // finally: an interrupted call must not leave the subagent's lane on the band
     try {
@@ -380,7 +444,7 @@ export const register: Register = on => {
       try {
         if (!e.run_in_background) {
           inFlight.delete(id)
-          await showLane($, showing)
+          await refreshBand($, tracker)
         }
       } catch {}
     }
@@ -398,7 +462,7 @@ export const register: Register = on => {
       if (entry && !r.deny) {
         entry.lane = e.subagentType
         if (r.model) entry.model = modelName(r.model)
-        await showLane($, showing)
+        await refreshBand($, tracker)
       }
     } catch {}
     return r
@@ -412,10 +476,10 @@ export const register: Register = on => {
       const cli = parseCli(e.command)
       if (cli) {
         isCli = true
-        const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview: cli.isReview }
+        const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview: cli.isReview, startedAt: await $.clock.now() }
         inFlight.set(id, entry)
         delegate = entry
-        await showLane($, showing, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
+        await refreshBand($, tracker, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
         // outside CLIs report no usage: count the call, leave it unpriced
         await update($, totals, t => {
           const cur = t[cli.lane] ?? ZERO_TOTALS
@@ -429,7 +493,7 @@ export const register: Register = on => {
       if (isCli) {
         try {
           inFlight.delete(id)
-          await showLane($, showing)
+          await refreshBand($, tracker)
         } catch {}
       }
     }
@@ -471,6 +535,10 @@ export const register: Register = on => {
           // the main turn already ended and this was the last agent: the band goes idle (last stays as written)
           if (!mainTurnOpen && inFlight.size === 0) await update($, current, () => null)
           else await showLane($, showing)
+          await publishRunning($, inFlight, timedOut)
+        } else if (call !== undefined && timedOut.delete(call)) {
+          // it did finish after all: its "timed out" row goes
+          await publishRunning($, inFlight, timedOut)
         }
       } else {
         const endedAt = await $.clock.now()
@@ -483,6 +551,8 @@ export const register: Register = on => {
           const done: TurnRecord = { ...c, lane: who.lane, model: who.model, effort: who.effort, endedAt, costUsd: usage ? estimateCost(usage.model, usage) : null }
           delete done.agentIndex
           delete done.isReview
+          delete done.laneCount
+          delete done.laneSince
           delete done.nowMs
           await update($, last, () => done)
           await update($, turns, list => [done, ...list].slice(0, 50))
@@ -491,6 +561,8 @@ export const register: Register = on => {
           if (inFlight.size > 0) await showLane($, showing, () => ({ note: undefined }))
           else await update($, current, () => null)
         }
+        await sweep($, tracker)
+        await publishRunning($, inFlight, timedOut)
       }
     } catch {}
     return next(e)
@@ -535,8 +607,9 @@ export const register: Register = on => {
     const c = await read($, current)
     const l = await read($, last)
     const view: BandView | null = c
-      ? { lane: c.lane, model: c.model, agents: c.agents, agentIndex: c.agentIndex, isReview: c.isReview, isIdle: false,
-          durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - c.startedAt), note: c.note, mainModel: mainModel ? modelName(mainModel) : undefined }
+      ? { lane: c.lane, model: c.model, agents: c.agents, agentIndex: c.agentIndex, isReview: c.isReview, isIdle: false, count: c.laneCount,
+          // several of one lane: the time is the oldest of them; one agent or none: the turn's, as before
+          durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - (c.laneCount !== undefined && c.laneCount > 1 && c.laneSince !== undefined ? c.laneSince : c.startedAt)), note: c.note, mainModel: mainModel ? modelName(mainModel) : undefined }
       : l
         ? { lane: l.lane, model: l.model, agents: 0, isIdle: true }
         : null
@@ -570,6 +643,7 @@ export const register: Register = on => {
     const ctl = await read($, controls)
     const eff = effectiveRouting(ctl, (await read($, sessionModel)) || mainModel)
     const t = await read($, totals)
+    const runningNow = await read($, running)
     const q = await read($, quota)
     const list = await read($, turns)
     const isHidden = await read($, hidden)
@@ -603,7 +677,9 @@ export const register: Register = on => {
     const quotaNote = !q ? 'not read' : quotaRows.length === 0 ? 'unknown' : ''
 
     // rows the pane uses besides the turn list, so the list never scrolls past the bottom
-    const used = 2 + 5 + (isNarrow ? 1 : 0) + 2 + sessionTable.length + 2 + 1 + Math.max(quotaRows.length, quotaNote ? 1 : 0) + 2
+    const runningView = runningLines(runningNow, now)
+    const runningUsed = runningNow.length > 0 ? 2 + runningView.lines.length + (runningView.more > 0 ? 1 : 0) : 0
+    const used = runningUsed + 2 + 5 + (isNarrow ? 1 : 0) + 2 + sessionTable.length + 2 + 1 + Math.max(quotaRows.length, quotaNote ? 1 : 0) + 2
     const recent = list.slice(0, Math.max(1, rows - used))
     const recentTable = table(
       recent.map(r => [clock(r.startedAt), r.lane, r.model, r.effort ?? '', fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt)]),
@@ -659,6 +735,16 @@ export const register: Register = on => {
             </Box>
           </Box>
         </Box>
+
+        {runningNow.length > 0 ? (
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold>Running</Text>
+            <Box flexDirection="column" paddingLeft={2}>
+              {runningView.lines.map(line => <Text>{line}</Text>)}
+              {runningView.more > 0 ? <Text color="subtle">{`and ${runningView.more} more`}</Text> : null}
+            </Box>
+          </Box>
+        ) : null}
 
         <Box flexDirection="column" marginTop={1}>
           {sessionTable.map((line, i) =>

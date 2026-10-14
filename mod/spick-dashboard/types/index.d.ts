@@ -14,6 +14,10 @@ export type TurnRecord = {
   agents: number
   /** while an agent shows on the band: its ordinal among this turn's agents (1-based) */
   agentIndex?: number
+  /** while an agent shows on the band: how many of that lane run now; above 1 the band reads `coder ×12` */
+  laneCount?: number
+  /** start time of the oldest running agent of the lane the band shows; the band's elapsed time counts from it when laneCount > 1 */
+  laneSince?: number
   /** while a Codex review call shows on the band: the verb reads `is reviewing` */
   isReview?: boolean
   /** while active: the latest tick (a turn.step chunk or tool.call, at most one write per second), so the band's elapsed time moves */
@@ -21,6 +25,18 @@ export type TurnRecord = {
   /** attention cause, shown in color on the band and in the pane's note column */
   note?: Note
   costUsd?: number | null
+}
+
+/** a delegate (Agent or outside CLI call) the pane's Running section lists */
+export type RunningAgent = {
+  /** the tool_use_id of the call that started it */
+  id: string
+  lane: string
+  model: string
+  effort?: string
+  startedAt: number
+  /** set when no completion signal came for 30 minutes: the row reads "timed out" until the next prompt drops it */
+  timedOutAt?: number
 }
 
 export type LaneTotals = {
@@ -57,6 +73,8 @@ declare module 'claude-code' {
   interface PluginState {
     'spick-dashboard': {
       current: TurnRecord | null
+      /** delegates running now (oldest first), then any that timed out */
+      running: RunningAgent[]
       last: TurnRecord | null
       turns: TurnRecord[]
       totals: Record<string, LaneTotals>

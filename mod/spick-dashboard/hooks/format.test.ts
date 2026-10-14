@@ -1,7 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
-  fmtDuration, fmtAge, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE,
+  fmtDuration, fmtAge, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE, runningLines,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -312,4 +312,33 @@ test('bandSegments: routing off puts a warning ` off` after the wordmark at ever
   expect(bandSegments({ ...v, routingOff: false }, 120).left[1]).toEqual({ text: '   ', style: 'plain' })
   // the wordmark keeps its five cells, no letter spacing
   expect(displayWidth(bandSegments({ ...v, routingOff: false }, 120).left[0]!.text)).toBe(5)
+})
+
+test('bandSegments aggregates several agents of a lane: coder ×12 working, no ordinal; one agent reads as before', () => {
+  const many = { ...coderActive, agents: 12, agentIndex: 12, count: 12, durationMs: 190000 }
+  expect(L(bandSegments(many, 100))).toBe('SPICK   coder \u00d712 working · Sonnet 5.5 · 3m 10s')
+  expect(bandSegments(many, 100).left[2]).toEqual({ text: 'coder \u00d712', style: 'lane' })
+  expect(bandSegments(many, 100).left[3]).toEqual({ text: ' working', style: 'plain' })
+  expect(R(bandSegments(many, 100))).toBe('main: Fable 5.1')
+  expect(L(bandSegments({ ...many, lane: 'Gemini', count: 2 }, 100))).toContain('Gemini \u00d72 searching')
+  expect(L(bandSegments({ ...many, lane: 'Codex', count: 2, isReview: true }, 100))).toContain('Codex \u00d72 reviewing')
+  // narrow: the count stays with the lane
+  expect(L(bandSegments(many, 30))).toBe('SPICK · coder \u00d712 · Sonnet 5.5')
+  // one agent (count 1 or absent): exactly the old sentence, ordinal included
+  expect(L(bandSegments({ ...coderActive, count: 1 }, 100))).toBe(L(bandSegments(coderActive, 100)))
+  expect(L(bandSegments({ ...coderActive, count: 1 }, 100))).toBe('SPICK   coder is working · Sonnet 5.5 · agent 2 of 2 · 44s')
+  // idle and main never show a count
+  expect(L(bandSegments({ ...coderIdle, count: 3 }, 100))).toBe('SPICK   Idle · last turn: coder on Sonnet 5.5')
+  expect(L(bandSegments({ ...mainActive, count: 3 }, 100))).toBe('SPICK   Working · Fable 5.1 · 12s')
+})
+
+test('runningLines caps at five rows and counts the rest; a timed-out row says why', () => {
+  const rows = Array.from({ length: 12 }, (_, i) => ({ id: `c${i}`, lane: 'coder', model: 'Sonnet 5.5', startedAt: 1000 + i * 1000 }))
+  const r = runningLines(rows, 200000)
+  expect(r.lines).toHaveLength(5)
+  expect(r.more).toBe(7)
+  expect(r.lines[0]).toBe('coder  Sonnet 5.5  3m 19s')
+  expect(runningLines(rows.slice(0, 5), 200000).more).toBe(0)
+  const t = runningLines([{ ...rows[0]!, timedOutAt: 5 }], 200000)
+  expect(t.lines[0]).toBe('coder  Sonnet 5.5  timed out, no completion signal')
 })

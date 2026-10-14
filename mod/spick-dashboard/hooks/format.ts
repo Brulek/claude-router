@@ -1,4 +1,4 @@
-import type { Note, Quota } from '../types'
+import type { Note, Quota, RunningAgent } from '../types'
 
 const CLAUDE_NAMES: Record<string, string> = {
   'claude-haiku-5-5': 'Haiku 5.5',
@@ -99,6 +99,8 @@ export type BandView = {
   agents: number
   /** ordinal of the agent the band shows among this turn's agents; absent when no agent is showing */
   agentIndex?: number
+  /** how many agents of this lane run now; above 1 the lane reads `coder ×12` and the ordinal is dropped */
+  count?: number
   isIdle: boolean
   /** active: time since the turn began; ignored when idle (the band shows no duration then) */
   durationMs?: number
@@ -163,9 +165,11 @@ const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'wording', 'model']
 export function bandSegments(v: BandView, columns: number): Band {
   const wordmark: Seg[] = v.routingOff ? [{ text: 'SPICK', style: 'brand' }, { text: ' off', style: 'warning' }] : [{ text: 'SPICK', style: 'brand' }]
   const isMain = v.lane === MAIN_LANE
+  const many = !isMain && !v.isIdle && (v.count ?? 1) > 1
+  const laneText = many ? `${v.lane} \u00d7${v.count}` : v.lane
   const style = (s: Seg['style']): Seg['style'] => (v.isIdle ? 'dim' : s)
   const show: Record<Droppable, boolean> = {
-    ordinal: columns >= 70 && !v.isIdle && v.agents > 1 && v.agentIndex !== undefined,
+    ordinal: columns >= 70 && !v.isIdle && !many && v.agents > 1 && v.agentIndex !== undefined,
     elapsed: v.durationMs !== undefined && !v.isIdle && columns >= 70,
     wording: true,
     model: !!v.model,
@@ -173,7 +177,7 @@ export function bandSegments(v: BandView, columns: number): Band {
 
   const buildLeft = (): Seg[] => {
     if (columns < 40) {
-      const left: Seg[] = [...wordmark, SEP, { text: v.isIdle ? 'Idle' : isMain ? 'Working' : v.lane, style: style('lane') }]
+      const left: Seg[] = [...wordmark, SEP, { text: v.isIdle ? 'Idle' : isMain ? 'Working' : laneText, style: style('lane') }]
       if (show.model) left.push(SEP, { text: v.model, style: style('plain') })
       return left
     }
@@ -189,8 +193,8 @@ export function bandSegments(v: BandView, columns: number): Band {
       }
     } else {
       parts.push(isMain ? [{ text: 'Working', style: 'lane' }]
-        : show.wording ? [{ text: v.lane, style: 'lane' }, { text: ` ${verbOf(v.lane, v.isReview)}`, style: 'plain' }]
-        : [{ text: v.lane, style: 'lane' }])
+        : show.wording ? [{ text: laneText, style: 'lane' }, { text: ` ${many ? verbOf(v.lane, v.isReview).replace(/^is /, '') : verbOf(v.lane, v.isReview)}`, style: 'plain' }]
+        : [{ text: laneText, style: 'lane' }])
       if (show.model) parts.push([{ text: v.model, style: 'plain' }])
     }
     if (show.ordinal) parts.push([{ text: `agent ${v.agentIndex} of ${v.agents}`, style: 'dim' }])
@@ -214,6 +218,19 @@ export function bandSegments(v: BandView, columns: number): Band {
     left = buildLeft()
   }
   return { left, right }
+}
+
+/** The longest the pane's Running section gets before it says "and N more". */
+export const RUNNING_ROWS = 5
+export const TIMED_OUT_TEXT = 'timed out, no completion signal'
+/** a delegate with no completion signal this long after it started is dropped from the running state */
+export const STALE_MS = 30 * 60_000
+
+/** The Running section as aligned lines (lane, model, elapsed), at most RUNNING_ROWS, and how many were left out. */
+export function runningLines(rows: readonly RunningAgent[], now: number): { lines: string[]; more: number } {
+  const shown = rows.slice(0, RUNNING_ROWS)
+  const lines = table(shown.map(r => [r.lane, r.model, r.timedOutAt !== undefined ? TIMED_OUT_TEXT : fmtDuration(Math.max(0, now - r.startedAt))]), ['l', 'l', 'l'])
+  return { lines, more: rows.length - shown.length }
 }
 
 export function padRight(s: string, w: number): string { return s + ' '.repeat(Math.max(0, w - s.length)) }
