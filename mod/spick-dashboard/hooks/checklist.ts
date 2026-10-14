@@ -15,7 +15,7 @@ export const reviewOffNote = (labelLine: boolean): string =>
   labelLine ? 'Codex review is off: skip the review step and write `Review: off` in the label line.' : 'Codex review is off: skip the review step.'
 export const laneName = (lane: string): string => LANE_NAMES[lane] ?? lane
 /** checklist line 2 when the user declared lane_registry: same words as scripts/triage-hook.sh */
-export const REGISTRY_LANE_LINE = "2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line by its tags; never send anything above a lane's data: level. Pick an effort for every delegate."
+export const REGISTRY_LANE_LINE = "2. Lane? chores -> you; a change that needs a decision (layout, API, algorithm, data shape, which file) -> Agent(planner) first, then Agent(coder) with the plan; other code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line by its tags; never send anything above a lane's data: level. Pick an effort for every delegate. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner."
 export const NO_LABEL_LINE = 'Reply starts with the deliverable; the status band shows who worked, so print no label line.'
 
 /** True where an AbovePrompt band is drawn: terminal and desktop. */
@@ -63,7 +63,7 @@ export function checklist(c: Controls, sessionModel: string, labelLine: boolean,
   const lines = [
     '[spick triage - answer all three before the first tool call]',
     '1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).',
-    registry ? REGISTRY_LANE_LINE : '2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); web lookup -> Gemini (agy); X data -> Grok. Pick an effort for every delegate.',
+    registry ? REGISTRY_LANE_LINE : '2. Lane? chores -> you; a change that needs a decision (layout, API, algorithm, data shape, which file) -> Agent(planner) first, then Agent(coder) with the plan; other code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); web lookup -> Gemini (agy); X data -> Grok. Pick an effort for every delegate. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.',
     '3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.',
     labelLine
       ? `Reply starts with the deliverable; end with the label line: no delegate -> \`[Model: ${main} | Effort: medium]\`; with delegates -> \`[Model: ${main} (medium) → coder Sonnet 5.5 (high) | ${review}]\` — ${who}. Never write \`→ none\` or \`→ 无\`.`

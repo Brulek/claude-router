@@ -23,11 +23,11 @@ registry=0
 [ -f "$cfg" ] && grep -q '"lane_registry"' "$cfg" 2>/dev/null && registry=1
 if [ "$registry" = 1 ]; then
 cat <<'TXT'
-2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line by its tags; never send anything above a lane's data: level. Pick an effort for every delegate.
+2. Lane? chores -> you; a change that needs a decision (layout, API, algorithm, data shape, which file) -> Agent(planner) first, then Agent(coder) with the plan; other code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line by its tags; never send anything above a lane's data: level. Pick an effort for every delegate. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.
 TXT
 else
 cat <<'TXT'
-2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); web lookup -> Gemini (agy); X data -> Grok. Pick an effort for every delegate.
+2. Lane? chores -> you; a change that needs a decision (layout, API, algorithm, data shape, which file) -> Agent(planner) first, then Agent(coder) with the plan; other code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); web lookup -> Gemini (agy); X data -> Grok. Pick an effort for every delegate. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.
 TXT
 fi
 cat <<'TXT'

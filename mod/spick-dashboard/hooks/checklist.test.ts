@@ -16,6 +16,11 @@ test('routing on: the three questions, the bash hook\'s substance, no notes', ()
   expect(block.startsWith('[spick triage - answer all three before the first tool call]')).toBe(true)
   for (const q of ['1. Plan mode?', '2. Lane?', '3. Goal-shaped?']) expect(block).toContain(q)
   expect(block).toContain('web lookup -> Gemini (agy); X data -> Grok.')
+  // design first: a change that needs a decision goes to planner before coder, and the brief carries no design of the main session's own
+  expect(block).toContain('a change that needs a decision (layout, API, algorithm, data shape, which file) -> Agent(planner) first, then Agent(coder) with the plan; other code change beyond a one-liner -> Agent(coder)')
+  expect(block).toContain('A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.')
+  expect(REGISTRY_LANE_LINE).toContain('-> Agent(planner) first, then Agent(coder) with the plan;')
+  expect(REGISTRY_LANE_LINE).toContain('A brief carries no design of your own')
   expect(block).toContain('Review: Codex gpt-6-astra (medium)')
   expect(block).toContain('every participant, reviewer included, carries its own model and effort')
   expect(block).not.toContain('lane is off')
@@ -88,7 +93,7 @@ test('/spick arguments parse; anything else is usage', () => {
 
 test('with every switch at its default the block is the bash hook\'s text, word for word', () => {
   // a copy of scripts/triage-hook.sh's heredoc: change both together
-  expect(checklist(DEFAULT_CONTROLS, HAIKU, true)).toBe("[spick triage - answer all three before the first tool call]\n1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).\n2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); web lookup -> Gemini (agy); X data -> Grok. Pick an effort for every delegate.\n3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.\nReply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex gpt-6-astra (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.")
+  expect(checklist(DEFAULT_CONTROLS, HAIKU, true)).toBe("[spick triage - answer all three before the first tool call]\n1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).\n2. Lane? chores -> you; a change that needs a decision (layout, API, algorithm, data shape, which file) -> Agent(planner) first, then Agent(coder) with the plan; other code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); web lookup -> Gemini (agy); X data -> Grok. Pick an effort for every delegate. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.\n3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.\nReply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex gpt-6-astra (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.")
 })
 
 test('while the band shows (labelLine false) no sentence asks for the label line', () => {
