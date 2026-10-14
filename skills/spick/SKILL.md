@@ -213,7 +213,8 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 | `/spick` | (dashboard mod) opens the pane; with no UI it prints a one-paragraph status |
 | `/spick on` / `off` / `auto` | (dashboard mod) routing switch, remembered; `off` means do the work yourself, no Spick dispatch; `auto` = on only in a Haiku session. A manual `/model` turns it off for the session |
 | `/spick review on` / `off` | (dashboard mod) Codex review step, remembered; when off write `Review: off` in the label line |
-| `/spick lane <id> on` / `off` | (dashboard mod) one outside lane (a built-in or a registered id), remembered; an off lane is left out |
+| `/spick lane <id> on` / `off` | (dashboard mod) one lane (a built-in or a registered id): writes `enabled` through `scripts/set_lane.py`, so it persists in `spick.json`; an off lane is left out |
+| `/spick lane <id> <field> <value>` / `/spick lane <id>` | (dashboard mod) changes one field through `scripts/set_lane.py` (any field; secrets and unknown ids refused) / shows the lane's record. The pane's lanes page (`l`) does the same |
 | `/spick hide` / `show` | (dashboard mod) band visibility, this session only |
 | `/spick quota` | (dashboard mod) refreshes quota now and prints the meters |
 

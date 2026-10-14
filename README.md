@@ -115,11 +115,13 @@ While the band is displayed, replies omit the label line.
 | `spick quota` | Displays the quota line |
 | `/spick on\|off\|auto` | Routing switch |
 | `/spick review on\|off` | Codex review step |
-| `/spick lane <gemini\|grok\|codex> on\|off` | Toggles one outside CLI |
+| `/spick lane <id>` | Shows one lane's record |
+| `/spick lane <id> on\|off` | Switches a lane on or off (field `enabled`, saved in `spick.json`) |
+| `/spick lane <id> <field> <value>` | Changes any field of a lane through `set_lane.py` (tags take a comma list) |
 | `/spick hide` / `show` | Hides or shows the band for the current session |
 | `/spick quota` | Refreshes the quota line |
 
-Pane hotkeys: `r` routing, `v` review, `g` `k` `c` Gemini / Grok / Codex, `b` band, `q` refresh quota, `x` close.
+Pane hotkeys: `r` routing, `v` review, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
 
 ## Requirements
 

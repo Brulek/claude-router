@@ -117,11 +117,13 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 | `spick quota` | 显示额度信息 |
 | `/spick on\|off\|auto` | 分流开关 |
 | `/spick review on\|off` | Codex 审核步骤开关 |
-| `/spick lane <gemini\|grok\|codex> on\|off` | 单个外部 CLI 开关 |
+| `/spick lane <id>` | 显示单个 lane 的记录 |
+| `/spick lane <id> on\|off` | 开关某个 lane（字段 `enabled`，写入 `spick.json`） |
+| `/spick lane <id> <field> <value>` | 经 `set_lane.py` 修改 lane 的任意字段（tags 用逗号分隔） |
 | `/spick hide` / `show` | 隐藏或显示状态带，仅限本会话 |
 | `/spick quota` | 刷新额度信息 |
 
-面板快捷键：`r` 分流，`v` 审核，`g` `k` `c` 对应 Gemini / Grok / Codex，`b` 状态带，`q` 刷新额度，`x` 关闭。
+面板快捷键：`r` 分流，`v` 审核，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
 
 ## 环境要求
 
