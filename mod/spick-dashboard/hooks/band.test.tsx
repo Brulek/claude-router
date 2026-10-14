@@ -1,5 +1,6 @@
 import { test, expect, mock } from 'claude-code/testing'
 import type { Engine, TestBody } from 'claude-code/testing'
+import { LANES as LANE_ROWS, SCRIPT, fakeSetLane } from './fakelane'
 
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 const BAND = { hasSurvey: false, isWorking: false, maxRows: 1, bodyColumns: 80, scroll: { offset: 0, bodyRows: 1 }, view: {} }
@@ -190,6 +191,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
   test(`pane opens with the Controls section, Close in the title row and the routing note on its own line when narrow, on ${surface}`, async ($, on) => {
     mock.clock(on, { now: 1000 })
     mock.store(on)
+    mock.env(on, { HOME: '/h' })
+    fakeSetLane(on)
     on('session.model', async () => ({ value: 'claude-haiku-5-5' }))
     on('fs.write', async () => ({ value: undefined }))
     on('session.start', async ($, e) => ({ cwd: e.cwd }))
@@ -214,6 +217,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini on', variant: 'primary', hotkey: 'g' })
     expect(await button('lane-grok')).toMatchObject({ label: 'Grok on', variant: 'primary', hotkey: 'k' })
     expect(await button('lane-codex')).toMatchObject({ label: 'Codex off', variant: 'secondary', hotkey: 'c' })
+    expect(await button('edit-lanes')).toMatchObject({ label: '[ Edit lanes ]', hotkey: 'l' })
     expect(await button('band')).toMatchObject({ label: 'shown', hotkey: 'b' })
     expect(await button('refresh')).toMatchObject({ label: 'Refresh', hotkey: 'q' })
     expect(await button('close')).toMatchObject({ label: 'Close', hotkey: 'x', role: 'dismiss' })
@@ -236,9 +240,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // a button that is not the active one sets its own value directly
     await ui.press({ key: 'routing-on' })
     expect(await button('routing-on')).toMatchObject({ label: '◉ on', variant: 'primary' })
-    // a lane toggles
+    // a lane toggles, through set_lane.py (the Controls row is the persisted switch)
     await ui.press({ key: 'lane-gemini' })
     expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini off', variant: 'secondary' })
+    await ui.press({ key: 'lane-gemini' })
+    expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini on', variant: 'primary' })
     // review: the active option does nothing, the other sets it and takes no hotkey
     await ui.press({ key: 'review-auto' })
     expect(await button('review-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
@@ -391,4 +397,168 @@ test('a subagent that finishes after its timeout loses its "timed out" row', asy
   expect((await paneTexts($)).some(t => t.includes('timed out'))).toBe(true)
   await $.turn.complete({ turnId: 'sub', agentId: 'a-bg1', ...SUB_DONE })
   expect((await paneTexts($)).some(t => t.includes('timed out'))).toBe(false)
+})
+
+// --- lane switches and the lanes page: spick.json is written by set_lane.py, nothing here runs a process while drawing ---
+
+const LANE_PANE = { plugin: 'spick-dashboard', component: 'Pane' as const, requestId: 'spick', props: PANE, viewport: { columns: 82, rows: 30 } }
+const lanesWorld = (on: Parameters<TestBody>[1], rows?: Parameters<typeof fakeSetLane>[1]) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const closes: string[] = []
+  const toasts: string[] = []
+  on('ui.close', async (_$, e) => { closes.push(e.id); return { value: undefined } })
+  on('ui.toast', async (_$, e) => { toasts.push(e.text); return { value: undefined } })
+  return { fake: fakeSetLane(on, rows), closes, toasts }
+}
+const WRITE = (id: string, field: string, value: string) => ['python3', SCRIPT, '--id', id, '--field', field, '--value', value]
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`a Controls lane button writes enabled through set_lane.py, then reads the lanes again, on ${surface}`, async ($, on) => {
+    const { fake, toasts } = lanesWorld(on)
+    const ui = await $.ui.mount({ ...LANE_PANE, surface })
+    // drawing ran no process
+    expect(fake.calls).toEqual([])
+    const button = async (key: string) => (await ui.find({ type: 'Button', key }))?.props
+    expect(await button('lane-grok')).toMatchObject({ label: 'Grok on', variant: 'primary', hotkey: 'k' })
+
+    await ui.press({ key: 'lane-grok' })
+    expect(fake.calls).toEqual([['python3', SCRIPT, '--list'], WRITE('grok', 'enabled', 'no'), ['python3', SCRIPT, '--list']])
+    expect(fake.rows.find(r => r.id === 'grok')?.enabled).toBe(false)
+    expect(await button('lane-grok')).toMatchObject({ label: 'Grok off', variant: 'secondary', hotkey: 'k' })
+    await ui.press({ key: 'lane-grok' })
+    expect(fake.writes().at(-1)).toEqual(WRITE('grok', 'enabled', 'yes'))
+    expect(await button('lane-grok')).toMatchObject({ label: 'Grok on' })
+    expect(toasts).toEqual([])
+  })
+
+  test(`a refused Controls toggle toasts the first stderr line and leaves the button as it was on ${surface}`, async ($, on) => {
+    const { fake, toasts } = lanesWorld(on, [{ id: 'gemini', name: 'Gemini', enabled: true, tags: [], data: null, notes: null, kind: null }])
+    const ui = await $.ui.mount({ ...LANE_PANE, surface })
+    await ui.press({ key: 'lane-codex' })
+    expect(fake.writes()).toEqual([WRITE('codex', 'enabled', 'no')])
+    expect(toasts).toEqual(['spick: set_lane: unknown lane id codex; to add a new lane use add_lane.py'])
+    expect((await ui.find({ type: 'Button', key: 'lane-codex' }))?.props.label).toBe('Codex on')
+  })
+
+  test(`every Button on the main pane has its own hotkey, l opens the lanes page, drawing runs no process, on ${surface}`, async ($, on) => {
+    const { fake } = lanesWorld(on)
+    const ui = await $.ui.mount({ ...LANE_PANE, surface })
+    const keys = (await ui.findAll({ type: 'Button' })).map(b => b.props.hotkey).filter(Boolean)
+    expect([...keys].sort()).toEqual(['b', 'c', 'g', 'k', 'l', 'q', 'r', 'v', 'x'])
+    expect(new Set(keys).size).toBe(keys.length)
+    const edit = await ui.find({ type: 'Button', key: 'edit-lanes' })
+    expect(edit?.props).toMatchObject({ label: '[ Edit lanes ]', hotkey: 'l' })
+    // the Edit lanes button sits at the end of the Lanes row
+    const row = (await ui.findAll({ type: 'Box' })).find(b => b.text.startsWith('Lanes') && b.text.includes('Codex'))
+    expect(row?.text.endsWith('[ Edit lanes ]')).toBe(true)
+    expect(fake.calls).toEqual([])
+
+    await ui.press({ key: 'edit-lanes' })
+    expect(fake.calls).toEqual([['python3', SCRIPT, '--list']])
+    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('Edit')
+    expect(await ui.find({ type: 'Button', key: 'routing-auto' })).toBeUndefined()
+    // redrawing the page ran nothing more
+    await ui.find({ type: 'Button', key: 'back' })
+    expect(fake.calls).toHaveLength(1)
+  })
+
+  test(`the lanes page lists every lane, disabled ones too; no Button has a hotkey; Back returns, on ${surface}`, async ($, on) => {
+    const { fake } = lanesWorld(on)
+    fake.rows.find(r => r.id === 'codex')!.enabled = false
+    const ui = await $.ui.mount({ ...LANE_PANE, surface })
+    await ui.press({ key: 'edit-lanes' })
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    expect(texts.some(t => /^lane +tags +data +enabled$/.test(t))).toBe(true)
+    expect(texts.some(t => /^gemini +search +public +yes$/.test(t))).toBe(true)
+    expect(texts.some(t => /^grok +x-data +public +yes$/.test(t))).toBe(true)
+    expect(texts.some(t => /^codex +code +code +no$/.test(t))).toBe(true)
+    expect(texts.some(t => /^openrouter +gateway +text +yes$/.test(t))).toBe(true)
+    const buttons = await ui.findAll({ type: 'Button' })
+    expect(buttons.map(b => b.props.key)).toEqual(['back', 'close'])
+    for (const b of buttons) expect(b.props.hotkey).toBeUndefined()
+    expect(await ui.find({ type: 'Input' })).toBeDefined()
+    expect(texts).not.toContain('To change a lane, type /spick lane <lane> <field> <value> in the prompt.')
+
+    await ui.press({ key: 'back' })
+    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('Controls')
+    expect((await ui.find({ type: 'Button', key: 'lane-codex' }))?.props.label).toBe('Codex off')
+  })
+
+  test(`typing in the lanes page Input does not press anything: x does not close the pane, on ${surface}`, async ($, on) => {
+    const { fake, closes } = lanesWorld(on)
+    const ui = await $.ui.mount({ ...LANE_PANE, surface })
+    await ui.press({ key: 'edit-lanes' })
+    for (const ch of ['x', 'l', 'g', 'b']) await ui.input({ key: 'lane-edit-0', text: ch, kind: 'change' })
+    expect(closes).toEqual([])
+    expect(fake.writes()).toEqual([])
+    expect(await ui.find({ type: 'Button', key: 'close' })).toBeDefined()
+    expect(await ui.find({ type: 'Input', key: 'lane-edit-0' })).toBeDefined()
+    // Close still closes
+    await ui.press({ key: 'close' })
+    expect(closes).toEqual(['spick'])
+  })
+
+  test(`the Input applies "<lane> <field> <value>" through set_lane.py and shows the last change or the refusal, on ${surface}`, async ($, on) => {
+    const { fake } = lanesWorld(on)
+    const ui = await $.ui.mount({ ...LANE_PANE, surface })
+    await ui.press({ key: 'edit-lanes' })
+    const texts = async () => (await ui.findAll({ type: 'Text' })).map(t => t.text)
+
+    await ui.input({ key: 'lane-edit-0', text: 'openrouter tags gateway,cheap' })
+    expect(fake.writes()).toEqual([WRITE('openrouter', 'tags', 'gateway,cheap')])
+    let all = await texts()
+    expect(all).toContain('Last change')
+    expect(all).toContain('openrouter tags: gateway -> gateway,cheap. Backup: spick.json.bak.')
+    expect(all.some(t => /^openrouter +gateway,cheap +text +yes$/.test(t))).toBe(true)
+    // the field was cleared: a new Input stands in its place
+    expect(await ui.find({ type: 'Input', key: 'lane-edit-0' })).toBeUndefined()
+    expect(await ui.find({ type: 'Input', key: 'lane-edit-1' })).toBeDefined()
+
+    // a refusal keeps the last good change, shows the first stderr line, and keeps the text in the field
+    await ui.input({ key: 'lane-edit-1', text: 'nope tags a' })
+    all = await texts()
+    expect(all).toContain('Not changed')
+    expect(all).toContain('set_lane: unknown lane id nope; to add a new lane use add_lane.py')
+    expect(all).toContain('openrouter tags: gateway -> gateway,cheap. Backup: spick.json.bak.')
+    expect(await ui.find({ type: 'Input', key: 'lane-edit-1' })).toBeDefined()
+    // text that is not "<lane> <field> <value>" never reaches the script
+    const writes = fake.writes().length
+    await ui.input({ key: 'lane-edit-1', text: 'openrouter' })
+    expect(await texts()).toContain('type <lane> <field> <value>')
+    expect(fake.writes()).toHaveLength(writes)
+    // on|off works here too; notes keep their case
+    await ui.input({ key: 'lane-edit-1', text: 'openrouter off' })
+    expect(fake.writes().at(-1)).toEqual(WRITE('openrouter', 'enabled', 'no'))
+    await ui.input({ key: 'lane-edit-2', text: 'grok notes Keep Case Here' })
+    expect(fake.writes().at(-1)).toEqual(WRITE('grok', 'notes', 'Keep Case Here'))
+  })
+
+  test(`the lanes page fits 80 columns, long ids and tag lists included, on ${surface}`, async ($, on) => {
+    const long = { id: 'a-very-long-lane-identifier-in-use', name: 'Long', enabled: true, tags: ['alpha-tag', 'bravo-tag', 'charlie-tag', 'delta-tag', 'echo-tag', 'foxtrot-tag', 'golf-tag', 'hotel-tag'], data: null, notes: null, kind: 'relay' }
+    const { fake } = lanesWorld(on, [...LANE_ROWS, long])
+    const ui = await $.ui.mount({ ...LANE_PANE, surface, props: { ...PANE, bodyColumns: 80 }, viewport: { columns: 80, rows: 30 } })
+    await ui.press({ key: 'edit-lanes' })
+    await ui.input({ key: 'lane-edit-0', text: 'openrouter tags gateway,cheap' })
+    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    // 80 columns less the pane's one-column padding on each side
+    for (const t of texts) expect(t.length).toBeLessThanOrEqual(78)
+    expect(texts.some(t => t.startsWith('a-very-long-lan…') && t.includes('…') && /unset +yes$/.test(t))).toBe(true)
+    expect(fake.rows).toHaveLength(5)
+  })
+}
+
+test('on mobile the lanes page has no Input, only the line that says what to type; its Buttons have no hotkeys either', async ($, on) => {
+  const { fake } = lanesWorld(on)
+  const ui = await $.ui.mount({ ...LANE_PANE, surface: 'mobile' })
+  await ui.press({ key: 'edit-lanes' })
+  expect(await ui.findAll({ type: 'Input' })).toEqual([])
+  const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+  expect(texts).toContain('To change a lane, type /spick lane <lane> <field> <value> in the prompt.')
+  expect(texts.some(t => /^gemini +search +public +yes$/.test(t))).toBe(true)
+  const buttons = await ui.findAll({ type: 'Button' })
+  expect(buttons.map(b => b.props.key)).toEqual(['back', 'close'])
+  for (const b of buttons) expect(b.props.hotkey).toBeUndefined()
+  expect(fake.writes()).toEqual([])
 })

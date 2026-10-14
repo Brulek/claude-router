@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
-import type { Controls, LaneInfo, LaneKey, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
-import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
-import { MAIN_LANE, STALE_MS, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, runningLines, table } from './format'
+import type { Controls, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
+import { MAIN_LANE, STALE_MS, bandSegments, clip, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, runningLines, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
@@ -17,6 +17,10 @@ const quota = atom({ plugin: 'spick-dashboard', key: 'quota' } as const, null)
 const hidden = atom({ plugin: 'spick-dashboard', key: 'hidden' } as const, false)
 const controls = atom({ plugin: 'spick-dashboard', key: 'controls' } as const, DEFAULT_CONTROLS)
 const sessionModel = atom({ plugin: 'spick-dashboard', key: 'sessionModel' } as const, '')
+const laneRows = atom({ plugin: 'spick-dashboard', key: 'laneRows' } as const, null)
+const page = atom({ plugin: 'spick-dashboard', key: 'page' } as const, 'main')
+const laneNote = atom({ plugin: 'spick-dashboard', key: 'laneNote' } as const, { change: '', error: '' })
+const editSeq = atom({ plugin: 'spick-dashboard', key: 'editSeq' } as const, 0)
 
 const QUOTA_TTL_MS = 600_000
 const TICK_MS = 1_000
@@ -57,30 +61,126 @@ async function lanesNow($: EngineInterface): Promise<LaneInfo[] | null> {
   } catch { return null }
 }
 
-/** the ids `/spick lane` accepts: the built-ins and every lane the cache registers */
-async function knownLaneIds($: EngineInterface): Promise<string[]> {
-  const extra = ((await lanesNow($)) ?? []).map(l => l.id).filter(id => !LANE_KEYS.includes(id))
-  return [...LANE_KEYS, ...extra]
-}
-
-/** The three remembered choices: routing, review and the lanes (a JSON string). */
+/** The two remembered choices: routing and review. The lanes' on/off is not remembered here: it lives in spick.json. */
 async function loadControls($: EngineInterface): Promise<void> {
   const routing = parseRouting(await $.store.get('spick:routing'))
   const review = parseReview(await $.store.get('spick:review'))
-  const lanes = parseLanes(await $.store.get('spick:lanes'))
   // a manual model pick lasts one session only
-  await update($, controls, () => ({ routing, review, lanes, manualModel: false }))
+  await update($, controls, () => ({ routing, review, manualModel: false }))
 }
 
-/** Change the switches and write the three remembered ones back to $.store. */
+/** Change the switches and write the two remembered ones back to $.store. */
 async function setControls($: EngineInterface, change: (c: Controls) => Controls): Promise<Controls> {
   const next = await update($, controls, change)
   try {
     await $.store.set('spick:routing', next.routing)
     await $.store.set('spick:review', next.review)
-    await $.store.set('spick:lanes', JSON.stringify(next.lanes))
   } catch {}
   return next
+}
+
+// --- lanes: spick.json is written by scripts/set_lane.py only; this module never writes it ---------------------------
+// $.process.run is called from command handlers and onPress closures, never from a render or a hook on the prompt path.
+
+const SET_LANE = '.claude/skills/spick/scripts/set_lane.py'
+const firstLine = (s: string): string => s.split('\n').find(l => l.trim() !== '')?.trim() ?? ''
+
+/** Run set_lane.py with the argv after the script path; ok is exit 0, err the first stderr line. */
+async function runSetLane($: EngineInterface, args: string[]): Promise<{ ok: boolean; stdout: string; err: string }> {
+  try {
+    const home = await $.env.get('HOME')
+    if (!home) return { ok: false, stdout: '', err: 'HOME is not set' }
+    const r = await $.process.run(['python3', `${home}/${SET_LANE}`, ...args])
+    if (r.exitCode === 0) return { ok: true, stdout: r.stdout, err: '' }
+    return { ok: false, stdout: r.stdout, err: firstLine(r.stderr) || `set_lane.py failed (exit ${r.exitCode})` }
+  } catch {
+    return { ok: false, stdout: '', err: 'could not run set_lane.py' }
+  }
+}
+
+const isLaneRow = (r: unknown): r is LaneRow => !!r && typeof r === 'object' && typeof (r as LaneRow).id === 'string' && Array.isArray((r as LaneRow).tags)
+
+/** The lanes as `set_lane.py --list` prints them (disabled ones included); keeps the pane's copy current when it succeeds. */
+async function listLanes($: EngineInterface): Promise<{ rows: LaneRow[] | null; err: string }> {
+  const r = await runSetLane($, ['--list'])
+  if (!r.ok) return { rows: null, err: r.err }
+  try {
+    const doc = JSON.parse(r.stdout) as unknown
+    if (!Array.isArray(doc)) return { rows: null, err: 'set_lane.py --list printed no list' }
+    const rows = doc.filter(isLaneRow).map(x => ({ ...x, enabled: x.enabled !== false, data: x.data ?? null, notes: x.notes ?? null, kind: x.kind ?? null }))
+    await update($, laneRows, () => rows)
+    return { rows, err: '' }
+  } catch {
+    return { rows: null, err: 'set_lane.py --list printed no JSON' }
+  }
+}
+
+/** a field as the lanes list shows it, or null for a field the list does not carry (base_url, model, key_ref ...) */
+function laneField(row: LaneRow | undefined, field: string): string | null {
+  if (!row) return null
+  switch (field) {
+    case 'name': return row.name
+    case 'enabled': return row.enabled ? 'yes' : 'no'
+    case 'tags': return row.tags.length > 0 ? row.tags.join(',') : '-'
+    case 'data': return row.data ?? 'unset'
+    case 'notes': return row.notes ?? '-'
+    case 'kind': return row.kind ?? '-'
+    default: return null
+  }
+}
+
+/**
+ * The one edit path (the command, the Input on the lanes page, the Controls buttons): set_lane.py changes the field,
+ * then the lanes list is read again. The text is the one-line reply; the lanes page keeps it as its last change or last refusal.
+ */
+async function editLane($: EngineInterface, id: string, field: string, value: string): Promise<{ ok: boolean; text: string }> {
+  const before = (await listLanes($)).rows
+  const r = await runSetLane($, ['--id', id, '--field', field, '--value', value])
+  if (!r.ok) {
+    await update($, laneNote, n => ({ ...n, error: r.err }))
+    return { ok: false, text: `spick: ${r.err}` }
+  }
+  const after = (await listLanes($)).rows
+  const was = laneField(before?.find(l => l.id === id), field)
+  const now = laneField(after?.find(l => l.id === id), field)
+  const change = was !== null && now !== null ? `${id} ${field}: ${was} -> ${now}. Backup: spick.json.bak.` : `${id} ${field}: changed. Backup: spick.json.bak.`
+  await update($, laneNote, () => ({ change, error: '' }))
+  return { ok: true, text: `spick: ${change}` }
+}
+
+/** `/spick lane <id>`: the lane's whole record on one line */
+async function laneRecordLine($: EngineInterface, id: string): Promise<string> {
+  const { rows, err } = await listLanes($)
+  if (!rows) return `spick: ${err}`
+  const l = rows.find(x => x.id === id)
+  if (!l) return `spick: unknown lane id ${id.length <= 40 && /^[a-z0-9-]+$/.test(id) ? id : '(not shown)'}`
+  const f = (k: string) => laneField(l, k) ?? '-'
+  return `spick: ${l.id} · enabled ${f('enabled')} · name ${f('name')} · tags ${f('tags')} · data ${f('data')} · kind ${f('kind')} · notes ${f('notes')}`
+}
+
+/** a Controls lane button: flip enabled through set_lane.py; a refusal is a toast */
+async function toggleLane($: EngineInterface, id: string): Promise<void> {
+  const on = (await read($, laneRows))?.find(l => l.id === id)?.enabled ?? true
+  const r = await editLane($, id, 'enabled', on ? 'no' : 'yes')
+  if (!r.ok) $.ui.toast(r.text)
+}
+
+/** the "[ Edit lanes ]" button: read the lanes, then show the page (a failed read shows on the page) */
+async function openLanesPage($: EngineInterface): Promise<void> {
+  const { err } = await listLanes($)
+  if (err) await update($, laneNote, n => ({ ...n, error: err }))
+  await update($, page, () => 'lanes')
+}
+
+/** the Input on the lanes page: "<lane> <field> <value>", the same handler as the command; a good edit clears the field */
+async function submitLaneEdit($: EngineInterface, text: string): Promise<void> {
+  const cmd = parseLaneText(text)
+  if (!cmd || cmd.kind !== 'lane-set') {
+    await update($, laneNote, n => ({ ...n, error: 'type <lane> <field> <value>' }))
+    return
+  }
+  const r = await editLane($, cmd.lane, cmd.field, cmd.value)
+  if (r.ok) await update($, editSeq, n => n + 1)
 }
 
 /** The session model, read fresh where the engine answers, else the last one read. */
@@ -147,7 +247,8 @@ async function quotaLine($: EngineInterface, force: boolean): Promise<string> {
 async function statusParagraph($: EngineInterface): Promise<string> {
   const c = await read($, controls)
   const eff = effectiveRouting(c, await readSessionModel($))
-  const lanes = (await knownLaneIds($)).map(k => `${laneName(k)} ${c.lanes[k] !== false ? 'on' : 'off'}`).join(', ')
+  const rows = await read($, laneRows)
+  const lanes = (rows ?? LANE_KEYS.map(id => ({ id, enabled: true }))).map(l => `${laneName(l.id)} ${l.enabled ? 'on' : 'off'}`).join(', ')
   const quotaText = await quotaLine($, false).catch(() => 'spick: quota not read')
   return `spick: routing ${c.routing}, ${eff.why}; review ${c.review}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
 }
@@ -250,7 +351,7 @@ function passThrough<E, R>($: unknown, e: E, next: (e: E) => R): R {
 const routingOptions: readonly Routing[] = ['auto', 'on', 'off']
 const reviewOptions: readonly Review[] = ['auto', 'off']
 const nextRouting = (r: Routing): Routing => (r === 'auto' ? 'on' : r === 'on' ? 'off' : 'auto')
-const LANE_HOTKEYS: Record<LaneKey, string> = { gemini: 'g', grok: 'k', codex: 'c' }
+const LANE_HOTKEYS: Record<string, string> = { gemini: 'g', grok: 'k', codex: 'c' }
 
 const clock = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
 
@@ -570,7 +671,7 @@ export const register: Register = on => {
 
   // Every change answers one line; the pane redraws from the state it reads.
   on('command.run', { command: 'spick' }, async ($, e) => {
-    const cmd = parseSpick(e.args, await knownLaneIds($))
+    const cmd = parseSpick(e.args)
     switch (cmd.kind) {
       case 'band':
         await update($, hidden, () => cmd.hidden)
@@ -583,15 +684,18 @@ export const register: Register = on => {
       case 'review':
         await setControls($, c => ({ ...c, review: cmd.value }))
         return { text: `spick: review ${cmd.value}` }
-      case 'lane':
-        await setControls($, c => ({ ...c, lanes: { ...c.lanes, [cmd.lane]: cmd.on } }))
-        return { text: `spick: ${laneName(cmd.lane)} lane ${cmd.on ? 'on' : 'off'}` }
+      case 'lane-show':
+        return { text: await laneRecordLine($, cmd.lane) }
+      case 'lane-set':
+        return { text: (await editLane($, cmd.lane, cmd.field, cmd.value)).text }
       case 'quota':
         return { text: await quotaLine($, true).catch(() => 'spick: quota not read') }
       case 'usage':
         return { text: USAGE }
       case 'open': {
         await refreshQuota($, true).catch(() => undefined)
+        await listLanes($)
+        await update($, page, () => 'main')
         const surfaces = await $.session.surfaces().catch(() => [] as const)
         if (surfaces.length === 0) return { text: await statusParagraph($) }
         const placed = await $.ui.open({ id: PANE, title: 'SPICK', closeOnEscape: true })
@@ -639,8 +743,67 @@ export const register: Register = on => {
 
   // The pane: the controls, then the session, quota and recent turns, spacing and weight only, no borders.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
-    const { Box, Text, Button } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Text, Button } = ui
+    // no Input on mobile: its table has none
+    const Input = e.surface !== 'mobile' && 'Input' in ui ? ui.Input : undefined
     const ctl = await read($, controls)
+    const rowsNow = await read($, laneRows)
+    if ((await read($, page)) === 'lanes') {
+      const note = await read($, laneNote)
+      const seq = await read($, editSeq)
+      // lane, tags, data, enabled: every lane, the disabled ones too; cells cut so a line fits 80 columns
+      const laneTable = table([
+        ['lane', 'tags', 'data', 'enabled'],
+        ...(rowsNow ?? []).map(l => [clip(l.id, 16), clip(l.tags.join(',') || '-', 30), l.data ?? 'unset', l.enabled ? 'yes' : 'no']),
+      ], ['l', 'l', 'l', 'l'])
+      // the lanes page has no hotkeys: a letter typed into the field must not press anything
+      return (
+        <Box flexDirection="column" paddingX={1}>
+          <Box flexDirection="row" justifyContent="space-between">
+            <Box flexDirection="row">
+              <Text bold color="claude">SPICK</Text>
+              <Text bold>{'  Lanes'}</Text>
+            </Box>
+            <Box flexDirection="row">
+              <Button key="back" label="Back" variant="secondary" onPress={() => { void update($, page, () => 'main').catch(() => undefined) }} />
+              <Text>{' '}</Text>
+              <Button key="close" label="Close" variant="secondary" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />
+            </Box>
+          </Box>
+
+          <Box flexDirection="column" marginTop={1}>
+            {rowsNow === null ? <Text color="subtle">lanes not read</Text> : null}
+            {rowsNow === null ? null : laneTable.map((line, i) => (i === 0 ? <Text color="subtle">{line.trimEnd()}</Text> : <Text>{line.trimEnd()}</Text>))}
+          </Box>
+
+          <Box flexDirection="column" marginTop={1}>
+            <Text bold>Edit</Text>
+            <Box flexDirection="column" paddingLeft={2}>
+              {Input
+                ? <Input key={`lane-edit-${seq}`} label="> " placeholder="<lane> <field> <value>" submitLabel="apply" autoFocus onSubmit={value => { void submitLaneEdit($, value).catch(() => undefined) }} />
+                : <Text>{'To change a lane, type /spick lane <lane> <field> <value> in the prompt.'}</Text>}
+              <Text color="subtle">Fields  name tags data enabled notes kind api model max_tokens base_url</Text>
+              <Text color="subtle">{'        key_ref meter_type meter_preset health_url'}</Text>
+              <Text color="subtle">enabled yes|no · data public|text|code|unset · tags a,b,c · - clears</Text>
+            </Box>
+          </Box>
+
+          {note.change ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold>Last change</Text>
+              <Box flexDirection="column" paddingLeft={2}><Text>{note.change}</Text></Box>
+            </Box>
+          ) : null}
+          {note.error ? (
+            <Box flexDirection="column" marginTop={1}>
+              <Text bold>Not changed</Text>
+              <Box flexDirection="column" paddingLeft={2}><Text color="error">{note.error}</Text></Box>
+            </Box>
+          ) : null}
+        </Box>
+      )
+    }
     const eff = effectiveRouting(ctl, (await read($, sessionModel)) || mainModel)
     const t = await read($, totals)
     const runningNow = await read($, running)
@@ -721,12 +884,19 @@ export const register: Register = on => {
             </Box>
             <Box flexDirection="row">
               <Text>{padRight('Lanes', 10)}</Text>
-              {LANE_KEYS.flatMap((k, i) => [
-                i > 0 ? <Text>{' '}</Text> : null,
-                <Button key={`lane-${k}`} label={`${LANE_NAMES[k]} ${ctl.lanes[k] ? 'on' : 'off'}`}
-                  variant={ctl.lanes[k] ? 'primary' : 'secondary'} hotkey={LANE_HOTKEYS[k]}
-                  onPress={() => { void setControls($, c => ({ ...c, lanes: { ...c.lanes, [k]: !c.lanes[k] } })).catch(() => undefined) }} />,
-              ])}
+              {LANE_KEYS.flatMap((k, i) => {
+                // the switch is spick.json's lane_registry.<id>.enabled, read from set_lane.py --list; on until that has been read
+                const isOn = rowsNow?.find(l => l.id === k)?.enabled ?? true
+                return [
+                  i > 0 ? <Text>{' '}</Text> : null,
+                  <Button key={`lane-${k}`} label={`${LANE_NAMES[k]} ${isOn ? 'on' : 'off'}`}
+                    variant={isOn ? 'primary' : 'secondary'} hotkey={LANE_HOTKEYS[k]}
+                    onPress={() => { void toggleLane($, k).catch(() => undefined) }} />,
+                ]
+              })}
+              <Text>{' '}</Text>
+              <Button key="edit-lanes" label="[ Edit lanes ]" variant="secondary" hotkey="l"
+                onPress={() => { void openLanesPage($).catch(() => undefined) }} />
             </Box>
             <Box flexDirection="row">
               <Text>{padRight('Band', 10)}</Text>

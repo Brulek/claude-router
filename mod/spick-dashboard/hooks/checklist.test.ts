@@ -1,17 +1,14 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
-import { DEFAULT_CONTROLS, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, offSentence, reviewOffNote, effectiveRouting, laneOffNote, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
+import { DEFAULT_CONTROLS, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, offSentence, reviewOffNote, effectiveRouting, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
 const FABLE = 'claude-fable-5-1'
-const ctl = (patch: Partial<Controls> = {}): Controls => ({ ...DEFAULT_CONTROLS, ...patch, lanes: { ...DEFAULT_CONTROLS.lanes, ...(patch.lanes ?? {}) } })
+const ctl = (patch: Partial<Controls> = {}): Controls => ({ ...DEFAULT_CONTROLS, ...patch })
 
 test('the off sentence and notes read exactly as the spec words them', () => {
   expect(offSentence(true)).toBe('Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; still end with the label line.')
   expect(reviewOffNote(true)).toBe('Codex review is off: skip the review step and write `Review: off` in the label line.')
-  expect(laneOffNote('gemini')).toBe('Gemini lane is off: use the fallback chain.')
-  expect(laneOffNote('grok')).toBe('Grok lane is off: use the fallback chain. X data has no fallback: say so.')
-  expect(laneOffNote('codex')).toBe('Codex lane is off: use the fallback chain.')
 })
 
 test('routing on: the three questions, the bash hook\'s substance, no notes', () => {
@@ -35,24 +32,22 @@ test('routing off: the off sentence alone', () => {
   expect(checklist(ctl({ routing: 'on' }), FABLE, true)).not.toBe(offSentence(true))
 })
 
-test('a lane that is off leaves the checklist and adds its note', () => {
-  const noGemini = checklist(ctl({ lanes: { gemini: false, grok: true, codex: true } }), HAIKU, true)
-  expect(noGemini).toContain('web lookup -> Grok; X data -> Grok.')
-  expect(noGemini).not.toContain('Gemini (agy)')
-  expect(noGemini.split('\n').at(-1)).toBe('Gemini lane is off: use the fallback chain.')
-
-  const noGrok = checklist(ctl({ lanes: { gemini: true, grok: false, codex: true } }), HAIKU, true)
-  expect(noGrok).toContain('web lookup -> Gemini (agy). Pick an effort')
-  expect(noGrok).not.toContain('X data ->')
-  expect(noGrok).toContain('Grok lane is off: use the fallback chain. X data has no fallback: say so.')
-
-  const neither = checklist(ctl({ lanes: { gemini: false, grok: false, codex: true } }), HAIKU, true)
-  expect(neither).toContain('web lookup -> Agent(deep) with WebSearch.')
-
-  const noCodex = checklist(ctl({ lanes: { gemini: true, grok: true, codex: false } }), HAIKU, true)
+test('a lane switched off is simply absent from the cache: no note, the Lanes line shows what is enabled', () => {
+  const on = [
+    { id: 'gemini', kind: 'cli-subscription', tags: ['search'], data: 'public' },
+    { id: 'grok', kind: 'cli-subscription', tags: ['x-data'], data: 'public' },
+    { id: 'codex', kind: 'cli-subscription', tags: ['code'], data: 'code' },
+  ]
+  const all = checklist(ctl(), HAIKU, true, undefined, on).split('\n')
+  expect(all.at(-1)).toBe('Lanes (user-declared; data = most that may be sent): gemini search data:public · grok x-data data:public · codex code data:code')
+  expect(all.join('\n')).toContain('Review: Codex gpt-6-astra (medium)')
+  const noGemini = checklist(ctl(), HAIKU, true, undefined, on.slice(1)).split('\n')
+  expect(noGemini.at(-1)).toBe('Lanes (user-declared; data = most that may be sent): grok x-data data:public · codex code data:code')
+  expect(noGemini.join('\n')).not.toContain('lane is off')
+  // codex absent from the enabled lanes: no Codex reviewer in the label example
+  const noCodex = checklist(ctl(), HAIKU, true, undefined, on.slice(0, 2))
   expect(noCodex).not.toContain('Codex gpt-6-astra')
   expect(noCodex).toContain('Review: skipped]')
-  expect(noCodex.split('\n').at(-1)).toBe('Codex lane is off: use the fallback chain.')
 })
 
 test('review off adds its note and the label example reads Review: off', () => {
@@ -60,9 +55,6 @@ test('review off adds its note and the label example reads Review: off', () => {
   expect(block).toContain('| Review: off]')
   expect(block).not.toContain('Codex gpt-6-astra')
   expect(block.split('\n').at(-1)).toBe(reviewOffNote(true))
-  // lane notes first, the review note last
-  const both = checklist(ctl({ review: 'off', lanes: { gemini: false, grok: true, codex: true } }), HAIKU, true).split('\n')
-  expect(both.slice(-2)).toEqual([laneOffNote('gemini'), reviewOffNote(true)])
 })
 
 test('effectiveRouting states the value for this session and why', () => {
@@ -79,9 +71,6 @@ test('stored values parse, a malformed one falls back to the default', () => {
   expect(parseRouting(undefined)).toBe('auto')
   expect(parseReview('off')).toBe('off')
   expect(parseReview(3)).toBe('auto')
-  expect(parseLanes(JSON.stringify({ gemini: false, grok: true, codex: false }))).toEqual({ gemini: false, grok: true, codex: false })
-  expect(parseLanes('{not json')).toEqual({ gemini: true, grok: true, codex: true })
-  expect(parseLanes(JSON.stringify({ grok: 'no' }))).toEqual({ gemini: true, grok: true, codex: true })
 })
 
 test('/spick arguments parse; anything else is usage', () => {
@@ -90,11 +79,11 @@ test('/spick arguments parse; anything else is usage', () => {
   expect(parseSpick('auto')).toEqual({ kind: 'routing', value: 'auto' })
   expect(parseSpick('review on')).toEqual({ kind: 'review', value: 'auto' })
   expect(parseSpick('review off')).toEqual({ kind: 'review', value: 'off' })
-  expect(parseSpick('lane grok off')).toEqual({ kind: 'lane', lane: 'grok', on: false })
+  expect(parseSpick('lane grok off')).toEqual({ kind: 'lane-set', lane: 'grok', field: 'enabled', value: 'no' })
   expect(parseSpick('hide')).toEqual({ kind: 'band', hidden: true })
   expect(parseSpick('show')).toEqual({ kind: 'band', hidden: false })
   expect(parseSpick('quota')).toEqual({ kind: 'quota' })
-  for (const bad of ['lane', 'lane claude off', 'review', 'on now', 'details']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
+  for (const bad of ['lane', 'lane   ', 'lane glm tags', 'review', 'on now', 'details']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
 })
 
 test('with every switch at its default the block is the bash hook\'s text, word for word', () => {
@@ -163,15 +152,19 @@ test('without declared lanes the checklist is the old one', () => {
   expect(checklist(ctl(), HAIKU, true, undefined, [])).toBe(checklist(ctl(), HAIKU, true))
 })
 
-test('a declared lane switched off leaves the Lanes line and adds the plain off note', () => {
-  const block = checklist(ctl({ lanes: { glm: false } }), HAIKU, true, undefined, DECLARED).split('\n')
-  expect(block.at(-2)).toBe('glm lane is off for this session')
-  expect(block.at(-1)).not.toContain('glm chinese')
-  expect(laneOffNote('grok', true)).toBe('grok lane is off for this session')
-})
-
-test('/spick lane accepts the ids it is told are registered', () => {
-  expect(parseSpick('lane glm off', ['gemini', 'glm'])).toEqual({ kind: 'lane', lane: 'glm', on: false })
-  expect(parseSpick('lane glm off')).toEqual({ kind: 'usage' })
-  expect(parseLanes(JSON.stringify({ gemini: false, glm: false, 'Bad Id': false }))).toEqual({ gemini: false, grok: true, codex: true, glm: false })
+test('/spick lane forms: show, on|off maps to enabled, any field with a free-text value', () => {
+  expect(parseSpick('lane glm')).toEqual({ kind: 'lane-show', lane: 'glm' })
+  expect(parseSpick('lane glm on')).toEqual({ kind: 'lane-set', lane: 'glm', field: 'enabled', value: 'yes' })
+  expect(parseSpick(' LANE GLM Off ')).toEqual({ kind: 'lane-set', lane: 'glm', field: 'enabled', value: 'no' })
+  expect(parseSpick('lane glm enabled no')).toEqual({ kind: 'lane-set', lane: 'glm', field: 'enabled', value: 'no' })
+  // a tag list, and notes with spaces and case kept
+  expect(parseSpick('lane openrouter tags gateway,cheap')).toEqual({ kind: 'lane-set', lane: 'openrouter', field: 'tags', value: 'gateway,cheap' })
+  expect(parseSpick('lane glm notes  Use for Chinese   drafts only ')).toEqual({ kind: 'lane-set', lane: 'glm', field: 'notes', value: 'Use for Chinese   drafts only' })
+  expect(parseSpick('lane glm name GLM Plan A')).toEqual({ kind: 'lane-set', lane: 'glm', field: 'name', value: 'GLM Plan A' })
+  // an unknown id is not the parser's to refuse: set_lane.py does
+  expect(parseSpick('lane claude off')).toEqual({ kind: 'lane-set', lane: 'claude', field: 'enabled', value: 'no' })
+  // the Input on the lanes page sends "<lane> <field> <value>" through the same parser
+  expect(parseLaneText('glm tags a,b')).toEqual({ kind: 'lane-set', lane: 'glm', field: 'tags', value: 'a,b' })
+  expect(parseLaneText('')).toBeNull()
+  expect(USAGE).toBe(`spick: usage /spick ${ARGUMENT_HINT}`)
 })

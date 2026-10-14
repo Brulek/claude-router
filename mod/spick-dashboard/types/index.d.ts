@@ -57,11 +57,13 @@ export type Review = 'auto' | 'off'
 export type LaneKey = string
 /** a declared lane as the quota cache carries it (notes, urls and key_ref are never in the cache) */
 export type LaneInfo = { id: string; kind?: string; tags: string[]; data?: string | null }
+/** a lane as `set_lane.py --list` prints it (no key_ref, no base_url) */
+export type LaneRow = { id: string; name: string; enabled: boolean; tags: string[]; data: string | null; notes: string | null; kind: string | null }
+/** the lanes page's last edit and last refusal, both one line */
+export type LaneNote = { change: string; error: string }
 export type Controls = {
   routing: Routing
   review: Review
-  /** true = the outside lane may be used */
-  lanes: Record<LaneKey, boolean>
   /** the user picked a model by hand this session: routing is off until /spick on or /spick auto */
   manualModel: boolean
 }
@@ -80,10 +82,18 @@ declare module 'claude-code' {
       totals: Record<string, LaneTotals>
       quota: Quota | null
       hidden: boolean
-      /** the switches; routing, review and lanes are also kept in $.store */
+      /** the switches; routing and review are also kept in $.store (the lanes' on/off lives in spick.json) */
       controls: Controls
       /** the session model id from $.session.model(), '' until read */
       sessionModel: string
+      /** the lanes as set_lane.py --list last printed them, null until a command or press read them */
+      laneRows: LaneRow[] | null
+      /** which page the pane shows */
+      page: 'main' | 'lanes'
+      /** the lanes page's last edit and refusal */
+      laneNote: LaneNote
+      /** counts the lanes page's edit field, so a submit clears it */
+      editSeq: number
     }
   }
 }

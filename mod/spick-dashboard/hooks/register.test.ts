@@ -1,6 +1,7 @@
 import { test, expect, mock } from 'claude-code/testing'
 import type { Engine, Plugin, TestBody } from 'claude-code/testing'
 import type { LaneTotals, TurnRecord } from '../types'
+import { SCRIPT, fakeSetLane } from './fakelane'
 
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 
@@ -445,30 +446,39 @@ test('session.start resolves when the store, the session model and fs.write all 
   expect((await $.command.run({ command: 'spick', args: 'off', ...RUN })).text).toBe('spick: routing off')
 })
 
-test('/spick lane gemini off persists to the store and the next session.start reads it back', async ($, on) => {
+test('review off persists to the store and the next session.start reads it back; the lanes switch is not in the store', async ($, on) => {
   mock.clock(on)
-  mock.store(on)
+  const written: string[] = []
+  const held = new Map<string, unknown>()
+  on('store.get', async (_$, e) => ({ value: held.get(e.key) }))
+  on('store.set', async (_$, e) => { written.push(e.key); held.set(e.key, e.value); return { value: undefined } })
+  mock.env(on, { HOME: '/h' })
+  const fake = fakeSetLane(on)
   session(on)
   await $.session.start(START)
-  expect((await $.command.run({ command: 'spick', args: 'lane gemini off', ...RUN })).text).toBe('spick: Gemini lane off')
   expect((await $.command.run({ command: 'spick', args: 'review off', ...RUN })).text).toBe('spick: review off')
+  expect((await $.command.run({ command: 'spick', args: 'lane gemini off', ...RUN })).text).toBe('spick: gemini enabled: yes -> no. Backup: spick.json.bak.')
+  expect(fake.rows.find(r => r.id === 'gemini')?.enabled).toBe(false)
 
   // a new session: the state starts from the store, so only what was written comes back
   await $.session.start(START)
   const block = (await contextOf($))[0] ?? ''
-  expect(block).toContain('Gemini lane is off: use the fallback chain.')
-  expect(block).toContain('web lookup -> Grok')
   expect(block).toContain('Codex review is off: skip the review step.')
+  // the lane switch lives in spick.json (and reaches the checklist through the cache), not in the mod's store
+  expect(written.length).toBeGreaterThan(0)
+  expect(written).not.toContain('spick:lanes')
 })
 
-test('session.start reads the three stored choices', async ($, on) => {
+test('session.start reads the two stored choices and ignores an old spick:lanes', async ($, on) => {
   mock.clock(on)
   mock.store(on, { 'spick:routing': 'off', 'spick:review': 'auto', 'spick:lanes': JSON.stringify({ gemini: true, grok: false, codex: true }) })
   session(on)
   await $.session.start(START)
   expect(await contextOf($)).toEqual([OFF])
   await $.command.run({ command: 'spick', args: 'on', ...RUN })
-  expect((await contextOf($))[0]).toContain('Grok lane is off: use the fallback chain. X data has no fallback: say so.')
+  const block = (await contextOf($))[0] ?? ''
+  expect(block).toContain('X data -> Grok')
+  expect(block).not.toContain('lane is off')
 })
 
 test('/model by the user turns routing off for the session with one toast; /spick auto restores', async ($, on) => {
@@ -570,13 +580,16 @@ test('/spick quota answers with the meters text', async ($, on) => {
 test('every /spick answer is one line starting with spick:', async ($, on) => {
   mock.clock(on)
   mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  fakeSetLane(on)
   session(on)
   await $.session.start(START)
   const answer = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text ?? ''
-  expect(await answer('lane claude off')).toBe('spick: usage /spick [on|off|auto|review on|off|lane <gemini|grok|codex> on|off|hide|show|quota]')
+  expect(await answer('details')).toBe('spick: usage /spick [on|off|auto|review on|off|lane <id> [<field> <value>]|hide|show|quota]')
+  expect(await answer('lane glm')).toBe('spick: unknown lane id glm')
   expect(await answer('hide')).toBe('spick: band hidden · /spick show restores it')
   expect(await answer('show')).toBe('spick: band shown')
-  for (const args of ['on', 'off', 'auto', 'review on', 'review off', 'lane grok on', 'lane codex off', 'hide', 'show', 'quota', 'what']) {
+  for (const args of ['on', 'off', 'auto', 'review on', 'review off', 'lane grok on', 'lane codex off', 'lane claude off', 'lane grok', 'lane openrouter notes Two words', 'lane grok tags', 'hide', 'show', 'quota', 'what']) {
     const text = await answer(args)
     expect(text.startsWith('spick: ')).toBe(true)
     expect(text).not.toContain('\n')
@@ -592,10 +605,12 @@ test('/spick with no UI surface prints a one-paragraph status', async ($, on) =>
   on('fs.read', async () => ({ deny: 'missing' }))
   on('fs.list', async () => ({ value: [] }))
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  mock.env(on, { HOME: '/h' })
+  fakeSetLane(on)
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
   const text = (await $.command.run({ command: 'spick', args: '', ...RUN })).text ?? ''
-  expect(text).toBe('spick: routing auto, on (Haiku 5.5 session); review auto; lanes: Gemini on, Grok on, Codex off; band shown; quota unknown (no local data for claude or codex).')
+  expect(text).toBe('spick: routing auto, on (Haiku 5.5 session); review auto; lanes: Gemini on, Grok on, Codex off, openrouter on; band shown; quota unknown (no local data for claude or codex).')
   expect(text).not.toContain('\n')
 })
 
@@ -616,18 +631,79 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   expect(without[0]).not.toContain('Quota')
 })
 
-test('lanes in the cache switch line 2 to the capability wording and add the Lanes line; /spick lane takes a registered id', async ($, on) => {
+test('lanes in the cache switch line 2 to the capability wording and add the Lanes line; a lane switched off is simply gone from the cache', async ($, on) => {
   mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
   mock.store(on)
   mock.env(on, { HOME: '/h' })
+  fakeSetLane(on, [{ id: 'gemini', name: 'Gemini', enabled: true, tags: ['search'], data: 'public', notes: null, kind: 'cli-subscription' }, { id: 'glm', name: 'glm', enabled: true, tags: ['cheap'], data: 'text', notes: null, kind: 'api-key' }])
   session(on)
-  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[{"id":"glm","kind":"api-key","tags":["cheap"],"data":"text"}]}'
+  const lane = (id: string, kind: string, tags: string, data: string) => `{"id":"${id}","kind":"${kind}","tags":["${tags}"],"data":"${data}"}`
+  let cache = `{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[${lane('gemini', 'cli-subscription', 'search', 'public')},${lane('glm', 'api-key', 'cheap', 'text')}]}`
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const lines = ((await contextOf($))[0] ?? '').split('\n')
   expect(lines[2]).toContain('a task an outside lane is tagged for')
-  expect(lines.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): glm cheap data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
+  expect(lines.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): gemini search data:public · glm cheap data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
   expect(lines.at(-1)).toBe('Quota (cache 4m old): glm: no meter (declared plan only).')
-  expect((await $.command.run({ command: 'spick', args: 'lane glm off', ...RUN })).text).toBe('spick: glm lane off')
-  expect(((await contextOf($))[0] ?? '').split('\n').at(-2)).toBe('glm lane is off for this session')
+  expect((await $.command.run({ command: 'spick', args: 'lane glm off', ...RUN })).text).toBe('spick: glm enabled: yes -> no. Backup: spick.json.bak.')
+  // set_lane.py rebuilt the cache (quota.py --relane): glm is out of its lanes list
+  cache = `{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[${lane('gemini', 'cli-subscription', 'search', 'public')}]}`
+  const after = ((await contextOf($))[0] ?? '').split('\n')
+  expect(after.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): gemini search data:public')
+  expect(after.join('\n')).not.toContain('lane is off')
+})
+
+// --- /spick lane through set_lane.py ------------------------------------------------------
+
+async function laneWorld($: Engine, on: Parameters<TestBody>[1]) {
+  mock.clock(on)
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const fake = fakeSetLane(on)
+  session(on)
+  await $.session.start(START)
+  const run = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text ?? ''
+  return { fake, run }
+}
+
+test('/spick lane <id> <field> <value> runs set_lane.py with an argv array, the value verbatim', async ($, on) => {
+  const { fake, run } = await laneWorld($, on)
+  expect(await run('lane openrouter tags gateway,cheap')).toBe('spick: openrouter tags: gateway -> gateway,cheap. Backup: spick.json.bak.')
+  expect(fake.writes()).toEqual([['python3', SCRIPT, '--id', 'openrouter', '--field', 'tags', '--value', 'gateway,cheap']])
+  // notes keep their case and inner spaces
+  expect(await run('lane openrouter notes  Use for Chinese   Drafts ONLY ')).toBe('spick: openrouter notes: Pay per use -> Use for Chinese   Drafts ONLY. Backup: spick.json.bak.')
+  expect(fake.writes().at(-1)).toEqual(['python3', SCRIPT, '--id', 'openrouter', '--field', 'notes', '--value', 'Use for Chinese   Drafts ONLY'])
+  // a field the list does not carry
+  expect(await run('lane openrouter model some/model-1')).toBe('spick: openrouter model: changed. Backup: spick.json.bak.')
+})
+
+test('/spick lane <id> on|off still works and now maps to the enabled field', async ($, on) => {
+  const { fake, run } = await laneWorld($, on)
+  expect(await run('lane codex off')).toBe('spick: codex enabled: yes -> no. Backup: spick.json.bak.')
+  expect(fake.writes()).toEqual([['python3', SCRIPT, '--id', 'codex', '--field', 'enabled', '--value', 'no']])
+  expect(await run('lane codex on')).toBe('spick: codex enabled: no -> yes. Backup: spick.json.bak.')
+  expect(fake.writes().at(-1)).toEqual(['python3', SCRIPT, '--id', 'codex', '--field', 'enabled', '--value', 'yes'])
+  expect(fake.rows.find(r => r.id === 'codex')?.enabled).toBe(true)
+})
+
+test('a refusal (non-zero exit) answers spick: plus the first stderr line, and writes nothing', async ($, on) => {
+  const { fake, run } = await laneWorld($, on)
+  expect(await run('lane nope tags a')).toBe('spick: set_lane: unknown lane id nope; to add a new lane use add_lane.py')
+  expect(await run('lane grok notes sk-abcdefghijklmnopqrstuvwxyz')).toBe('spick: set_lane: the value looks like a secret; not written')
+  expect(await run('lane grok bogus x')).toBe('spick: set_lane: unknown field bogus; fields: name, tags, data')
+  expect(fake.rows.find(r => r.id === 'grok')).toMatchObject({ notes: null, tags: ['x-data'] })
+})
+
+test('/spick lane <id> shows the lane\'s whole record on one line', async ($, on) => {
+  const { run } = await laneWorld($, on)
+  expect(await run('lane openrouter')).toBe('spick: openrouter · enabled yes · name OpenRouter · tags gateway · data text · kind api-key · notes Pay per use')
+  expect(await run('lane nope')).toBe('spick: unknown lane id nope')
+})
+
+test('the prompt path runs no process', async ($, on) => {
+  const { fake } = await laneWorld($, on)
+  fake.calls.length = 0
+  await contextOf($)
+  await $.prompt.submit(PROMPT)
+  expect(fake.calls).toEqual([])
 })

@@ -234,6 +234,8 @@ export function runningLines(rows: readonly RunningAgent[], now: number): { line
 }
 
 export function padRight(s: string, w: number): string { return s + ' '.repeat(Math.max(0, w - s.length)) }
+/** s cut to n characters, an ellipsis last when it was longer */
+export function clip(s: string, n: number): string { return s.length > n ? s.slice(0, Math.max(0, n - 1)) + '…' : s }
 export function padLeft(s: string, w: number): string { return ' '.repeat(Math.max(0, w - s.length)) + s }
 
 /** Fixed-width columns, two spaces between, aligned per column. Every row comes back the same length. */
