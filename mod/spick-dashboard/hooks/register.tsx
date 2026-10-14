@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register, RenderSurface } from 'claude-code'
+import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 import type { Controls, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
-import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
-import { MAIN_LANE, STALE_MS, bandSegments, clip, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, runningLines, table } from './format'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
+import { HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, estimateCost, fmtAge, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaCells, quotaMeters, recentLines, runningLines, table, tagLine, usageLines, wrapWords } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
@@ -352,8 +352,8 @@ const routingOptions: readonly Routing[] = ['auto', 'on', 'off']
 const reviewOptions: readonly Review[] = ['auto', 'off']
 const nextRouting = (r: Routing): Routing => (r === 'auto' ? 'on' : r === 'on' ? 'off' : 'auto')
 const LANE_HOTKEYS: Record<string, string> = { gemini: 'g', grok: 'k', codex: 'c' }
-
-const clock = (ms: number) => { const d = new Date(ms); return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}` }
+/** the lanes page's field help, two lines at 80 columns (the fields set_lane.py takes) */
+const LANE_HELP = ['name tags data enabled notes kind base_url api model max_tokens', 'key_ref meter_type meter_preset health_url · enabled yes|no']
 
 // Every hook here only observes: its own work sits in try/catch so a failure
 // still ends in next(e), and next's own result is never swallowed.
@@ -741,7 +741,9 @@ export const register: Register = on => {
     )
   })
 
-  // The pane: the controls, then the session, quota and recent turns, spacing and weight only, no borders.
+  // The pane: plain text in a label column (LABEL_W) and a value column, no borders, no chips. Each row you can act on
+  // holds one plain Button; the engine draws its hotkey in front of the value (`r: auto · on · off`). Below
+  // NARROW_BELOW columns a section's label sits on its own line and its content is indented two.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
@@ -749,61 +751,90 @@ export const register: Register = on => {
     const Input = e.surface !== 'mobile' && 'Input' in ui ? ui.Input : undefined
     const ctl = await read($, controls)
     const rowsNow = await read($, laneRows)
-    if ((await read($, page)) === 'lanes') {
-      const note = await read($, laneNote)
-      const seq = await read($, editSeq)
-      // lane, tags, data, enabled: every lane, the disabled ones too; cells cut so a line fits 80 columns
-      const laneTable = table([
-        ['lane', 'tags', 'data', 'enabled'],
-        ...(rowsNow ?? []).map(l => [clip(l.id, 16), clip(l.tags.join(',') || '-', 30), l.data ?? 'unset', l.enabled ? 'yes' : 'no']),
-      ], ['l', 'l', 'l', 'l'])
-      // the lanes page has no hotkeys: a letter typed into the field must not press anything
+    const isNarrow = e.props.bodyColumns < NARROW_BELOW
+    // the pane pads one column each side
+    const W = Math.max(20, e.props.bodyColumns - 2)
+    const contentW = W - (isNarrow ? 2 : LABEL_W)
+    const rows = e.props.scroll?.bodyRows || e.viewport?.rows || 30
+    // lines drawn so far, so the Recent list never scrolls past the bottom
+    let used = 0
+
+    const sub = (text: string) => <Text color="subtle">{text}</Text>
+    const strong = (text: string) => <Text bold color="claude">{text}</Text>
+    /** the selected value in brand bold, the others subtle, joined by ` · ` */
+    const choice = (all: readonly string[], picked: string): RenderElement[] =>
+      all.flatMap((v, i) => (i > 0 ? [sub(' · '), v === picked ? strong(v) : sub(v)] : [v === picked ? strong(v) : sub(v)]))
+    /** a section: its label in the label column on the first row (own line when narrow), one row per entry */
+    const part = (label: string, lines: RenderElement[][]): RenderElement => {
+      used += lines.length + (isNarrow ? 1 : 0)
       return (
-        <Box flexDirection="column" paddingX={1}>
-          <Box flexDirection="row" justifyContent="space-between">
+        <Box flexDirection="column">
+          {isNarrow ? <Text bold>{label}</Text> : null}
+          {lines.map((cells, i) => (
             <Box flexDirection="row">
-              <Text bold color="claude">SPICK</Text>
-              <Text bold>{'  Lanes'}</Text>
+              {isNarrow ? <Text>{'  '}</Text> : i === 0 ? <Text bold>{padRight(label, LABEL_W)}</Text> : <Text>{' '.repeat(LABEL_W)}</Text>}
+              {cells}
             </Box>
-            <Box flexDirection="row">
-              <Button key="back" label="Back" variant="secondary" onPress={() => { void update($, page, () => 'main').catch(() => undefined) }} />
-              <Text>{' '}</Text>
-              <Button key="close" label="Close" variant="secondary" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />
-            </Box>
-          </Box>
-
-          <Box flexDirection="column" marginTop={1}>
-            {rowsNow === null ? <Text color="subtle">lanes not read</Text> : null}
-            {rowsNow === null ? null : laneTable.map((line, i) => (i === 0 ? <Text color="subtle">{line.trimEnd()}</Text> : <Text>{line.trimEnd()}</Text>))}
-          </Box>
-
-          <Box flexDirection="column" marginTop={1}>
-            <Text bold>Edit</Text>
-            <Box flexDirection="column" paddingLeft={2}>
-              {Input
-                ? <Input key={`lane-edit-${seq}`} label="> " placeholder="<lane> <field> <value>" submitLabel="apply" autoFocus onSubmit={value => { void submitLaneEdit($, value).catch(() => undefined) }} />
-                : <Text>{'To change a lane, type /spick lane <lane> <field> <value> in the prompt.'}</Text>}
-              <Text color="subtle">Fields  name tags data enabled notes kind api model max_tokens base_url</Text>
-              <Text color="subtle">{'        key_ref meter_type meter_preset health_url'}</Text>
-              <Text color="subtle">enabled yes|no · data public|text|code|unset · tags a,b,c · - clears</Text>
-            </Box>
-          </Box>
-
-          {note.change ? (
-            <Box flexDirection="column" marginTop={1}>
-              <Text bold>Last change</Text>
-              <Box flexDirection="column" paddingLeft={2}><Text>{note.change}</Text></Box>
-            </Box>
-          ) : null}
-          {note.error ? (
-            <Box flexDirection="column" marginTop={1}>
-              <Text bold>Not changed</Text>
-              <Box flexDirection="column" paddingLeft={2}><Text color="error">{note.error}</Text></Box>
-            </Box>
-          ) : null}
+          ))}
         </Box>
       )
     }
+    /** sections set apart from the one above by one blank line */
+    const block = (...parts: RenderElement[]): RenderElement => {
+      used += 1
+      return <Box flexDirection="column" marginTop={1}>{parts}</Box>
+    }
+    const line = (text: string) => [<Text>{clip(text, contentW)}</Text>]
+
+    /** SPICK on the left, the right-hand controls at the edge */
+    const titleRow = (left: RenderElement[], leftLen: number, right: RenderElement[], rightLen: number): RenderElement => {
+      used += 1
+      return (
+        <Box flexDirection="row">
+          {left}
+          <Text>{' '.repeat(Math.max(1, W - leftLen - rightLen))}</Text>
+          {right}
+        </Box>
+      )
+    }
+
+    if ((await read($, page)) === 'lanes') {
+      const note = await read($, laneNote)
+      const seq = await read($, editSeq)
+      const header = titleRow(
+        [<Text bold color="claude">SPICK</Text>, <Text>{'  lanes'}</Text>], 12,
+        [
+          <Button key="back" plain label="back" onPress={() => { void update($, page, () => 'main').catch(() => undefined) }} />,
+          <Text>{'  '}</Text>,
+          <Button key="close" plain label="close" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />,
+        ], 'back  close'.length)
+
+      // lane, tags, data, enabled: every declared lane, the disabled ones too, cells cut so a line fits
+      const idMax = isNarrow ? 12 : 16
+      const laneTable = rowsNow === null ? [] : table([
+        ['lane', 'tags', 'data', isNarrow ? 'on' : 'enabled'],
+        ...rowsNow.map(l => [clip(l.id, idMax), l.tags.length > 0 ? tagLine(l.tags, isNarrow ? 12 : 30) : '-', l.data ?? 'unset', l.enabled ? 'yes' : 'no']),
+      ], ['l', 'l', 'l', 'l']).map(l => l.trimEnd())
+      const help = isNarrow ? wrapWords(LANE_HELP.join(' '), contentW) : LANE_HELP
+      // the lanes page has no hotkeys: a letter typed into the field must not press anything
+      const editRow = Input
+        ? [<Input key={`lane-edit-${seq}`} label="> " placeholder="<lane> <field> <value>  (- clears)" submitLabel="apply" autoFocus onSubmit={value => { void submitLaneEdit($, value).catch(() => undefined) }} />]
+        : [<Text>{'To change a lane, type /spick lane <lane> <field> <value> in the prompt.'}</Text>]
+      return (
+        <Box flexDirection="column" paddingX={1}>
+          {header}
+          {block(part('Lanes', rowsNow === null ? [[sub('lanes not read')]] : laneTable.map((l, i) => (i === 0 ? [sub(l)] : line(l)))))}
+          {block(part('Edit', [editRow, ...help.map(h => [sub(h)])]))}
+          {note.change || note.error
+            ? block(...[
+                note.change ? part('Changed', [line(note.change)]) : null,
+                note.error ? part('Refused', [[<Text color="error">{clip(note.error, contentW)}</Text>]]) : null,
+              ].filter((x): x is RenderElement => x !== null))
+            : null}
+        </Box>
+      )
+    }
+
     const eff = effectiveRouting(ctl, (await read($, sessionModel)) || mainModel)
     const t = await read($, totals)
     const runningNow = await read($, running)
@@ -813,142 +844,97 @@ export const register: Register = on => {
     // a manual model pick shows as off: the switch's value for this session
     const shownRouting: Routing = ctl.manualModel ? 'off' : ctl.routing
     const now = await $.clock.now()
-    const rows = e.props.scroll?.bodyRows || e.viewport?.rows || 30
 
-    const isNarrow = e.props.bodyColumns < 80
-    const barCells = isNarrow ? 5 : 10
+    const header = titleRow(
+      [
+        <Text bold color="claude">SPICK</Text>,
+        <Text>{'  '}</Text>,
+        eff.on ? sub('routing on') : <Text color="warning">routing off</Text>,
+        sub(' · '),
+        <Button key="band" plain hotkey="b" onPress={() => { void update($, hidden, v => !v) }}>{sub(isHidden ? 'band hidden' : 'band shown')}</Button>,
+      ], 7 + (eff.on ? 10 : 11) + 3 + HOTKEY_W + (isHidden ? 11 : 10),
+      [<Button key="close" plain hotkey="x" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }}>close</Button>],
+      HOTKEY_W + 5)
 
-    // "This session" is the table's header row: its heading and column headers share one row
-    const lanes = Object.entries(t).sort((a, b) => b[1].turns - a[1].turns)
-    const totalCost = lanes.reduce<number | null>((acc, [, v]) => (v.costUsd === null ? acc : (acc ?? 0) + v.costUsd), null)
-    const sessionTable = table([
-      ['This session', 'turns', 'at API rates'],
-      ...lanes.map(([lane, v]) => ['  ' + lane, String(v.turns), fmtCost(v.costUsd)]),
-      ...(lanes.length > 1 ? [['  total', String(lanes.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)]] : []),
-    ], ['l', 'r', 'r'])
-    const headCut = 'This session'.length
+    // routing and review sit together; the note under routing says why it reads as it does
+    const controlsBlock = block(
+      part('Routing', [
+        // r moves on to the next value: auto -> on -> off -> auto
+        [<Button key="routing" plain hotkey="r" onPress={() => { void setControls($, c => ({ ...c, routing: nextRouting(shownRouting), manualModel: false })).catch(() => undefined) }}>{choice(routingOptions, shownRouting)}</Button>],
+        [sub(' '.repeat(HOTKEY_W) + clip(eff.why, contentW - HOTKEY_W))],
+      ]),
+      part('Review', [
+        // v flips between the two
+        [<Button key="review" plain hotkey="v" onPress={() => { void setControls($, c => ({ ...c, review: c.review === 'auto' ? 'off' : 'auto' })).catch(() => undefined) }}>{choice(reviewOptions, ctl.review)}</Button>],
+      ]))
+
+    // g k c flip a built-in lane (spick.json's lane_registry.<id>.enabled, read from set_lane.py --list; on until that has been read)
+    const nameW = Math.max(...LANE_KEYS.map(k => laneName(k).length))
+    const tagW = contentW - HOTKEY_W - nameW - 2 - 3 - 2
+    const laneLines = LANE_KEYS.map(k => {
+      const row = rowsNow?.find(l => l.id === k)
+      const isOn = row?.enabled ?? true
+      const tags = row && row.tags.length > 0 ? tagLine(row.tags, tagW) : ''
+      return [
+        <Button key={`lane-${k}`} plain hotkey={LANE_HOTKEYS[k]} onPress={() => { void toggleLane($, k).catch(() => undefined) }}>
+          <Text>{padRight(laneName(k), nameW) + '  '}</Text>{isOn ? strong('on') : sub('off')}
+        </Button>,
+        ...(tags ? [sub(' '.repeat(isOn ? 3 : 2) + tags)] : []),
+      ]
+    })
+    laneLines.push([
+      <Button key="edit-lanes" plain hotkey="l" onPress={() => { void openLanesPage($).catch(() => undefined) }}>
+        {[<Text>edit lanes</Text>, ...(isNarrow ? [] : [sub(' · every field, every declared lane')])]}
+      </Button>,
+    ])
+    const lanesBlock = block(part('Lanes', laneLines))
+
+    const runningView = runningLines(runningNow, now)
+    const runningBlock = runningNow.length > 0
+      ? block(part('Running', [...runningView.lines.map(line), ...(runningView.more > 0 ? [[sub(`and ${runningView.more} more`)]] : [])]))
+      : null
+
+    // lanes with turns, most turns first; the head row sits right of the label, the lane names under it
+    const entries = Object.entries(t).sort((a, b) => b[1].turns - a[1].turns)
+    const usage = usageLines(entries)
+    const usageBlock = block(part('Usage', entries.length === 0 ? [[sub('none yet')]] : usage.map((l, i) => (i === 0 ? [sub(l)] : line(l)))))
 
     // only claude and codex; a provider with no window data gets no row
-    const quotaRows = ([['claude', q?.claude], ['codex', q?.codex]] as [string, QuotaWindows | null | undefined][]).map(([name, w]) => {
-      const cells: { lead: string; meter: string }[] = []
-      for (const [label, pct] of [['5h', w?.fiveHour], ['7d', w?.sevenDay]] as const) {
-        if (pct === undefined) continue
-        cells.push({ lead: `${cells.length > 0 ? '     ' : ''}${label}  `, meter: `${quotaBar(pct, barCells)} ${String(Math.round(pct)).padStart(3)}%` })
-      }
-      return { name: padRight(name, 8), cells }
-    }).filter(r => r.cells.length > 0)
-    const quotaNote = !q ? 'not read' : quotaRows.length === 0 ? 'unknown' : ''
+    const barCells = isNarrow ? 5 : 10
+    const quotaRows = ([['claude', q?.claude], ['codex', q?.codex]] as [string, QuotaWindows | null | undefined][])
+      .map(([name, w]) => ({ name, cells: quotaCells(w, barCells) }))
+      .filter(r => r.cells.length > 0)
+    const quotaBlock = block(part('Quota', [
+      ...(q && quotaRows.length === 0 ? [[sub('unknown')]] : []),
+      ...quotaRows.map(r => [<Text>{padRight(r.name, 8) + r.cells.join('   ')}</Text>]),
+      [<Button key="refresh" plain hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }}>
+        <Text>refresh</Text>{sub(q ? ` · read ${fmtAge(now - q.readAt)}` : ' · not read')}
+      </Button>],
+    ]))
 
-    // rows the pane uses besides the turn list, so the list never scrolls past the bottom
-    const runningView = runningLines(runningNow, now)
-    const runningUsed = runningNow.length > 0 ? 2 + runningView.lines.length + (runningView.more > 0 ? 1 : 0) : 0
-    const used = runningUsed + 2 + 5 + (isNarrow ? 1 : 0) + 2 + sessionTable.length + 2 + 1 + Math.max(quotaRows.length, quotaNote ? 1 : 0) + 2
-    const recent = list.slice(0, Math.max(1, rows - used))
-    const recentTable = table(
-      recent.map(r => [clock(r.startedAt), r.lane, r.model, r.effort ?? '', fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt)]),
-      ['l', 'l', 'l', 'l', 'r'])
+    // what is left of the viewport after everything above and the blank line before Recent
+    const room = Math.max(1, rows - used - 1 - (isNarrow ? 1 : 0))
+    const recent = list.slice(0, Math.min(room, isNarrow ? NARROW_RECENT_ROWS : list.length))
+    const recentBlock = recent.length > 0
+      ? block(part('Recent', recentLines(recent, isNarrow).map((text, i) => {
+          const note = recent[i]?.note
+          if (!note) return line(text)
+          const fits = contentW - text.length - 2
+          if (fits < 6) return line(text)
+          const parts = noteParts({ ...note, text: clip(note.text, fits) })
+          return [<Text>{text + '  '}</Text>, ...parts.map(p => (p.style === 'warning' || p.style === 'error' ? <Text color={p.style}>{p.text}</Text> : <Text>{p.text}</Text>))]
+        })))
+      : null
 
     return (
       <Box flexDirection="column" paddingX={1}>
-        <Box flexDirection="row" justifyContent="space-between">
-          <Text bold color="claude">SPICK</Text>
-          <Button key="close" label="Close" variant="secondary" hotkey="x" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />
-        </Box>
-
-        <Box flexDirection="column" marginTop={1}>
-          <Text bold>Controls</Text>
-          <Box flexDirection="column" paddingLeft={2}>
-            <Box flexDirection="row">
-              <Text>{padRight('Routing', 10)}</Text>
-              {routingOptions.flatMap((v, i) => [
-                i > 0 ? <Text>{' '}</Text> : null,
-                <Button key={`routing-${v}`} label={`${shownRouting === v ? '◉' : '○'} ${v}`}
-                  variant={shownRouting === v ? 'primary' : 'secondary'}
-                  // r presses the next value's button: auto -> on -> off -> auto; the active one does nothing
-                  hotkey={nextRouting(shownRouting) === v ? 'r' : undefined}
-                  onPress={() => { if (shownRouting !== v) void setControls($, c => ({ ...c, routing: v, manualModel: false })).catch(() => undefined) }} />,
-              ])}
-              {isNarrow ? null : <Text color="subtle">{'      ' + eff.why}</Text>}
-            </Box>
-            {isNarrow ? <Text color="subtle">{' '.repeat(10) + eff.why}</Text> : null}
-            <Box flexDirection="row">
-              <Text>{padRight('Review', 10)}</Text>
-              {reviewOptions.flatMap((v, i) => [
-                i > 0 ? <Text>{' '}</Text> : null,
-                <Button key={`review-${v}`} label={`${ctl.review === v ? '◉' : '○'} ${v}`}
-                  variant={ctl.review === v ? 'primary' : 'secondary'}
-                  // v presses the other option
-                  hotkey={ctl.review !== v ? 'v' : undefined}
-                  onPress={() => { if (ctl.review !== v) void setControls($, c => ({ ...c, review: v })).catch(() => undefined) }} />,
-              ])}
-            </Box>
-            <Box flexDirection="row">
-              <Text>{padRight('Lanes', 10)}</Text>
-              {LANE_KEYS.flatMap((k, i) => {
-                // the switch is spick.json's lane_registry.<id>.enabled, read from set_lane.py --list; on until that has been read
-                const isOn = rowsNow?.find(l => l.id === k)?.enabled ?? true
-                return [
-                  i > 0 ? <Text>{' '}</Text> : null,
-                  <Button key={`lane-${k}`} label={`${LANE_NAMES[k]} ${isOn ? 'on' : 'off'}`}
-                    variant={isOn ? 'primary' : 'secondary'} hotkey={LANE_HOTKEYS[k]}
-                    onPress={() => { void toggleLane($, k).catch(() => undefined) }} />,
-                ]
-              })}
-              <Text>{' '}</Text>
-              <Button key="edit-lanes" label="[ Edit lanes ]" variant="secondary" hotkey="l"
-                onPress={() => { void openLanesPage($).catch(() => undefined) }} />
-            </Box>
-            <Box flexDirection="row">
-              <Text>{padRight('Band', 10)}</Text>
-              <Button key="band" label={isHidden ? 'hidden' : 'shown'} variant={isHidden ? 'secondary' : 'primary'} hotkey="b"
-                onPress={() => { void update($, hidden, v => !v) }} />
-            </Box>
-          </Box>
-        </Box>
-
-        {runningNow.length > 0 ? (
-          <Box flexDirection="column" marginTop={1}>
-            <Text bold>Running</Text>
-            <Box flexDirection="column" paddingLeft={2}>
-              {runningView.lines.map(line => <Text>{line}</Text>)}
-              {runningView.more > 0 ? <Text color="subtle">{`and ${runningView.more} more`}</Text> : null}
-            </Box>
-          </Box>
-        ) : null}
-
-        <Box flexDirection="column" marginTop={1}>
-          {sessionTable.map((line, i) =>
-            i === 0 ? (lanes.length > 0 ? <Text><Text bold>{line.slice(0, headCut)}</Text><Text color="subtle">{line.slice(headCut)}</Text></Text> : <Text bold>This session</Text>)
-            : <Text>{line}</Text>)}
-        </Box>
-
-        <Box flexDirection="column" marginTop={1}>
-          <Box flexDirection="row">
-            <Text bold>Quota</Text>
-            {q ? <Text>{'  '}</Text> : null}
-            {q ? <Text color="subtle">{fmtAge(now - q.readAt)}</Text> : null}
-            <Text>{'  '}</Text>
-            <Button key="refresh" label="Refresh" variant="secondary" hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }} />
-          </Box>
-          <Box flexDirection="column" paddingLeft={2}>
-            {quotaNote ? <Text color="subtle">{quotaNote}</Text> : null}
-            {quotaRows.map(r => <Text>{r.name}{r.cells.flatMap(c => [c.lead, c.meter])}</Text>)}
-          </Box>
-        </Box>
-
-        {recent.length > 0 ? (
-          <Box flexDirection="column" marginTop={1}>
-            <Text bold>Recent turns</Text>
-            <Box flexDirection="column" paddingLeft={2}>
-              {recentTable.map((line, i) => {
-                const note = recent[i]?.note
-                if (!note) return <Text>{line}</Text>
-                return <Text>{`${line}   `}{noteParts(note).map(p => (p.style === 'warning' || p.style === 'error' ? <Text color={p.style}>{p.text}</Text> : p.text))}</Text>
-              })}
-            </Box>
-          </Box>
-        ) : null}
-
+        {header}
+        {controlsBlock}
+        {lanesBlock}
+        {runningBlock}
+        {usageBlock}
+        {quotaBlock}
+        {recentBlock}
       </Box>
     )
   })

@@ -11,6 +11,39 @@ const tick = () => new Promise<void>(r => timers.setTimeout(r, 1))
 const RUN = { origin: { kind: 'composer' as const }, presentation: { isFullscreen: false, columns: 80 } }
 const PANE = { title: 'SPICK', isFocused: false, bodyColumns: 80, placement: 'inline' as const, scroll: { offset: 0, bodyRows: 30 }, view: {} }
 
+// --- reading the pane as text: the drawn tree, one string per screen line ---------------------------------------------
+type Drawn = string | { type?: string; props?: Record<string, unknown>; children?: unknown[] }
+/** what a row shows inline: strings and Text joined; a plain Button as the engine draws it (`r: ` in front), else its label */
+const inlineText = (n: unknown): string => {
+  if (typeof n === 'string') return n
+  const o = n as Exclude<Drawn, string>
+  const kids = (o.children ?? []).map(inlineText).join('')
+  if (o.type === 'Button') return (o.props?.plain && o.props.hotkey ? `${String(o.props.hotkey)}: ` : '') + (kids || String(o.props?.label ?? ''))
+  if (o.type === 'Input') return String(o.props?.label ?? '') + String(o.props?.placeholder ?? '')
+  return kids
+}
+/** a row Box is one line, a column Box with marginTop is a blank line then its children, anything else is one line */
+function drawnLines(n: unknown, out: string[] = []): string[] {
+  const o = n as Exclude<Drawn, string>
+  if (typeof n === 'string') out.push(n)
+  else if (o.type === 'Box' && o.props?.flexDirection === 'row') out.push(inlineText(o))
+  else if (o.type === 'Box') {
+    if (o.props?.marginTop) out.push('')
+    for (const c of o.children ?? []) drawnLines(c, out)
+  } else out.push(inlineText(o))
+  return out
+}
+type Mounted = { drawn: () => Promise<unknown> }
+const linesOf = async (ui: Mounted) => drawnLines(await ui.drawn())
+const mountPane = ($: Engine, surface: 'terminal' | 'desktop' | 'mobile' = 'terminal', columns = 80, rows = 40) =>
+  $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'Pane', requestId: 'spick', props: { ...PANE, bodyColumns: columns, scroll: { offset: 0, bodyRows: rows } }, viewport: { columns, rows } })
+const paneLinesAt = async ($: Engine, columns = 80, surface: 'terminal' | 'desktop' | 'mobile' = 'terminal') => {
+  const ui = await mountPane($, surface, columns)
+  const out = await linesOf(ui)
+  await ui.unmount()
+  return out
+}
+
 for (const surface of ['terminal', 'desktop'] as const) {
   test(`band draws the last turn, dim, on ${surface}`, async ($, on) => {
     const clock = mock.clock(on, { now: 1000 })
@@ -118,43 +151,43 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect((await ui.findAll({ type: 'Text' })).map(t => t.text).join('')).toBe('SPICK   Idle · last turn: main session')
   })
 
-  test(`pane draws the sections and toggles the band on ${surface}`, async ($, on) => {
+  test(`pane draws the sections and toggles the band from the title row on ${surface}`, async ($, on) => {
     mock.clock(on, { now: 1000 })
     on('turn.start', async ($, e) => ({ turnId: e.turnId }))
     on('turn.complete', async ($, e) => ({ text: e.answer }))
     await $.turn.start({ text: 'hi', turnId: 't1' })
     await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
 
-    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'Pane', requestId: 'spick', props: PANE, viewport: { columns: 82, rows: 30 } })
-    const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    const ui = await mountPane($, surface)
+    const all = await linesOf(ui)
     // turn.start refreshed the quota (nothing readable in the test, so no provider has data)
-    for (const want of ['SPICK', 'This session', 'Quota', 'just now', 'unknown', 'Recent turns']) expect(all).toContain(want)
-    // one lane: no total row; the heading row carries the column headers
-    expect(all.some(t => t.startsWith('total') || t.includes('  total'))).toBe(false)
-    expect(all.some(t => t.includes('turns') && t.includes('at API rates'))).toBe(true)
-    expect(all.some(t => /^ {2}main session +1 +\$3\.00$/.test(t))).toBe(true)
-    expect(all.some(t => /^\d\d:\d\d  main session/.test(t))).toBe(true)
-    expect(all.some(t => /\byou\b/.test(t))).toBe(false)
-    // no tagline, price note, refreshed word, nor grok/gemini rows
-    expect(all.join('\n')).not.toMatch(/stop pick|list pric|refreshed|not a bill|grok|gemini/)
-    // only the one subtle unknown line, no per-provider rows
-    expect(all.some(t => t.startsWith('claude') || t.startsWith('codex'))).toBe(false)
+    for (const want of [/^SPICK {2}routing off · b: band shown +x: close$/, /^Routing {3}r: /, /^Review {4}v: /, /^Lanes {5}g: /, /^Usage /, /^Quota {5}unknown$/, /^ {10}q: refresh · read just now$/, /^Recent /]) {
+      expect(all.some(l => want.test(l))).toBe(true)
+    }
+    // one lane: no total row; the head row carries the column heads
+    expect(all.some(l => /\btotal\b/.test(l))).toBe(false)
+    expect(all.some(l => /^Usage {5}\s+turns {2}at API rates$/.test(l))).toBe(true)
+    expect(all.some(l => /^ {10}main session +1 +\$3\.00$/.test(l))).toBe(true)
+    expect(all.some(l => /^Recent {4}\d\d:\d\d {2}main session/.test(l))).toBe(true)
+    expect(all.some(l => /\byou\b/.test(l))).toBe(false)
+    // no tagline, price note, refreshed word, nor grok/gemini rows beyond the Lanes section's own
+    expect(all.join('\n')).not.toMatch(/stop pick|list pric|refreshed|not a bill|This session|Controls|Close|Refresh/)
     expect((await ui.find({ type: 'Text', text: 'unknown' }))?.props).toMatchObject({ color: 'subtle' })
-    // the Band button keeps the hide/show toggle
-    expect((await ui.find({ type: 'Button', key: 'band' }))?.props.label).toBe('shown')
+    // the band toggle sits in the title row, a plain Button with hotkey b
+    expect(await ui.find({ type: 'Button', key: 'band' })).toMatchObject({ props: { plain: true, hotkey: 'b' }, text: 'band shown' })
     await ui.press({ key: 'band' })
-    expect((await ui.find({ type: 'Button', key: 'band' }))?.props.label).toBe('hidden')
+    expect((await linesOf(ui))[0]).toMatch(/^SPICK {2}routing off · b: band hidden +x: close$/)
   })
 
-  test(`pane hides Recent turns without turns and says not read before the first read on ${surface}`, async ($, on) => {
+  test(`pane hides Recent without turns and says not read before the first read on ${surface}`, async ($, on) => {
     mock.clock(on, { now: 1000 })
-    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'Pane', requestId: 'spick', props: PANE, viewport: { columns: 82, rows: 30 } })
-    const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-    expect(all).not.toContain('Recent turns')
-    expect(all).not.toContain('no turns yet')
-    expect(all).toContain('not read')
-    expect(all).not.toContain('unknown')
-    expect(all.some(t => t.includes('just now') || t.includes('m ago'))).toBe(false)
+    const all = await paneLinesAt($, 80, surface)
+    expect(all.some(l => l.startsWith('Recent'))).toBe(false)
+    expect(all.some(l => l.includes('no turns yet'))).toBe(false)
+    expect(all).toContain('Quota     q: refresh · not read')
+    expect(all.some(l => /^Quota/.test(l) && l.includes('unknown'))).toBe(false)
+    expect(all.some(l => l.includes('just now') || l.includes('m ago'))).toBe(false)
+    expect(all).toContain('Usage     none yet')
   })
 
   test(`pane shows a total row from two lanes, and quota rows only for providers with data, five-cell bars when narrow, on ${surface}`, async ($, on) => {
@@ -169,26 +202,19 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'agy -p "x"' })
     await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 0, isAborted: false, reason: 'answer', usage: USAGE })
 
-    const pane = async (columns: number) => {
-      const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'Pane', requestId: 'spick', props: { ...PANE, bodyColumns: columns }, viewport: { columns, rows: 30 } })
-      const texts = await ui.findAll({ type: 'Text' })
-      await ui.unmount()
-      return texts
-    }
-    let texts = await pane(100)
-    let all = texts.map(t => t.text)
-    for (let i = 0; i < 50 && !all.some(t => t.startsWith('claude')); i++) { await tick(); texts = await pane(100); all = texts.map(t => t.text) }
-    expect(all.some(t => /^ {2}total +2 /.test(t))).toBe(true)
-    expect(all.some(t => t.startsWith('claude'))).toBe(true)
-    expect(all.some(t => t.startsWith('codex'))).toBe(false)
-    expect(all).not.toContain('unknown')
-    expect(all.some(t => t.startsWith('claude') && t.includes('5h  ▰▱▱▱▱▱▱▱▱▱   5%') && t.includes('7d  ▰▰▰▰▰▰▰▰▰▱  85%'))).toBe(true)
-    // narrow: five-cell bars
-    const narrow = (await pane(60)).map(t => t.text)
-    expect(narrow.some(t => t.startsWith('claude') && t.includes('5h  ▱▱▱▱▱   5%') && t.includes('7d  ▰▰▰▰▱  85%'))).toBe(true)
+    let all = await paneLinesAt($, 100, surface)
+    for (let i = 0; i < 50 && !all.some(l => l.startsWith('Quota     claude')); i++) { await tick(); all = await paneLinesAt($, 100, surface) }
+    expect(all.some(l => /^ {10}total +2 /.test(l))).toBe(true)
+    expect(all).toContain('Quota     claude  5h ▰▱▱▱▱▱▱▱▱▱   5%   7d ▰▰▰▰▰▰▰▰▰▱  85%')
+    expect(all.some(l => l.includes('codex'))).toBe(false)
+    expect(all.includes('          unknown')).toBe(false)
+    // narrow: five-cell bars, the label on its own line
+    const narrow = await paneLinesAt($, 60, surface)
+    expect(narrow).toContain('  claude  5h ▱▱▱▱▱   5%   7d ▰▰▰▰▱  85%')
+    expect(narrow).toContain('Quota')
   })
 
-  test(`pane opens with the Controls section, Close in the title row and the routing note on its own line when narrow, on ${surface}`, async ($, on) => {
+  test(`pane Buttons are all plain, with the nine hotkeys, each once, and no chrome, on ${surface}`, async ($, on) => {
     mock.clock(on, { now: 1000 })
     mock.store(on)
     mock.env(on, { HOME: '/h' })
@@ -199,64 +225,81 @@ for (const surface of ['terminal', 'desktop'] as const) {
     await $.session.start({ cwd: '/repo', surface, isInteractive: true })
     await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
 
-    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'Pane', requestId: 'spick', props: PANE, viewport: { columns: 82, rows: 30 } })
-    const all = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-    expect(all.indexOf('Controls')).toBeGreaterThan(-1)
-    expect(all.indexOf('Controls')).toBeLessThan(all.findIndex(t => t.startsWith('Quota')))
-    for (const label of ['Routing   ', 'Review    ', 'Lanes     ', 'Band      ']) expect(all).toContain(label)
-    expect(all).toContain('      on (Haiku 5.5 session)')
+    const ui = await mountPane($, surface)
+    const buttons = await ui.findAll({ type: 'Button' })
+    expect(buttons.map(b => b.props.key)).toEqual(['band', 'close', 'routing', 'review', 'lane-gemini', 'lane-grok', 'lane-codex', 'edit-lanes', 'refresh'])
+    for (const b of buttons) expect(b.props.plain).toBe(true)
+    const keys = buttons.map(b => b.props.hotkey as string)
+    expect([...keys].sort()).toEqual(['b', 'c', 'g', 'k', 'l', 'q', 'r', 'v', 'x'])
+    expect(new Set(keys).size).toBe(keys.length)
+    const hotkeyOf = async (key: string) => (await ui.find({ type: 'Button', key }))?.props.hotkey
+    expect(await Promise.all(['close', 'band', 'routing', 'review', 'lane-gemini', 'lane-grok', 'lane-codex', 'edit-lanes', 'refresh'].map(hotkeyOf))).toEqual(['x', 'b', 'r', 'v', 'g', 'k', 'c', 'l', 'q'])
+    expect((await ui.find({ type: 'Button', key: 'close' }))?.props.role).toBe('dismiss')
+    // no pills, radio dots, brackets or a help line of keys
+    const text = (await linesOf(ui)).join('\n')
+    expect(text).not.toMatch(/[◉○\[\]]/)
+    expect(text).not.toMatch(/\bkeys?\b/i)
+    // codex was switched off through set_lane.py: its row reads off, in subtle
+    expect(await linesOf(ui)).toContain('          c: Codex   off  code')
+    expect((await ui.findAll({ type: 'Text', text: /^off$/ })).map(t => t.props.color)).toEqual(['subtle', 'subtle', 'subtle'])
+  })
 
-    const button = async (key: string) => (await ui.find({ type: 'Button', key }))?.props
-    // r and v sit on the value they move to: auto -> on, auto -> off
-    expect(await button('routing-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
-    expect((await button('routing-auto'))?.hotkey).toBeUndefined()
-    expect(await button('routing-on')).toMatchObject({ label: '○ on', variant: 'secondary', hotkey: 'r' })
-    expect(await button('routing-off')).toMatchObject({ label: '○ off', variant: 'secondary' })
-    expect(await button('review-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
-    expect(await button('review-off')).toMatchObject({ label: '○ off', variant: 'secondary', hotkey: 'v' })
-    expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini on', variant: 'primary', hotkey: 'g' })
-    expect(await button('lane-grok')).toMatchObject({ label: 'Grok on', variant: 'primary', hotkey: 'k' })
-    expect(await button('lane-codex')).toMatchObject({ label: 'Codex off', variant: 'secondary', hotkey: 'c' })
-    expect(await button('edit-lanes')).toMatchObject({ label: '[ Edit lanes ]', hotkey: 'l' })
-    expect(await button('band')).toMatchObject({ label: 'shown', hotkey: 'b' })
-    expect(await button('refresh')).toMatchObject({ label: 'Refresh', hotkey: 'q' })
-    expect(await button('close')).toMatchObject({ label: 'Close', hotkey: 'x', role: 'dismiss' })
+  test(`r cycles routing auto, on, off, auto; v toggles review; g k c flip the lanes; the selected value is brand bold, on ${surface}`, async ($, on) => {
+    mock.clock(on, { now: 1000 })
+    mock.store(on)
+    mock.env(on, { HOME: '/h' })
+    fakeSetLane(on)
+    on('session.model', async () => ({ value: 'claude-haiku-5-5' }))
+    on('fs.write', async () => ({ value: undefined }))
+    on('session.start', async ($, e) => ({ cwd: e.cwd }))
+    await $.session.start({ cwd: '/repo', surface, isInteractive: true })
+    await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
 
-    // SPICK left, Close right: the title row holds both
-    const titleRow = (await ui.findAll({ type: 'Box' })).find(b => b.props.justifyContent === 'space-between' && b.text.startsWith('SPICK'))
-    expect(titleRow).toBeDefined()
-    expect(titleRow?.text).toContain('Close')
-    // pressing the active value does nothing
-    await ui.press({ key: 'routing-auto' })
-    expect(await button('routing-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
-    // r's button sets on; r then moves to off, then back to auto
-    await ui.press({ key: 'routing-on' })
-    expect(await button('routing-on')).toMatchObject({ label: '◉ on', variant: 'primary' })
-    expect((await button('routing-off'))?.hotkey).toBe('r')
-    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('      on (forced)')
-    await ui.press({ key: 'routing-off' })
-    expect(await button('routing-off')).toMatchObject({ label: '◉ off', variant: 'primary' })
-    expect((await button('routing-auto'))?.hotkey).toBe('r')
-    // a button that is not the active one sets its own value directly
-    await ui.press({ key: 'routing-on' })
-    expect(await button('routing-on')).toMatchObject({ label: '◉ on', variant: 'primary' })
-    // a lane toggles, through set_lane.py (the Controls row is the persisted switch)
+    const ui = await mountPane($, surface)
+    const lines = async () => linesOf(ui)
+    expect(await lines()).toContain('Routing   r: auto · on · off')
+    expect(await lines()).toContain('             on (Haiku 5.5 session)')
+    expect(await lines()).toContain('Review    v: auto · off')
+    expect((await lines())[0]).toMatch(/^SPICK {2}routing on · /)
+    expect((await ui.find({ type: 'Text', text: 'SPICK' }))?.props).toMatchObject({ bold: true, color: 'claude' })
+    const props = async (re: RegExp) => (await ui.findAll({ type: 'Text', text: re })).map(t => t.props)
+    // the selected value is brand bold, the unselected ones subtle, the section labels bold
+    expect(await props(/^auto$/)).toEqual([{ bold: true, color: 'claude' }, { bold: true, color: 'claude' }])
+    expect((await props(/^on$/))[0]).toEqual({ color: 'subtle' })
+    expect((await props(/^off$/))[0]).toEqual({ color: 'subtle' })
+    expect((await ui.find({ type: 'Text', text: 'Routing   ' }))?.props).toMatchObject({ bold: true })
+
+    // r: auto -> on -> off -> auto
+    await ui.press({ key: 'routing' })
+    expect(await lines()).toContain('Routing   r: auto · on · off')
+    expect(await lines()).toContain('             on (forced)')
+    expect((await props(/^on$/))[0]).toEqual({ bold: true, color: 'claude' })
+    expect((await props(/^auto$/))[0]).toEqual({ color: 'subtle' })
+    await ui.press({ key: 'routing' })
+    expect(await lines()).toContain('             off (forced)')
+    expect((await lines())[0]).toMatch(/^SPICK {2}routing off · /)
+    expect(await props(/^routing off$/)).toEqual([{ color: 'warning' }])
+    await ui.press({ key: 'routing' })
+    expect(await lines()).toContain('             on (Haiku 5.5 session)')
+    // v: auto <-> off
+    await ui.press({ key: 'review' })
+    expect((await props(/^off$/))[1]).toEqual({ bold: true, color: 'claude' })
+    expect((await props(/^auto$/))[1]).toEqual({ color: 'subtle' })
+    await ui.press({ key: 'review' })
+    expect((await props(/^auto$/))[1]).toEqual({ bold: true, color: 'claude' })
+    // a lane toggles, through set_lane.py
+    expect(await lines()).toContain('Lanes     g: Gemini  on   search')
     await ui.press({ key: 'lane-gemini' })
-    expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini off', variant: 'secondary' })
+    expect(await lines()).toContain('Lanes     g: Gemini  off  search')
     await ui.press({ key: 'lane-gemini' })
-    expect(await button('lane-gemini')).toMatchObject({ label: 'Gemini on', variant: 'primary' })
-    // review: the active option does nothing, the other sets it and takes no hotkey
-    await ui.press({ key: 'review-auto' })
-    expect(await button('review-auto')).toMatchObject({ label: '◉ auto', variant: 'primary' })
-    await ui.press({ key: 'review-off' })
-    expect(await button('review-off')).toMatchObject({ label: '◉ off', variant: 'primary' })
-    expect((await button('review-auto'))?.hotkey).toBe('v')
+    expect(await lines()).toContain('Lanes     g: Gemini  on   search')
+    await ui.press({ key: 'lane-codex' })
+    expect(await lines()).toContain('          c: Codex   on   code')
 
-    // narrow: the explanation sits on its own line under the routing row
+    // narrow: the label on its own line, the explanation under the value
     await ui.unmount()
-    const narrowUi = await $.ui.mount({ plugin: 'spick-dashboard', surface, component: 'Pane', requestId: 'spick', props: { ...PANE, bodyColumns: 60 }, viewport: { columns: 60, rows: 30 } })
-    expect((await narrowUi.findAll({ type: 'Text' })).map(t => t.text)).toContain('          on (forced)')
-
+    const narrow = await paneLinesAt($, 60, surface)
+    expect(narrow.slice(narrow.indexOf('Routing'), narrow.indexOf('Routing') + 3)).toEqual(['Routing', '  r: auto · on · off', '     on (Haiku 5.5 session)'])
   })
 
   test(`band reads SPICK off while routing is off on ${surface}`, async ($, on) => {
@@ -318,8 +361,8 @@ const textsOf = async ($: Engine, mount: Record<string, unknown>) => {
   return out
 }
 const bandLine = async ($: Engine) => (await textsOf($, { component: 'AbovePrompt', props: WIDE })).join('')
-const paneTexts = async ($: Engine) =>
-  textsOf($, { component: 'Pane', requestId: 'spick', props: PANE, viewport: { columns: 82, rows: 40 } })
+const paneTexts = async ($: Engine) => paneLinesAt($, 80)
+const hasRunning = (lines: string[]) => lines.some(l => l.startsWith('Running'))
 
 test('12 concurrent coders: the band reads coder ×12 with the oldest one\'s time; the pane lists 5 rows and "and 7 more"', async ($, on) => {
   const clock = agentHooks(on)
@@ -334,12 +377,17 @@ test('12 concurrent coders: the band reads coder ×12 with the oldest one\'s tim
   expect(line).not.toContain('Idle')
 
   const all = await paneTexts($)
-  expect(all).toContain('Running')
-  const rows = all.filter(t => /^coder +Sonnet 5\.5 +\d+m \d+s$/.test(t))
+  expect(hasRunning(all)).toBe(true)
+  const rows = all.filter(l => /^(Running {3}| {10})coder +Sonnet 5\.5 +\d+m \d+s$/.test(l))
   expect(rows).toHaveLength(5)
-  expect(rows[0]).toBe('coder  Sonnet 5.5  3m 21s')
-  expect(rows[4]).toBe('coder  Sonnet 5.5  3m 17s')
-  expect(all).toContain('and 7 more')
+  expect(rows[0]).toBe('Running   coder  Sonnet 5.5  3m 21s')
+  expect(rows[4]).toBe('          coder  Sonnet 5.5  3m 17s')
+  expect(all).toContain('          and 7 more')
+  // the section sits between Lanes and Usage, set apart by a blank line each side
+  const at = all.indexOf(rows[0]!)
+  expect(all[at - 1]).toBe('')
+  expect(all.findIndex(l => l.startsWith('Lanes'))).toBeLessThan(at)
+  expect(all.findIndex(l => l.startsWith('Usage'))).toBeGreaterThan(at + 5)
 })
 
 test('one background coder: the band reads exactly as before (no ×1), the pane has one row and no "more"', async ($, on) => {
@@ -350,19 +398,19 @@ test('one background coder: the band reads exactly as before (no ×1), the pane 
 
   expect(await bandLine($)).toBe('SPICK   coder is working · Sonnet 5.5 · 5s/spick for details')
   const all = await paneTexts($)
-  expect(all).toContain('Running')
-  expect(all.filter(t => /^coder +Sonnet 5\.5 +4s$/.test(t))).toHaveLength(1)
-  expect(all.some(t => t.startsWith('and '))).toBe(false)
+  expect(hasRunning(all)).toBe(true)
+  expect(all.filter(l => /^Running {3}coder +Sonnet 5\.5 +4s$/.test(l))).toHaveLength(1)
+  expect(all.some(l => l.trim().startsWith('and '))).toBe(false)
 })
 
 test('the pane has no Running section while nothing runs, and loses it when the last agent finishes', async ($, on) => {
   const clock = agentHooks(on)
   await $.turn.start({ text: 'go', turnId: 't1' })
-  expect(await paneTexts($)).not.toContain('Running')
+  expect(hasRunning(await paneTexts($))).toBe(false)
   await spawnCoders($, clock, 1).catch(() => undefined)
-  expect(await paneTexts($)).toContain('Running')
+  expect(hasRunning(await paneTexts($))).toBe(true)
   await $.turn.complete({ turnId: 'sub', agentId: 'a-bg1', ...SUB_DONE })
-  expect(await paneTexts($)).not.toContain('Running')
+  expect(hasRunning(await paneTexts($))).toBe(false)
   expect(await bandLine($)).toContain('Idle')
 })
 
@@ -379,13 +427,13 @@ test('a subagent with no completion signal for 30 minutes leaves the running sta
   // 31 minutes: off the band, on in the pane with the reason
   expect(await bandLine($)).toContain('Idle')
   let all = await paneTexts($)
-  expect(all).toContain('Running')
-  expect(all).toContain('coder  Sonnet 5.5  timed out, no completion signal')
+  expect(hasRunning(all)).toBe(true)
+  expect(all).toContain('Running   coder  Sonnet 5.5  timed out, no completion signal')
 
   // the next prompt drops it
   await $.prompt.submit({ text: 'next', wait: false, origin: { kind: 'composer' } })
   all = await paneTexts($)
-  expect(all).not.toContain('Running')
+  expect(hasRunning(all)).toBe(false)
   expect(all.some(t => t.includes('timed out'))).toBe(false)
 })
 
@@ -397,6 +445,161 @@ test('a subagent that finishes after its timeout loses its "timed out" row', asy
   expect((await paneTexts($)).some(t => t.includes('timed out'))).toBe(true)
   await $.turn.complete({ turnId: 'sub', agentId: 'a-bg1', ...SUB_DONE })
   expect((await paneTexts($)).some(t => t.includes('timed out'))).toBe(false)
+})
+
+// --- the pane at 80 columns, against the design's example ---------------------------------------------------------------
+
+const EXAMPLE_80 = [
+  'SPICK  routing on · b: band shown                                     x: close',
+  '',
+  'Routing   r: auto · on · off',
+  '             on (Haiku 5.5 session)',
+  'Review    v: auto · off',
+  '',
+  'Lanes     g: Gemini  on   search, long-context, multimodal, image',
+  '          k: Grok    on   x-data',
+  '          c: Codex   on   code, review, image',
+  '          l: edit lanes · every field, every declared lane',
+  '',
+  'Usage                   turns  at API rates',
+  '          main session     52         $0.45',
+  '          coder            13         $9.39',
+  '          planner           4         $3.79',
+  '          deep              1         $0.46',
+  '          total            70        $14.09',
+  '',
+  'Quota     claude  5h ▰▰▱▱▱▱▱▱▱▱  19%   7d ▰▱▱▱▱▱▱▱▱▱   9%',
+  '          codex   7d ▰▰▰▰▰▰▰▰▱▱  80%',
+  '          q: refresh · read just now',
+  '',
+  'Recent    14:52  coder         Sonnet 5.5  high    3m 41s',
+  '          14:47  main session  Haiku 5.5   low         6s',
+  '          14:40  planner       Opus 5.5    high     2m 5s',
+  // the duration column is right-aligned to the widest value (six characters); the design's sketch of this row is one column off
+  '          14:31  deep          Opus 5.5    high    1m 52s',
+  '          14:22  coder         Sonnet 5.5  medium  4m 10s',
+]
+
+const HAIKU = 'claude-haiku-5-5'
+const free = (model: string) => ({ model, input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })
+const big = (model: string, input_tokens: number) => ({ ...free(model), input_tokens })
+const localTime = (h: number, m: number) => new Date(2026, 9, 14, h, m).getTime()
+
+/**
+ * Five main turns (the Recent rows), then the extra completes that bring the lane totals to the design's figures,
+ * the quota files, and /spick to read the lanes: everything the design's example pane shows.
+ */
+async function exampleWorld($: Engine, on: Parameters<TestBody>[1], tags = true) {
+  const clock = mock.clock(on, { now: localTime(14, 22) })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const rows = LANE_ROWS.map(r => (r.id === 'gemini' ? { ...r, tags: ['search', 'long-context', 'multimodal', 'image'] }
+    : r.id === 'codex' ? { ...r, tags: ['code', 'review', 'image'] } : r))
+  fakeSetLane(on, tags ? rows : LANE_ROWS.map(r => ({ ...r, tags: [] })))
+  const claudeJson = JSON.stringify({ cachedUsageUtilization: { utilization: { five_hour: { utilization: 19 }, seven_day: { utilization: 9 } } } })
+  const codexLine = JSON.stringify({ payload: { rate_limits: { primary: { used_percent: 80, window_minutes: 10080 } } } })
+  const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 1, isLink: false })
+  on('fs.read', async (_$, e) => ({ value: e.path === '/h/.claude.json' ? claudeJson : codexLine }))
+  on('fs.list', async (_$, e) => {
+    const depth = e.path.split('/').length - '/h/.codex/sessions'.split('/').length
+    return { value: depth < 3 ? [entry(String(depth), 'dir')] : [entry('s.jsonl', 'file')] }
+  })
+  on('fs.write', async () => ({ value: undefined }))
+  on('session.model', async () => ({ value: HAIKU }))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('turn.step', async function* ($, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: null }
+  })
+  on('tool.call', async () => ({ result: {} as never }))
+  on('agent.spawn', async (_$, e) => ({ model: 'claude-sonnet-5-5', agentId: `a-${e.tool_use_id}` }))
+
+  let now = localTime(14, 22)
+  let n = 0
+  /** one main turn at hh:mm that lasts `ms`; a delegate takes the row (its lane, model and effort), else the main session does */
+  const turn = async (h: number, m: number, ms: number, delegate?: { type: string; model: 'sonnet' | 'opus'; effort: 'medium' | 'high' }, main?: { effort: 'low' }) => {
+    await clock.advance(localTime(h, m) - now)
+    now = localTime(h, m)
+    const id = `t${++n}`
+    await $.turn.start({ text: 'go', turnId: id })
+    for await (const _ of $.turn.step({ turnId: id, index: 0, model: HAIKU, effort: main?.effort ?? 'medium', messageCount: 1 })) { /* drain */ }
+    if (delegate) {
+      await $.tool.call({ tool: 'Agent' as const, tool_use_id: `ag${n}`, prompt: 'p', description: 'd', run_in_background: false, subagent_type: delegate.type, model: delegate.model, effort: delegate.effort })
+    }
+    await clock.advance(ms)
+    now += ms
+    await $.turn.complete({ turnId: id, answer: 'ok', durationMs: ms, isAborted: false, reason: 'answer', usage: free(HAIKU) })
+  }
+  await turn(14, 22, 250_000, { type: 'coder', model: 'sonnet', effort: 'medium' })
+  await turn(14, 31, 112_000, { type: 'deep', model: 'opus', effort: 'high' })
+  await turn(14, 40, 125_000, { type: 'planner', model: 'opus', effort: 'high' })
+  await turn(14, 47, 6_000, undefined, { effort: 'low' })
+  await turn(14, 52, 221_000, { type: 'coder', model: 'sonnet', effort: 'high' })
+
+  // the rest of the lane totals: main session 52 turns in all (5 above), coder 13, planner 4, deep 1
+  const done = { answer: 'ok', durationMs: 1, isAborted: false, reason: 'answer' as const }
+  for (let i = 0; i < 46; i++) await $.turn.complete({ turnId: 'x', ...done, usage: free(HAIKU) })
+  await $.turn.complete({ turnId: 'x', ...done, usage: big(HAIKU, 4_500_000) })       // $0.45
+  const sub = async (type: string, usages: ReturnType<typeof free>[]) => {
+    // an agent's lane is forgotten when it completes: one spawn per completion
+    for (const [i, usage] of usages.entries()) {
+      await $.agent.spawn({ tool_use_id: `sp-${type}-${i}`, prompt: 'p', description: 'd', subagentType: type, provider: { plugin: 'engine', tier: 'core' as const }, parentModel: HAIKU, background: false, fork: false })
+      await $.turn.complete({ turnId: 'sub', agentId: `a-sp-${type}-${i}`, ...done, usage })
+    }
+  }
+  await sub('coder', [...Array.from({ length: 12 }, () => free('claude-sonnet-5-5')), big('claude-sonnet-5-5', 4_695_000)])   // $9.39
+  await sub('planner', [...Array.from({ length: 3 }, () => free('claude-opus-5-5')), big('claude-opus-5-5', 947_500)])           // $3.79
+  await sub('deep', [big('claude-opus-5-5', 115_000)])                                                                          // $0.46
+  // /spick reads the quota and the lanes; the pane is not placed (no surface in the test), the state is what counts
+  await $.command.run({ command: 'spick', args: '', ...RUN })
+}
+
+for (const surface of ['terminal', 'desktop'] as const) {
+  test(`the pane at 80 columns reads exactly as the design's example on ${surface}`, async ($, on) => {
+    await exampleWorld($, on)
+    const ui = await mountPane($, surface, 80, 40)
+    const lines = await linesOf(ui)
+    expect(lines).toEqual(EXAMPLE_80)
+    // colours: SPICK, the selected value and a lane that is on in brand bold; the rest subtle
+    expect((await ui.find({ type: 'Text', text: 'SPICK' }))?.props).toMatchObject({ bold: true, color: 'claude' })
+    expect((await ui.findAll({ type: 'Text', text: /^on$/ })).map(t => t.props)).toEqual([{ color: 'subtle' }, ...Array.from({ length: 3 }, () => ({ bold: true, color: 'claude' }))])
+    expect((await ui.find({ type: 'Text', text: /x-data/ }))?.props).toMatchObject({ color: 'subtle' })
+    expect((await ui.find({ type: 'Text', text: /^ +turns +at API rates$/ }))?.props).toMatchObject({ color: 'subtle' })
+    expect((await ui.find({ type: 'Text', text: 'Usage     ' }))?.props).toMatchObject({ bold: true })
+    expect((await ui.find({ type: 'Text', text: 'routing on' }))?.props).toMatchObject({ color: 'subtle' })
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(78)
+  })
+}
+
+test('the pane at 45 columns keeps every line inside 43 columns, with the label on its own line, five-cell bars and no effort column', async ($, on) => {
+  await exampleWorld($, on)
+  const lines = await paneLinesAt($, 45)
+  for (const l of lines) expect(l.length).toBeLessThanOrEqual(43)
+  for (const label of ['Routing', 'Review', 'Lanes', 'Usage', 'Quota', 'Recent']) expect(lines).toContain(label)
+  expect(lines).toContain('  g: Gemini  on   search, long-context +2')
+  expect(lines).toContain('  claude  5h ▰▱▱▱▱  19%   7d ▱▱▱▱▱   9%')
+  const at = lines.indexOf('Recent')
+  expect(lines.slice(at + 1)).toEqual([
+    '  14:52  coder         Sonnet 5.5  3m 41s',
+    '  14:47  main session  Haiku 5.5       6s',
+    '  14:40  planner       Opus 5.5     2m 5s',
+    '  14:31  deep          Opus 5.5    1m 52s',
+    '  14:22  coder         Sonnet 5.5  4m 10s',
+  ])
+})
+
+test('eight turns show five Recent rows on a narrow pane, all eight that fit on a wide one', async ($, on) => {
+  const clock = mock.clock(on, { now: localTime(10, 0) })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  for (let i = 0; i < 8; i++) {
+    await $.turn.start({ text: 'go', turnId: `t${i}` })
+    await clock.advance(60_000)
+    await $.turn.complete({ turnId: `t${i}`, answer: 'ok', durationMs: 60_000, isAborted: false, reason: 'answer', usage: free(HAIKU) })
+  }
+  const count = (lines: string[]) => lines.filter(l => /\d\d:\d\d {2}main session/.test(l)).length
+  expect(count(await paneLinesAt($, 45))).toBe(5)
+  expect(count(await paneLinesAt($, 80))).toBe(8)
 })
 
 // --- lane switches and the lanes page: spick.json is written by set_lane.py, nothing here runs a process while drawing ---
@@ -421,44 +624,46 @@ for (const surface of ['terminal', 'desktop'] as const) {
     // drawing ran no process
     expect(fake.calls).toEqual([])
     const button = async (key: string) => (await ui.find({ type: 'Button', key }))?.props
-    expect(await button('lane-grok')).toMatchObject({ label: 'Grok on', variant: 'primary', hotkey: 'k' })
+    expect(await button('lane-grok')).toMatchObject({ plain: true, hotkey: 'k' })
+    expect(await linesOf(ui)).toContain('          k: Grok    on')
 
     await ui.press({ key: 'lane-grok' })
     expect(fake.calls).toEqual([['python3', SCRIPT, '--list'], WRITE('grok', 'enabled', 'no'), ['python3', SCRIPT, '--list']])
     expect(fake.rows.find(r => r.id === 'grok')?.enabled).toBe(false)
-    expect(await button('lane-grok')).toMatchObject({ label: 'Grok off', variant: 'secondary', hotkey: 'k' })
+    expect(await linesOf(ui)).toContain('          k: Grok    off  x-data')
     await ui.press({ key: 'lane-grok' })
     expect(fake.writes().at(-1)).toEqual(WRITE('grok', 'enabled', 'yes'))
-    expect(await button('lane-grok')).toMatchObject({ label: 'Grok on' })
+    expect(await linesOf(ui)).toContain('          k: Grok    on   x-data')
     expect(toasts).toEqual([])
   })
 
-  test(`a refused Controls toggle toasts the first stderr line and leaves the button as it was on ${surface}`, async ($, on) => {
+  test(`a refused Controls toggle toasts the first stderr line and leaves the row as it was on ${surface}`, async ($, on) => {
     const { fake, toasts } = lanesWorld(on, [{ id: 'gemini', name: 'Gemini', enabled: true, tags: [], data: null, notes: null, kind: null }])
     const ui = await $.ui.mount({ ...LANE_PANE, surface })
     await ui.press({ key: 'lane-codex' })
     expect(fake.writes()).toEqual([WRITE('codex', 'enabled', 'no')])
     expect(toasts).toEqual(['spick: set_lane: unknown lane id codex; to add a new lane use add_lane.py'])
-    expect((await ui.find({ type: 'Button', key: 'lane-codex' }))?.props.label).toBe('Codex on')
+    expect(await linesOf(ui)).toContain('          c: Codex   on')
   })
 
-  test(`every Button on the main pane has its own hotkey, l opens the lanes page, drawing runs no process, on ${surface}`, async ($, on) => {
+  test(`every Button on the main pane is plain with its own hotkey, l opens the lanes page, drawing runs no process, on ${surface}`, async ($, on) => {
     const { fake } = lanesWorld(on)
     const ui = await $.ui.mount({ ...LANE_PANE, surface })
-    const keys = (await ui.findAll({ type: 'Button' })).map(b => b.props.hotkey).filter(Boolean)
+    const buttons = await ui.findAll({ type: 'Button' })
+    expect(buttons).toHaveLength(9)
+    for (const b of buttons) expect(b.props.plain).toBe(true)
+    const keys = buttons.map(b => b.props.hotkey).filter(Boolean)
     expect([...keys].sort()).toEqual(['b', 'c', 'g', 'k', 'l', 'q', 'r', 'v', 'x'])
     expect(new Set(keys).size).toBe(keys.length)
-    const edit = await ui.find({ type: 'Button', key: 'edit-lanes' })
-    expect(edit?.props).toMatchObject({ label: '[ Edit lanes ]', hotkey: 'l' })
-    // the Edit lanes button sits at the end of the Lanes row
-    const row = (await ui.findAll({ type: 'Box' })).find(b => b.text.startsWith('Lanes') && b.text.includes('Codex'))
-    expect(row?.text.endsWith('[ Edit lanes ]')).toBe(true)
+    expect(await ui.find({ type: 'Button', key: 'edit-lanes' })).toMatchObject({ props: { plain: true, hotkey: 'l' } })
+    // the Edit lanes row is the last row of the Lanes section
+    expect(await linesOf(ui)).toContain('          l: edit lanes · every field, every declared lane')
     expect(fake.calls).toEqual([])
 
     await ui.press({ key: 'edit-lanes' })
     expect(fake.calls).toEqual([['python3', SCRIPT, '--list']])
-    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('Edit')
-    expect(await ui.find({ type: 'Button', key: 'routing-auto' })).toBeUndefined()
+    expect((await linesOf(ui))[0]).toMatch(/^SPICK {2}lanes +back {2}close$/)
+    expect(await ui.find({ type: 'Button', key: 'routing' })).toBeUndefined()
     // redrawing the page ran nothing more
     await ui.find({ type: 'Button', key: 'back' })
     expect(fake.calls).toHaveLength(1)
@@ -469,21 +674,32 @@ for (const surface of ['terminal', 'desktop'] as const) {
     fake.rows.find(r => r.id === 'codex')!.enabled = false
     const ui = await $.ui.mount({ ...LANE_PANE, surface })
     await ui.press({ key: 'edit-lanes' })
-    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-    expect(texts.some(t => /^lane +tags +data +enabled$/.test(t))).toBe(true)
-    expect(texts.some(t => /^gemini +search +public +yes$/.test(t))).toBe(true)
-    expect(texts.some(t => /^grok +x-data +public +yes$/.test(t))).toBe(true)
-    expect(texts.some(t => /^codex +code +code +no$/.test(t))).toBe(true)
-    expect(texts.some(t => /^openrouter +gateway +text +yes$/.test(t))).toBe(true)
+    const lines = await linesOf(ui)
+    expect(lines[0]).toBe('SPICK  lanes' + ' '.repeat(80 - 2 - 23) + 'back  close')
+    // the table: the section label and the subtle column heads share a row, the lanes sit under the heads
+    expect(lines.some(l => /^Lanes {5}lane +tags +data +enabled$/.test(l))).toBe(true)
+    expect((await ui.find({ type: 'Text', text: /^lane +tags +data +enabled$/ }))?.props).toMatchObject({ color: 'subtle' })
+    expect(lines.some(l => /^ {10}gemini +search +public +yes$/.test(l))).toBe(true)
+    expect(lines.some(l => /^ {10}grok +x-data +public +yes$/.test(l))).toBe(true)
+    expect(lines.some(l => /^ {10}codex +code +code +no$/.test(l))).toBe(true)
+    expect(lines.some(l => /^ {10}openrouter +gateway +text +yes$/.test(l))).toBe(true)
+    // the Edit row holds the Input, the field help takes two subtle lines
+    const edit = lines.findIndex(l => l.startsWith('Edit      > '))
+    expect(edit).toBeGreaterThan(-1)
+    expect(lines.slice(edit + 1, edit + 3)).toEqual([
+      ' '.repeat(10) + 'name tags data enabled notes kind base_url api model max_tokens',
+      ' '.repeat(10) + 'key_ref meter_type meter_preset health_url · enabled yes|no',
+    ])
+    expect((await ui.find({ type: 'Text', text: /^name tags data/ }))?.props).toMatchObject({ color: 'subtle' })
     const buttons = await ui.findAll({ type: 'Button' })
     expect(buttons.map(b => b.props.key)).toEqual(['back', 'close'])
-    for (const b of buttons) expect(b.props.hotkey).toBeUndefined()
+    for (const b of buttons) expect(b.props).toMatchObject({ plain: true }), expect(b.props.hotkey).toBeUndefined()
     expect(await ui.find({ type: 'Input' })).toBeDefined()
-    expect(texts).not.toContain('To change a lane, type /spick lane <lane> <field> <value> in the prompt.')
+    expect(lines).not.toContain('To change a lane, type /spick lane <lane> <field> <value> in the prompt.')
 
     await ui.press({ key: 'back' })
-    expect((await ui.findAll({ type: 'Text' })).map(t => t.text)).toContain('Controls')
-    expect((await ui.find({ type: 'Button', key: 'lane-codex' }))?.props.label).toBe('Codex off')
+    expect((await linesOf(ui)).some(l => l.startsWith('Routing   r: '))).toBe(true)
+    expect(await linesOf(ui)).toContain('          c: Codex   off  code')
   })
 
   test(`typing in the lanes page Input does not press anything: x does not close the pane, on ${surface}`, async ($, on) => {
@@ -500,33 +716,33 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(closes).toEqual(['spick'])
   })
 
-  test(`the Input applies "<lane> <field> <value>" through set_lane.py and shows the last change or the refusal, on ${surface}`, async ($, on) => {
+  test(`the Input applies "<lane> <field> <value>" through set_lane.py and shows the Changed or Refused line on ${surface}`, async ($, on) => {
     const { fake } = lanesWorld(on)
     const ui = await $.ui.mount({ ...LANE_PANE, surface })
     await ui.press({ key: 'edit-lanes' })
-    const texts = async () => (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    const texts = async () => linesOf(ui)
 
     await ui.input({ key: 'lane-edit-0', text: 'openrouter tags gateway,cheap' })
     expect(fake.writes()).toEqual([WRITE('openrouter', 'tags', 'gateway,cheap')])
     let all = await texts()
-    expect(all).toContain('Last change')
-    expect(all).toContain('openrouter tags: gateway -> gateway,cheap. Backup: spick.json.bak.')
-    expect(all.some(t => /^openrouter +gateway,cheap +text +yes$/.test(t))).toBe(true)
+    expect(all).toContain('Changed   openrouter tags: gateway -> gateway,cheap. Backup: spick.json.bak.')
+    expect(all.some(t => /^ {10}openrouter +gateway, cheap +text +yes$/.test(t))).toBe(true)
+    expect(all.some(l => l.startsWith('Refused'))).toBe(false)
     // the field was cleared: a new Input stands in its place
     expect(await ui.find({ type: 'Input', key: 'lane-edit-0' })).toBeUndefined()
     expect(await ui.find({ type: 'Input', key: 'lane-edit-1' })).toBeDefined()
 
-    // a refusal keeps the last good change, shows the first stderr line, and keeps the text in the field
+    // a refusal keeps the last good change, shows the first stderr line in the error colour, and keeps the text in the field
     await ui.input({ key: 'lane-edit-1', text: 'nope tags a' })
     all = await texts()
-    expect(all).toContain('Not changed')
-    expect(all).toContain('set_lane: unknown lane id nope; to add a new lane use add_lane.py')
-    expect(all).toContain('openrouter tags: gateway -> gateway,cheap. Backup: spick.json.bak.')
+    expect(all).toContain('Refused   set_lane: unknown lane id nope; to add a new lane use add_lane.py')
+    expect((await ui.find({ type: 'Text', text: /^set_lane: unknown lane id nope/ }))?.props).toMatchObject({ color: 'error' })
+    expect(all).toContain('Changed   openrouter tags: gateway -> gateway,cheap. Backup: spick.json.bak.')
     expect(await ui.find({ type: 'Input', key: 'lane-edit-1' })).toBeDefined()
     // text that is not "<lane> <field> <value>" never reaches the script
     const writes = fake.writes().length
     await ui.input({ key: 'lane-edit-1', text: 'openrouter' })
-    expect(await texts()).toContain('type <lane> <field> <value>')
+    expect(await texts()).toContain('Refused   type <lane> <field> <value>')
     expect(fake.writes()).toHaveLength(writes)
     // on|off works here too; notes keep their case
     await ui.input({ key: 'lane-edit-1', text: 'openrouter off' })
@@ -541,11 +757,24 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await $.ui.mount({ ...LANE_PANE, surface, props: { ...PANE, bodyColumns: 80 }, viewport: { columns: 80, rows: 30 } })
     await ui.press({ key: 'edit-lanes' })
     await ui.input({ key: 'lane-edit-0', text: 'openrouter tags gateway,cheap' })
-    const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
+    const lines = await linesOf(ui)
     // 80 columns less the pane's one-column padding on each side
-    for (const t of texts) expect(t.length).toBeLessThanOrEqual(78)
-    expect(texts.some(t => t.startsWith('a-very-long-lan…') && t.includes('…') && /unset +yes$/.test(t))).toBe(true)
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(78)
+    expect(lines.some(l => l.startsWith(' '.repeat(10) + 'a-very-long-lan…') && l.includes('+') && /unset +yes$/.test(l))).toBe(true)
     expect(fake.rows).toHaveLength(5)
+  })
+
+  test(`the lanes page on a narrow pane puts labels on their own line and keeps every line inside 43 columns on ${surface}`, async ($, on) => {
+    const { fake } = lanesWorld(on)
+    fake.rows.push({ id: 'a-very-long-lane-identifier-in-use', name: 'Long', enabled: true, tags: ['alpha-tag', 'bravo-tag', 'charlie-tag'], data: null, notes: null, kind: 'relay' })
+    const ui = await $.ui.mount({ ...LANE_PANE, surface, props: { ...PANE, bodyColumns: 45 }, viewport: { columns: 45, rows: 40 } })
+    await ui.press({ key: 'edit-lanes' })
+    await ui.input({ key: 'lane-edit-0', text: 'openrouter tags gateway,cheap' })
+    await ui.input({ key: 'lane-edit-1', text: 'nope tags a' })
+    const lines = await linesOf(ui)
+    for (const l of lines) expect(l.length).toBeLessThanOrEqual(43)
+    for (const label of ['Lanes', 'Edit', 'Changed', 'Refused']) expect(lines).toContain(label)
+    expect(lines.some(l => /^ {2}lane +tags +data +on$/.test(l))).toBe(true)
   })
 }
 
@@ -554,9 +783,9 @@ test('on mobile the lanes page has no Input, only the line that says what to typ
   const ui = await $.ui.mount({ ...LANE_PANE, surface: 'mobile' })
   await ui.press({ key: 'edit-lanes' })
   expect(await ui.findAll({ type: 'Input' })).toEqual([])
-  const texts = (await ui.findAll({ type: 'Text' })).map(t => t.text)
-  expect(texts).toContain('To change a lane, type /spick lane <lane> <field> <value> in the prompt.')
-  expect(texts.some(t => /^gemini +search +public +yes$/.test(t))).toBe(true)
+  const lines = await linesOf(ui)
+  expect(lines).toContain('Edit      To change a lane, type /spick lane <lane> <field> <value> in the prompt.')
+  expect(lines.some(l => /^ {10}gemini +search +public +yes$/.test(l))).toBe(true)
   const buttons = await ui.findAll({ type: 'Button' })
   expect(buttons.map(b => b.props.key)).toEqual(['back', 'close'])
   for (const b of buttons) expect(b.props.hotkey).toBeUndefined()
