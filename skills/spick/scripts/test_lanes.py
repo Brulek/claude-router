@@ -92,6 +92,45 @@ class Validate(unittest.TestCase):
         self.assertEqual(lanes.validate(cfg), [])
 
 
+class WriteConfig(unittest.TestCase):
+    def test_backup_tmp_replace_and_validation(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "spick.json")
+            with open(path, "w") as f:
+                f.write('{"version": 1}')
+            lanes.write_config(path, {"version": 2})
+            with open(path) as f:
+                self.assertEqual(json.load(f), {"version": 2})
+            with open(path + ".bak") as f:
+                self.assertEqual(f.read(), '{"version": 1}')
+            self.assertFalse(os.path.exists(path + ".tmp"))
+            with self.assertRaises(ValueError):
+                lanes.write_config(path, {"lane_registry": {"x": {"kind": "teapot"}}})
+            with open(path) as f:
+                self.assertEqual(json.load(f), {"version": 2})
+            self.assertFalse(os.path.exists(path + ".tmp"))
+
+    def test_new_file_has_no_backup(self):
+        with tempfile.TemporaryDirectory() as d:
+            path = os.path.join(d, "spick.json")
+            lanes.write_config(path, {"version": 1})
+            self.assertFalse(os.path.exists(path + ".bak"))
+
+
+class EnabledMerge(unittest.TestCase):
+    def test_registry_enabled_wins_over_the_lanes_boolean_both_ways(self):
+        self.assertEqual(ids({"lanes": {"codex": False}, "lane_registry": {"codex": {"enabled": True}}}), ["gemini", "grok", "codex"])
+        self.assertEqual(ids({"lanes": {"codex": True}, "lane_registry": {"codex": {"enabled": False}}}), ["gemini", "grok"])
+
+    def test_lanes_boolean_alone_still_works_and_default_is_on(self):
+        self.assertEqual(ids({"lanes": {"grok": False}}), ["gemini", "codex"])
+        self.assertEqual(ids({}), ["gemini", "grok", "codex"])
+
+    def test_enabled_must_be_a_boolean(self):
+        errs = lanes.validate({"lane_registry": {"x": {"kind": "local", "enabled": "yes"}}})
+        self.assertEqual(errs, ["lane x: enabled must be true or false"])
+
+
 class Line(unittest.TestCase):
     def test_builtin_line_is_exact(self):
         self.assertEqual(lanes.build_line(lanes.load_effective({"lanes": {"gemini": True, "grok": True, "codex": True}})), BUILTIN_LINE)

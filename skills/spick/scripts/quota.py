@@ -23,6 +23,8 @@ Usage:
   quota.py --line              the one checklist line from the cache; never waits for a refresh
   quota.py --touch             start a background refresh if the cache is older than 10 minutes
   quota.py --bg                (internal) the detached refresh
+  quota.py --relane            rebuild only the "lanes" part of the existing cache from spick.json (no
+                               collectors, no network, no subprocess); no cache file: does nothing
 Cache: $CLAUDE_CONFIG_DIR/spick-quota.json (default ~/.claude), written atomically.
 """
 import concurrent.futures
@@ -688,6 +690,31 @@ def release_lock(path=None):
         pass
 
 
+def _effective_lanes():
+    """Effective lanes for the cache, or None when spick.json has no lane_registry."""
+    cfg = lanes_mod.read_config(os.path.join(config_dir(), "spick.json"))
+    return lanes_mod.load_effective(cfg) if lanes_mod.has_registry(cfg) else None
+
+
+def _lane_ids(lanes):
+    return None if lanes is None else [l["id"] for l in lanes]
+
+
+def relane(path=None):
+    """Rebuild only the "lanes" part of the existing cache from spick.json; written_at and providers stay.
+    No collectors, no network, no subprocess. No cache file: does nothing. Returns True if it wrote."""
+    doc = read_cache(path)
+    if doc is None:
+        return False
+    reg = _effective_lanes()
+    if reg is None:
+        doc.pop("lanes", None)
+    else:
+        doc["lanes"] = lanes_mod.cache_view(reg)
+    write_cache(doc, path)
+    return True
+
+
 def refresh(wait_for_lock=False):
     """Collect and write the cache. Returns the cache doc, or None if another refresh holds the lock
     (background callers just stop; a synchronous caller waits and then reads that refresh's result)."""
@@ -699,20 +726,33 @@ def refresh(wait_for_lock=False):
             return read_cache()
         return None
     try:
-        cfg = lanes_mod.read_config(os.path.join(config_dir(), "spick.json"))
-        reg = lanes_mod.load_effective(cfg) if lanes_mod.has_registry(cfg) else None
-        doc = collect_all(read_subscriptions(), registry_lanes=reg)
+        reg = _effective_lanes()
+        for attempt in range(2):
+            doc = collect_all(read_subscriptions(), registry_lanes=reg)
+            # Collecting is slow; spick.json may have been edited meanwhile. Re-read it before writing so
+            # the cache never carries a stale lanes list (and collect once more if the lane set changed).
+            fresh = _effective_lanes()
+            if _lane_ids(fresh) == _lane_ids(reg) or attempt == 1:
+                break
+            reg = fresh
+        if fresh is None:
+            doc.pop("lanes", None)
+        else:
+            doc["lanes"] = lanes_mod.cache_view(fresh)
         write_cache(doc)
         return doc
     finally:
         release_lock()
 
 
-def background_refresh_if_stale(now=None):
-    """Spawn a detached refresh when the cache is missing or older than 10 minutes. Never waits."""
+def background_refresh_if_stale(now=None, force=False):
+    """Spawn a detached refresh when the cache is missing or older than 10 minutes (force: whatever its
+    age, used after spick.json was edited). Never waits. SPICK_NO_BG=1 turns it off (tests)."""
+    if os.environ.get("SPICK_NO_BG"):
+        return False
     now = time.time() if now is None else now
     age = cache_age(read_cache(), now)
-    if age is not None and age < CACHE_TTL_S:
+    if not force and age is not None and age < CACHE_TTL_S:
         return False
     try:
         if os.path.isdir(lock_path()) and now - os.path.getmtime(lock_path()) <= LOCK_STALE_S:
@@ -810,6 +850,9 @@ def main(argv):
     if "--bg" in args:
         signal.signal(signal.SIGHUP, signal.SIG_IGN)
         refresh()
+        return 0
+    if "--relane" in args:
+        relane()
         return 0
     if "--touch" in args:
         background_refresh_if_stale()

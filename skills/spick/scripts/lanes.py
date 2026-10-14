@@ -4,9 +4,10 @@
 The program states facts; the model judges. Nothing here ranks, scores or refuses a lane.
 
 Effective lanes, in this order:
-  1. built-in lanes (assets/builtin-lanes.json) that spick.json "lanes" does not switch off
+  1. built-in lanes (assets/builtin-lanes.json); spick.json "lanes".<id> (a boolean) is the old on/off switch
   2. spick.json "subscriptions".<id> plan and price folded in
-  3. spick.json "lane_registry".<id> overrides built-in fields one field at a time
+  3. spick.json "lane_registry".<id> overrides built-in fields one field at a time; its "enabled" wins
+     over "lanes".<id>, and is the one place the switch is written (set_lane.py)
   4. registry ids that are not built-in are appended
 
 Usage:
@@ -18,6 +19,7 @@ Usage:
 import json
 import os
 import re
+import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -169,6 +171,8 @@ def validate(cfg):
             elif mt == "local-file":
                 if not _nonempty(meter.get("path")):
                     errs.append("lane %s: meter.type local-file needs meter.path" % lid)
+        if "enabled" in rec and not isinstance(rec["enabled"], bool):
+            errs.append("lane %s: enabled must be true or false" % lid)
         if "key_ref" in rec:
             kr = rec["key_ref"]
             if not (isinstance(kr, str) and KEY_REF_RE.match(kr)):
@@ -177,6 +181,39 @@ def validate(cfg):
         if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
             errs.append("lane %s: tags must be a list of strings" % lid)
     return errs
+
+
+def write_config(path, cfg):
+    """Back up the current file to <path>.bak (if there is one), write cfg to a tmp file, check that the
+    tmp file validates, then os.replace it over the original. Raises ValueError (nothing replaced) when
+    the written result does not validate."""
+    if os.path.isfile(path):
+        shutil.copyfile(path, path + ".bak")
+    tmp = path + ".tmp"
+    try:
+        with open(tmp, "w") as f:
+            json.dump(cfg, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        with open(tmp) as f:
+            errs = validate(json.load(f))
+        if errs:
+            raise ValueError("invalid result, nothing written:\n  " + "\n  ".join(errs))
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def after_write():
+    """After spick.json changed: rebuild the cache's lanes list and start a detached quota refresh so the
+    next prompt has facts for new lanes. Best effort; never raises. (quota imports this module, so the
+    import is local.)"""
+    try:
+        import quota
+        quota.relane()
+        quota.background_refresh_if_stale(force=True)
+    except Exception:
+        pass
 
 
 def is_third_party(lane):

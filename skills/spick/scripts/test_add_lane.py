@@ -34,7 +34,7 @@ class AddLane(unittest.TestCase):
             return f.read()
 
     def run_it(self, *args):
-        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.dir)
+        env = dict(os.environ, CLAUDE_CONFIG_DIR=self.dir, SPICK_NO_BG="1")
         return subprocess.run([sys.executable, SCRIPT] + list(args), env=env, capture_output=True, text=True)
 
     def test_adds_lane_keeps_other_keys_and_writes_bak(self):
@@ -79,7 +79,19 @@ class AddLane(unittest.TestCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         rec = self.read()["lane_registry"]["ollama"]
         self.assertNotIn("key_ref", rec)
-        self.assertEqual(rec["health_url"], "http://127.0.0.1:11434/api/tags")
+        self.assertEqual(rec["meter"], {"type": "none", "health_url": "http://127.0.0.1:11434/api/tags"})
+        self.assertNotIn("health_url", rec)
+
+    def test_prefer_flag_is_gone_and_no_prefer_is_written(self):
+        self.write({"version": 1})
+        r = self.run_it(*BASE, "--prefer", "a")
+        self.assertEqual(r.returncode, 2)
+        self.assertEqual(self.run_it(*BASE).returncode, 0)
+        self.assertNotIn("prefer", self.read()["lane_registry"]["deepseek"])
+
+    def test_first_add_creates_lane_registry_and_a_replaced_record_may_carry_old_prefer(self):
+        self.write({"version": 1, "lane_registry": {"deepseek": {"kind": "api-key", "prefer": ["x"]}}})
+        self.assertEqual(self.run_it(*BASE).returncode, 0)
 
     def test_refuses_invalid_id(self):
         self.write({"version": 1})

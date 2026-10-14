@@ -3,7 +3,9 @@ import os
 import sys
 import tempfile
 import threading
+import time
 import unittest
+from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -245,6 +247,52 @@ class Line(unittest.TestCase):
         self.assertEqual(doc["providers"][0]["facts"], ["no meter (declared plan only)"])
         self.assertEqual([l["id"] for l in doc["lanes"]], ["gemini", "grok", "codex", "glm"])
         self.assertNotIn("meter", doc["lanes"][0])
+
+    def test_collect_all_lanes_carry_no_prefer(self):
+        reg = lanes.load_effective({"lane_registry": {"glm": {"kind": "api-key", "prefer": ["x"]}}})
+        for l in quota.collect_all({}, registry_lanes=reg)["lanes"]:
+            self.assertNotIn("prefer", l)
+
+    def test_refresh_rereads_the_config_before_writing_the_cache(self):
+        with tempfile.TemporaryDirectory() as d:
+            cfg = os.path.join(d, "spick.json")
+            with open(cfg, "w") as f:
+                json.dump({"lane_registry": {"a": {"kind": "local", "meter": {"type": "none"}}}}, f)
+            real = quota.collect_all
+
+            def slow_collect(subs, now=None, registry_lanes=None):
+                doc = real(subs, now, registry_lanes)
+                if not getattr(slow_collect, "edited", False):
+                    slow_collect.edited = True     # the user edits spick.json while collecting
+                    with open(cfg, "w") as f:
+                        json.dump({"lane_registry": {"a": {"kind": "local", "meter": {"type": "none"}},
+                                                     "b": {"kind": "local", "tags": ["new"], "meter": {"type": "none"}}}}, f)
+                return doc
+
+            old = os.environ.get("CLAUDE_CONFIG_DIR")
+            os.environ["CLAUDE_CONFIG_DIR"] = d
+            try:
+                with mock.patch.object(quota, "collect_all", slow_collect):
+                    doc = quota.refresh()
+            finally:
+                if old is None:
+                    del os.environ["CLAUDE_CONFIG_DIR"]
+                else:
+                    os.environ["CLAUDE_CONFIG_DIR"] = old
+            self.assertEqual([l["id"] for l in doc["lanes"]], ["gemini", "grok", "codex", "a", "b"])
+            self.assertEqual([e["provider"] for e in doc["providers"]], ["a", "b"])
+            self.assertEqual(quota.read_cache(os.path.join(d, "spick-quota.json"))["lanes"], doc["lanes"])
+
+    def test_background_refresh_can_be_switched_off_and_forced(self):
+        with mock.patch.dict(os.environ, {"SPICK_NO_BG": "1"}):
+            self.assertFalse(quota.background_refresh_if_stale(force=True))
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": d}), \
+                mock.patch.object(quota.subprocess, "Popen") as popen:
+            os.environ.pop("SPICK_NO_BG", None)
+            quota.write_cache({"written_at": quota.iso(time.time()), "providers": []})
+            self.assertFalse(quota.background_refresh_if_stale())      # fresh cache: nothing to do
+            self.assertTrue(quota.background_refresh_if_stale(force=True))
+            self.assertEqual(popen.call_count, 1)
 
     def test_stale_reset_and_unknown_are_stated_as_facts(self):
         line = quota.build_line(load("cache_sample.json"), quota.parse_iso("2026-10-13T15:34:00Z"))

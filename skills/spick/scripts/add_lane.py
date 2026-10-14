@@ -10,14 +10,14 @@ Usage:
 
 Reads $CLAUDE_CONFIG_DIR/spick.json (default ~/.claude/spick.json); refuses if it is missing
 (run spick setup first). Copies it to spick.json.bak (overwriting the previous .bak), then adds or
-replaces lane_registry[ID], keeping every other key and lane. Validates with lanes.validate and
+replaces lane_registry[ID] (creating lane_registry if the file has none), keeping every other key and lane.
+After a write it rebuilds the cache's lanes list and starts a detached quota refresh. Validates with lanes.validate and
 refuses to write if the result is invalid. --dry-run prints the record and writes nothing.
 It never reads the keychain and never prints or stores a key: key_ref is only a name.
 """
 import argparse
 import json
 import os
-import shutil
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -59,7 +59,7 @@ def build_record(a):
     rec["invoke"] = {"api": a.api, "base_url": a.base_url, "model": a.model, "max_tokens": a.max_tokens}
     rec["meter"] = meter_for(a.meter_preset)
     if a.kind == "local" and a.health_url:
-        rec["health_url"] = a.health_url
+        rec["meter"]["health_url"] = a.health_url
     if a.notes:
         rec["notes"] = a.notes
     return rec
@@ -116,14 +116,12 @@ def main(argv):
         print(json.dumps({a.id: rec}, indent=2, ensure_ascii=False))
         return 0
 
-    bak = path + ".bak"
-    shutil.copyfile(path, bak)
-    tmp = path + ".tmp"
-    with open(tmp, "w") as f:
-        json.dump(new, f, indent=2, ensure_ascii=False)
-        f.write("\n")
-    os.replace(tmp, path)
+    try:
+        lanes.write_config(path, new)
+    except ValueError as e:
+        die(str(e))
     print("registered %s; backup at spick.json.bak" % a.id)
+    lanes.after_write()
     return 0
 
 
