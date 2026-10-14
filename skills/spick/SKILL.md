@@ -10,7 +10,7 @@ You are (usually) a small, fast model sitting at the front of a Claude Code sess
 Two layers are merged here on purpose:
 
 1. **Claude tiers** - your own session plus three subagents whose models are pinned in `~/.claude/agents/` (`coder` on Sonnet, `planner` on Opus, `deep` on Opus).
-2. **Outside lanes** - subscription CLIs the user already pays for: Gemini (`agy`), Grok (`grok`), Codex (`codex`). They are optional; if one is missing, its lane simply falls through to the next in the fallback chain.
+2. **Outside lanes** - subscription CLIs the user already pays for: Gemini (`agy`), Grok (`grok`), Codex (`codex`). They are optional; a lane that is missing or switched off is simply not used. The user may also declare further lanes (other APIs, relays, local models) in `lane_registry`; see `references/providers.md`.
 
 Claude is the default for work, coding and daily tasks. Outside lanes are used where they are genuinely better (live web search, X data, long media, image generation) or where an independent second pair of eyes is worth paying for (Codex review).
 
@@ -22,26 +22,37 @@ Read the config (`cat ~/.claude/spick.json`) at the start of a session. It tells
 
 ## Step 1 - pick the lane
 
-Go down this table top to bottom; the first matching row wins. "Primary" is the default; move along the fallback chain only when the primary is disabled, over quota (Step 4), or fails.
+Decide first what the task needs, then pick a lane that offers it. Go down the table top to bottom; the first matching row wins. Built-in defaults are named as "default …"; they apply when the Lanes line is absent (no `lane_registry`) or names no other lane with that tag.
 
-| Task looks like | Primary | Fallback chain | Why |
-|---|---|---|---|
-| Live web search, fact check, "what is the latest…", prices, versions | **Gemini** | Grok → Claude `deep` with WebSearch | Gemini's built-in search is the most reliable headless search among the CLIs; Claude's own WebSearch is fine but costs Claude quota |
-| Anything about X / Twitter posts, trends, accounts, sentiment on X | **Grok** | none - tell the user it needs Grok | Only Grok has X data. Do not fake it with web search |
-| Generate or edit an image | **Codex** (`codex-image` plugin or the imagegen skill) | Gemini image-generator → tell the user | ChatGPT image generation is reachable from the Codex CLI; Claude cannot generate images |
-| Generate video | none | Tell the user: Grok Imagine, Sora and Veo are web/app only | No CLI can do this today; say so instead of trying |
-| Understand a long video / audio file, or a document far beyond ~200 pages | **Gemini** | Claude `deep` (documents only) | Gemini takes media files natively and has the largest context |
-| Daily chores: Q&A, find/read files, summarise, tidy, run an existing script, send an email with an existing tool | **You (Haiku)** | - | Cheapest; no handoff overhead |
-| Write, change, debug, refactor or test code (except a one-line or config-only change) | **`coder`** (Sonnet) | Codex `exec` with workspace-write | Sonnet is strong at code and keeps context in-house; Codex is a second implementer when Sonnet is stuck or you judge Claude quota to be short |
-| Plan, design, break a multi-step task down, "how should we do X" | **`planner`** (Opus) | `deep` | Planning quality compounds; pay for Opus once, then execute on Sonnet |
-| Hard reasoning, important decisions, risky operations, complex debugging, formal long-form writing | **`deep`** (Opus) | Gemini on `claude-opus-5-5-high` (uses Google quota) | Opus for judgment; the Gemini lane can run Opus on another subscription when Claude's is drained |
-| You cannot tell how hard it is | **`deep`** | - | Misjudging downward is the expensive mistake; a wasted Opus call is cheap by comparison |
-| User says "extremely important" or the task clearly exceeds Opus | `deep` first, then tell the user to switch the session to Fable in the model menu | - | A session cannot upgrade its own model; the user has to |
+| The task needs | Lane | If no lane offers it |
+|---|---|---|
+| search: live web, fact check, "what is the latest…", prices, versions | tag `search` (default Gemini `agy`) | `deep` with WebSearch |
+| x-data: X / Twitter posts, trends, accounts, sentiment on X | tag `x-data` (default Grok) | tell the user it needs a lane with X data; do not fake it with web search |
+| image: generate or edit an image | tag `image` (default Codex via `codex-image` or the imagegen skill; Gemini image-generator) | tell the user |
+| video generation | none | tell the user: Grok Imagine, Sora and Veo are web/app only |
+| long-context / multimodal: long video or audio, a document far beyond ~200 pages | tag `long-context` or `multimodal` (default Gemini) | `deep` (documents only) |
+| cheap / chinese: a draft where cost or Chinese output matters | a lane tagged `cheap` or `chinese`, if the user declared one | you, or `coder` / `deep` by difficulty |
+| chores: Q&A, find/read files, summarise, tidy, run an existing script, send an email with an existing tool | **You (Haiku)** | - |
+| code: write, change, debug, refactor or test code (except a one-line or config-only change) | **`coder`** (Sonnet); a lane tagged `code` (default Codex `exec` with workspace-write) is a second implementer | `coder` |
+| review: independent review of a diff | tag `review` (default Codex; see Step 3) | `deep` |
+| plan: plan, design, break a multi-step task down, "how should we do X" | **`planner`** (Opus) | `deep` |
+| reasoning: hard reasoning, important decisions, risky operations, complex debugging, formal long-form writing | **`deep`** (Opus) | - |
+| you cannot tell how hard it is | **`deep`** | - |
+| the user says "extremely important" or the task clearly exceeds Opus | `deep` first, then tell the user to switch the session to Fable in the model menu | - |
+
+Choosing between tagged lanes (the Lanes line lists them; its `data:` is the most a lane may be sent, `prefer:` is the user's own preference):
+
+1. A lane whose declared `data:` level is below what the task would send (`public` < `text` < `code`) is excluded. A lane with `data: unset` has no declared level: it may receive whatever the user asked for. Third-party lanes (API, relay) carry a data-leak reminder on the Lanes line; it is a fact, not a refusal.
+2. Among the rest, a lane whose `prefer:` list has the task's tag comes first.
+3. Otherwise weigh the Quota facts and the lane notes yourself.
+4. A `web-only` lane is never called; give the user a paste-ready prompt instead.
+
+If a call fails, or the lane is over quota (Step 4), choose again from the lanes that remain.
 
 Two special cases:
 
 - **Chinese official or formal writing** goes to `deep`, not to you. Formal register is where small models slip.
-- **A task that mixes lanes** (e.g. "search for the latest API and then update our client") is split: Gemini for the search, `coder` for the code, with the search result pasted into the coder brief.
+- **A task that mixes lanes** (e.g. "search for the latest API and then update our client") is split: a search lane for the search, `coder` for the code, with the search result pasted into the coder brief.
 
 ## Step 1b - plan mode or goal mode?
 
@@ -114,12 +125,12 @@ Review findings go back to `coder` for one fix round. Do not review the fix agai
 
 ## Step 4 - quota
 
-Read the `Quota` line at the end of the checklist (or run `bash <skill-dir>/scripts/quota.sh`). It lists, per subscribed provider, the plan, each window's used share and time to reset, and how old the sample is. Weigh task size, plan and remaining share yourself; no fixed thresholds.
+Read the `Lanes` line (when present) and the `Quota` line at the end of the checklist, and judge (or run `bash <skill-dir>/scripts/quota.sh`). The Quota line lists, per subscribed provider or declared lane, the plan, each window's used share and time to reset, how old the sample is, and any other facts the lane's meter reports (for example `no meter (declared plan only)`). Weigh task size, plan and remaining share yourself; no fixed thresholds.
 
 - The line states facts only. A window marked `reset passed` has rolled over since the sample, so its old figure is gone; `unknown` and `stale` mean unmeasured or old, not "fine".
-- If a call comes back with a quota or rate-limit error, treat that lane as exhausted for the rest of the session and move down the fallback chain.
+- If a call comes back with a quota or rate-limit error, treat that lane as exhausted for the rest of the session and choose again from the other lanes.
 - If the line is absent or says `unknown (no data yet)`, carry on; never block the user on a monitoring glitch.
-- The provider list comes from `subscriptions` in `~/.claude/spick.json` (shape in `references/providers.md`). A provider not listed there is not shown.
+- The provider list comes from `subscriptions` in `~/.claude/spick.json`, plus any lane declared in `lane_registry` (shapes in `references/providers.md`). A provider not listed there is not shown.
 
 ## Step 5 - brief the delegate properly
 
@@ -191,7 +202,7 @@ If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haik
 | `/spick` | (dashboard mod) opens the pane; with no UI it prints a one-paragraph status |
 | `/spick on` / `off` / `auto` | (dashboard mod) routing switch, remembered; `off` means do the work yourself, no Spick dispatch; `auto` = on only in a Haiku session. A manual `/model` turns it off for the session |
 | `/spick review on` / `off` | (dashboard mod) Codex review step, remembered; when off write `Review: off` in the label line |
-| `/spick lane <gemini\|grok\|codex> on` / `off` | (dashboard mod) one outside lane, remembered; an off lane uses its fallback chain |
+| `/spick lane <id> on` / `off` | (dashboard mod) one outside lane (a built-in or a registered id), remembered; an off lane is left out |
 | `/spick hide` / `show` | (dashboard mod) band visibility, this session only |
 | `/spick quota` | (dashboard mod) refreshes quota now and prints the meters |
 
@@ -199,5 +210,6 @@ If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haik
 
 - `references/providers.md` - per-provider spells, flags, model ids, quota sources, known pitfalls. Read before the first external call.
 - `references/onboarding.md` - first-run flow.
+- `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection and install.
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.

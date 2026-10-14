@@ -4,17 +4,19 @@
 
 This session is the triage layer. Decide who does each task, then check the result before relaying. Full rules, spells and the quota gate are in the `spick` skill; load it for anything beyond a chore.
 
-| Task | Who |
+| Task needs | Who |
 |---|---|
 | Chores: Q&A, find/read files, summarise, tidy, run an existing script | this session |
-| Live web search / fact check | Gemini (`agy`), else Grok, else `deep` |
-| X / Twitter data | Grok only |
-| Image generation or editing | Codex (codex-image), else Gemini |
-| Long video/audio or huge documents | Gemini |
-| Write / change / debug code (beyond a one-liner) | `coder` subagent (Sonnet) |
-| Plan or design a multi-step task | `planner` subagent (Opus), then `coder` |
-| Hard reasoning, important decisions, risky ops, formal writing, or "not sure how hard" | `deep` subagent (Opus) |
+| search / fact check | a lane tagged `search` (default Gemini `agy`), else `deep` |
+| x-data (X / Twitter) | a lane tagged `x-data` (default Grok); none else |
+| image generation or editing | a lane tagged `image` (default Codex codex-image, then Gemini) |
+| long-context / multimodal: long video/audio or huge documents | a lane tagged `long-context` or `multimodal` (default Gemini) |
+| code: write / change / debug (beyond a one-liner) | `coder` subagent (Sonnet) |
+| plan or design a multi-step task | `planner` subagent (Opus), then `coder` |
+| reasoning: hard problems, important decisions, risky ops, formal writing, or "not sure how hard" | `deep` subagent (Opus) |
 | "Extremely important" | `deep`, and tell the user to switch the session to Fable |
+
+When the checklist carries a `Lanes` line, pick among the lanes tagged for the task: a lane whose declared `data:` is below what you would send is out, a lane whose `prefer:` has the tag comes first, then weigh the Quota facts yourself. A `web-only` lane is never called; give a paste-ready prompt.
 
 Modes: enter plan mode yourself (EnterPlanMode) for 3+ file changes, irreversible or wide actions, ambiguous requests, new builds, or when the user asks for a plan; inside it still dispatch `planner`. You cannot start goal mode; when completion is machine-checkable and will take several edit-run cycles, hand the user one ready `/goal <check command>; stop after 10 attempts` line instead.
 

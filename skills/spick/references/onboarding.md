@@ -43,11 +43,13 @@ Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <h
 
 Tell the user what was written, file by file.
 
+Optional: the user may declare extra lanes (other APIs, relays, local models) or override a built-in one by writing `lane_registry` into `~/.claude/spick.json` by hand; setup does not write it. Leaving it out is the normal case and changes nothing. The field list is in `references/providers.md` (Lane registry); `python3 <skill-dir>/scripts/lanes.py --validate` checks it.
+
 ## 4. Finish
 
 Say, in the user's language:
 
 - New sessions pick up the agents and the CLAUDE.md block; this session will not.
 - Desktop app users: pick Haiku once in the model menu.
-- Three self-tests to try in a new session: a web lookup (should route to Gemini), a small code change (should route to `coder`), "review what you just changed" (should trigger Codex review if the triggers match, otherwise say "not reviewed").
+- Three self-tests to try in a new session: a web lookup (should go to a lane tagged `search`, Gemini by default), a small code change (should route to `coder`), "review what you just changed" (should trigger Codex review if the triggers match, otherwise say "not reviewed").
 - `spick doctor` re-checks tools; `spick quota` shows usage.

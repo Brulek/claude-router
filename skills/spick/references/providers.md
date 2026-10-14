@@ -87,21 +87,36 @@ Pitfalls (all hit in practice):
 - Does not self-update: `npm update -g @openai/codex` monthly.
 - Quota source: `codex -s read-only -a never app-server` speaks JSON-RPC on stdio: `initialize` (`params.clientInfo`), notification `initialized`, then `account/rateLimits/read` answers `result.rateLimits.primary|secondary` as `{usedPercent, windowDurationMins, resetsAt}` (`secondary` is null on this plan). Fallback when that fails: the newest `~/.codex/sessions/**/rollout-*.jsonl` event with `payload.rate_limits` (`used_percent`, `window_minutes`, `resets_at`), only as fresh as the last session. Fixtures: `scripts/testdata/codex_*`; the schema is unofficial, parse defensively.
 
-## Fallback chains at a glance
+## Lane registry
 
-```
-web search / fact check : gemini → grok → deep(+WebSearch)
-X data                  : grok → (none; tell the user)
-image gen / edit        : codex → gemini → (tell the user)
-video gen               : (none; web only)
-long media / huge docs  : gemini → deep (docs only)
-coding                  : coder → codex → gemini(claude-sonnet-5-5) 
-review                  : codex → deep
-planning                : planner → deep
-hard reasoning          : deep → gemini(claude-opus-5-5-high)
-```
+Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`. The user may override any field of them, and add lanes of their own, under `lane_registry` in `~/.claude/spick.json`, keyed by lane id (lowercase letters, digits, hyphens). The `lanes` booleans still switch built-ins on and off. If `lane_registry` is absent, nothing below applies and all output stays as before. `python3 scripts/lanes.py --validate` checks the file; secret-looking values are reported by field name, never echoed.
 
-When Claude's own quota looks short to you, judge from the facts whether coding should flip to `codex → coder`.
+| Field | Meaning |
+|---|---|
+| `name` | display name |
+| `kind` | `cli-subscription`, `api-key`, `local`, `relay` or `web-only` |
+| `enabled` | false leaves the lane out entirely |
+| `tags` | what the lane is for, free words (`search`, `x-data`, `image`, `long-context`, `multimodal`, `code`, `review`, `cheap`, `chinese`, ...), printed as declared |
+| `prefer` | the tags the user wants this lane picked for first |
+| `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data: unset` and nothing is blocked |
+| `price` | free-form object; built-ins use `{"model": "subscription"}`; the plan and price from `subscriptions` are folded in |
+| `meter` | `{"type": ...}` with `none`, `builtin` (+ `collector`), `local-file`, `balance-endpoint` or `usage-endpoint`; an optional `health_url` adds one GET-status fact. Only `none`, `builtin` and `health_url` are collected today |
+| `key_ref` | where the key lives: `keychain:<name>` or `env:<VAR>`; never the key itself, never printed |
+| `invoke` | how to call it; built-ins point here (`see references/providers.md`) |
+| `notes` | free text for the model; never printed in the checklist |
+
+The checklist prints one `Lanes` line (enabled lanes only: id, tags, `prefer:`, `data:`) before the `Quota` line. For `api-key` and `relay` lanes it adds one fact per lane: "<id> is a third-party service: sending content to it carries a data-leak risk." That is a reminder, not a gate. `web-only` lanes cannot be called; give the user a paste-ready prompt. The Quota line shows each lane's meter facts, for example `no meter (declared plan only)`.
+
+Example:
+
+```json
+"lane_registry": {
+  "glm": {"kind": "api-key", "tags": ["cheap", "chinese"], "prefer": ["chinese"], "data": "text",
+          "key_ref": "keychain:glm-api", "meter": {"type": "none"}},
+  "qwen-local": {"kind": "local", "tags": ["cheap"], "data": "code",
+                 "meter": {"type": "none", "health_url": "http://127.0.0.1:11434/api/tags"}}
+}
+```
 
 ## Subscriptions and the quota cache
 
