@@ -218,6 +218,12 @@ export const register: Register = on => {
   const callOfAgent = new Map<string, string>()
   /** tool_use_id -> lane of every Agent or CLI call in flight, oldest first; the band shows the most recent */
   const inFlight = new Map<string, Lane>()
+  /** whether the main session's turn is open: a background agent outlives it, and the band must not read idle meanwhile */
+  let mainTurnOpen = false
+  /** true for an Agent call whose subagent has spawned and not yet finished (a background agent, or a foreground one still running) */
+  const isRunningAgentCall = (id: string): boolean => { for (const c of callOfAgent.values()) if (c === id) return true; return false }
+  /** forget every call in flight except the ones whose subagent is still running */
+  const dropFinishedCalls = (): void => { for (const id of [...inFlight.keys()]) if (!isRunningAgentCall(id)) inFlight.delete(id) }
   /** the turn's latest delegate (Agent or CLI call), kept after the call ends: the closed turn is recorded under it */
   let delegate: Lane | null = null
   let agentsThisTurn = 0
@@ -324,7 +330,8 @@ export const register: Register = on => {
   on('turn.start', async ($, e, next) => {
     try {
       const startedAt = await $.clock.now()
-      inFlight.clear()
+      mainTurnOpen = true
+      dropFinishedCalls()
       delegate = null
       agentsThisTurn = 0
       lastTickMs = startedAt
@@ -460,9 +467,15 @@ export const register: Register = on => {
         const call = callOfAgent.get(e.agentId)
         callOfAgent.delete(e.agentId)
         // a background agent's Agent call returned long ago; its lane leaves the band now
-        if (call !== undefined && inFlight.delete(call)) await showLane($, showing)
+        if (call !== undefined && inFlight.delete(call)) {
+          // the main turn already ended and this was the last agent: the band goes idle (last stays as written)
+          if (!mainTurnOpen && inFlight.size === 0) await update($, current, () => null)
+          else await showLane($, showing)
+        }
       } else {
         const endedAt = await $.clock.now()
+        mainTurnOpen = false
+        dropFinishedCalls()
         const c = await read($, current)
         if (c) {
           // the turn is recorded under its latest delegate, the main session when it had none
@@ -473,7 +486,10 @@ export const register: Register = on => {
           delete done.nowMs
           await update($, last, () => done)
           await update($, turns, list => [done, ...list].slice(0, 50))
-          await update($, current, () => null)
+          // a background agent still running keeps the band on its lane (turnId and start time kept, so the
+          // elapsed time goes on) until its own turn.complete clears it
+          if (inFlight.size > 0) await showLane($, showing, () => ({ note: undefined }))
+          else await update($, current, () => null)
         }
       }
     } catch {}

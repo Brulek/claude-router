@@ -161,6 +161,56 @@ test('the later call finishing first brings the earlier one back, with its own o
   await coder
 })
 
+const bgCall = (id: string, subagent_type: string) => ({ ...agentCall(id, subagent_type), run_in_background: true })
+const bgSpawn = (id: string) =>
+  ({ tool_use_id: id, prompt: 'p', description: 'd', subagentType: 'coder', provider: { plugin: 'engine', tier: 'core' as const }, parentModel: 'claude-opus-5-5', background: true, fork: false })
+
+test('a background agent still running after the main turn completes keeps the band on its lane, not idle', { plugins: [probePlugin] }, async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('agent.spawn', async () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
+  on('tool.call', async () => ({ result: {} as never }))
+
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.tool.call({ ...bgCall('bg1', 'coder'), model: 'sonnet', effort: 'medium' })
+  await $.agent.spawn(bgSpawn('bg1'))
+  await clock.advance(2000)
+  await $.turn.complete({ turnId: 't1', ...DONE })
+
+  // the main turn is recorded as before, but the band is not idle: current stays on the subagent's lane
+  let s = await probe($)
+  expect(s.last).toMatchObject({ turnId: 't1', lane: 'coder', endedAt: 3000 })
+  expect(s.current).toMatchObject({ turnId: 't1', lane: 'coder', model: 'Sonnet 5.5', startedAt: 1000, agents: 1 })
+
+  // the subagent's own turn.complete clears it: the band returns to idle
+  await clock.advance(5000)
+  await $.turn.complete({ turnId: 'sub1', agentId: 'a1', ...DONE, usage: { ...USAGE, model: 'claude-sonnet-5-5' } })
+  s = await probe($)
+  expect(s.current).toBeNull()
+  expect(s.last).toMatchObject({ turnId: 't1' })
+})
+
+test('a background agent survives a second main turn and the band stays on it until it finishes', { plugins: [probePlugin] }, async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('agent.spawn', async () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
+  on('tool.call', async () => ({ result: {} as never }))
+
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.tool.call(bgCall('bg1', 'coder'))
+  await $.agent.spawn(bgSpawn('bg1'))
+  await $.turn.complete({ turnId: 't1', ...DONE })
+
+  await $.turn.start({ text: 'and another thing', turnId: 't2' })
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  expect((await probe($)).current).toMatchObject({ turnId: 't2', lane: 'coder' })
+
+  await $.turn.complete({ turnId: 'sub1', agentId: 'a1', ...DONE })
+  expect((await probe($)).current).toBeNull()
+})
+
 test('agent.spawn names the lane of an Agent call that gave no subagent_type', { plugins: [probePlugin] }, async ($, on) => {
   mock.clock(on, { now: 1000 })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
