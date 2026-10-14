@@ -321,5 +321,123 @@ class Line(unittest.TestCase):
         self.assertIn("grok    unknown (login needed)   unknown", out)
 
 
+class RegistryFactsSurvive(unittest.TestCase):
+    """Facts of registry-only lanes (deepseek, kimi, openrouter) must survive every write path of the cache."""
+
+    FACTS = {"deepseek": "balance 103.09 CNY", "kimi": "balance 495.19 CNY", "openrouter": "used 0.00 USD (no cap)"}
+
+    def setUp(self):
+        self.tmp = tempfile.TemporaryDirectory()
+        self.d = self.tmp.name
+        patch = mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": self.d, "SPICK_NO_BG": "1"})
+        patch.start()
+        self.addCleanup(patch.stop)
+        self.addCleanup(self.tmp.cleanup)
+        self.cfg = os.path.join(self.d, "spick.json")
+        self.cache = os.path.join(self.d, "spick-quota.json")
+        self.write_cfg(list(self.FACTS))
+
+    def write_cfg(self, ids):
+        reg = {i: {"kind": "api-key", "data": "text", "tags": ["x"], "meter": {"type": "none"}} for i in ids}
+        with open(self.cfg, "w") as f:
+            json.dump({"lane_registry": reg}, f)
+
+    def seed(self):
+        """A cache as a good refresh left it: every registry lane fresh, with its facts."""
+        now = time.time()
+        reg = quota._effective_lanes()
+        doc = {"written_at": quota.iso(now), "providers": [], "lanes": lanes.cache_view(reg)}
+        for pid, fact in self.FACTS.items():
+            e = quota.entry(pid, "lane_registry", now)
+            e["facts"] = [fact]
+            doc["providers"].append(quota.finalize(e, now))
+        quota.write_cache(doc)
+        return doc
+
+    def facts(self, doc=None):
+        doc = doc or quota.read_cache()
+        return {e["provider"]: e.get("facts") for e in doc["providers"] if e["provider"] in self.FACTS}
+
+    def test_relane_with_the_lane_set_unchanged_keeps_every_fact(self):
+        self.seed()
+        self.assertTrue(quota.relane())
+        self.assertEqual(self.facts(), {k: [v] for k, v in self.FACTS.items()})
+
+    def test_relane_after_the_lane_set_changed_keeps_the_facts_of_the_old_lanes(self):
+        self.seed()
+        self.write_cfg(list(self.FACTS) + ["glm"])
+        self.assertTrue(quota.relane())
+        doc = quota.read_cache()
+        self.assertEqual(self.facts(doc), {k: [v] for k, v in self.FACTS.items()})
+        self.assertIn("glm", [l["id"] for l in doc["lanes"]])
+
+    def test_relane_and_refresh_do_nothing_while_spick_json_is_unreadable(self):
+        self.seed()
+        before = quota.read_cache()
+        with open(self.cfg, "w") as f:
+            f.write("{\"lane_registry\": {")          # caught mid-edit
+        self.assertFalse(quota.relane())
+        with mock.patch.object(quota, "collect_all", side_effect=AssertionError("must not collect")):
+            self.assertEqual(quota.refresh(), before)
+        self.assertEqual(quota.read_cache(), before)
+        self.assertEqual(len(quota.read_cache()["lanes"]), len(before["lanes"]))
+
+    def test_refresh_keeps_the_facts_of_a_lane_whose_collector_did_not_run(self):
+        self.seed()
+        real = quota.collect_all
+
+        def partial(subs, now=None, registry_lanes=None):
+            doc = real(subs, now, registry_lanes)
+            doc["providers"] = [e for e in doc["providers"] if e["provider"] != "kimi"]       # kimi's collector did not run
+            for e in doc["providers"]:
+                if e["provider"] == "openrouter":                                              # its entry came back bare
+                    e["facts"] = []
+            return doc
+
+        with mock.patch.object(quota, "collect_all", partial):
+            doc = quota.refresh()
+        self.assertEqual(self.facts(doc)["kimi"], [self.FACTS["kimi"]])
+        self.assertEqual(self.facts(doc)["openrouter"], [self.FACTS["openrouter"]])
+        self.assertEqual(self.facts(doc)["deepseek"], ["no meter (declared plan only)"])      # this one ran: its new facts stand
+        self.assertEqual(self.facts(quota.read_cache()), self.facts(doc))
+        kimi = [e for e in doc["providers"] if e["provider"] == "kimi"][0]
+        self.assertEqual(kimi["status"], "fresh")
+
+    def test_refresh_while_the_lane_set_changes_keeps_the_prior_facts(self):
+        self.seed()
+        real = quota.collect_all
+        state = {"edited": False}
+
+        def edit_then_skip(subs, now=None, registry_lanes=None):
+            doc = real(subs, now, registry_lanes)
+            if not state["edited"]:
+                state["edited"] = True
+                self.write_cfg(list(self.FACTS) + ["glm"])         # the user adds a lane while collecting
+            doc["providers"] = [e for e in doc["providers"] if e["provider"] not in ("deepseek", "kimi")]
+            return doc
+
+        with mock.patch.object(quota, "collect_all", edit_then_skip):
+            doc = quota.refresh()
+        got = self.facts(doc)
+        self.assertEqual(got["deepseek"], [self.FACTS["deepseek"]])
+        self.assertEqual(got["kimi"], [self.FACTS["kimi"]])
+        self.assertIn("glm", [e["provider"] for e in doc["providers"]])
+
+    def test_a_lane_no_longer_declared_is_not_carried_forward(self):
+        self.seed()
+        self.write_cfg(["deepseek", "openrouter"])
+        doc = quota.refresh()
+        self.assertEqual(sorted(e["provider"] for e in doc["providers"]), ["deepseek", "openrouter"])
+
+    def test_carry_forward_leaves_built_in_providers_and_lanes_with_facts_alone(self):
+        prior = {"written_at": "2026-10-13T15:30:00Z", "providers": [
+            {"provider": "codex", "facts": ["x"], "windows": [], "sampled_at": "2026-10-13T15:29:00Z"},
+            {"provider": "glm", "facts": ["old"], "windows": [], "sampled_at": "2026-10-13T15:29:00Z", "source": "lane_registry"}]}
+        doc = {"written_at": "2026-10-13T15:40:00Z", "lanes": [{"id": "codex"}, {"id": "glm"}], "providers": [
+            {"provider": "glm", "facts": ["new"], "windows": [], "sampled_at": None, "status": "unknown"}]}
+        quota.carry_forward(doc, prior)
+        self.assertEqual([(e["provider"], e["facts"]) for e in doc["providers"]], [("glm", ["new"])])
+
+
 if __name__ == "__main__":
     unittest.main()

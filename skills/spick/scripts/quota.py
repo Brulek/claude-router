@@ -700,11 +700,48 @@ def _lane_ids(lanes):
     return None if lanes is None else [l["id"] for l in lanes]
 
 
+def _config_unreadable():
+    """spick.json exists but is not a JSON object (caught mid-edit, or damaged). lanes.read_config answers {} for
+    that, which reads as "no lane_registry"; a writer that believed it would drop every registry lane."""
+    try:
+        with open(os.path.join(config_dir(), "spick.json")) as f:
+            return not isinstance(json.load(f), dict)
+    except FileNotFoundError:
+        return False
+    except Exception:
+        return True
+
+
+def carry_forward(doc, prior):
+    """Keep the facts of registry lanes a new cache would lose. A registry lane (an id that is not a built-in
+    provider) still declared in doc["lanes"] but with no entry (its collector did not run) or an entry without
+    facts or windows takes the prior cache's entry back, sampling time included, so its age stays true."""
+    if not isinstance(prior, dict) or not isinstance(doc.get("lanes"), list):
+        return doc
+    declared = [l.get("id") for l in doc["lanes"] if isinstance(l, dict)]
+    old = {e.get("provider"): e for e in prior.get("providers") or [] if isinstance(e, dict) and e.get("facts")}
+    now = parse_iso(doc.get("written_at")) or time.time()
+    by_id = {e["provider"]: i for i, e in enumerate(doc["providers"])}
+    for pid in declared:
+        o = old.get(pid)
+        if o is None or pid in PROVIDERS:
+            continue
+        i = by_id.get(pid)
+        if i is None:
+            doc["providers"].append(finalize(json.loads(json.dumps(o)), now))
+        elif not doc["providers"][i].get("facts") and not doc["providers"][i].get("windows"):
+            kept = json.loads(json.dumps(o))
+            kept["plan"], kept["price"] = doc["providers"][i].get("plan"), doc["providers"][i].get("price")
+            doc["providers"][i] = finalize(kept, now)
+    return doc
+
+
 def relane(path=None):
     """Rebuild only the "lanes" part of the existing cache from spick.json; written_at and providers stay.
-    No collectors, no network, no subprocess. No cache file: does nothing. Returns True if it wrote."""
+    No collectors, no network, no subprocess. No cache file, or spick.json unreadable: does nothing.
+    Returns True if it wrote."""
     doc = read_cache(path)
-    if doc is None:
+    if doc is None or _config_unreadable():
         return False
     reg = _effective_lanes()
     if reg is None:
@@ -726,6 +763,9 @@ def refresh(wait_for_lock=False):
             return read_cache()
         return None
     try:
+        prior = read_cache()
+        if _config_unreadable():
+            return prior     # mid-edit or damaged: collecting now would read "no registry" and drop every registry lane
         reg = _effective_lanes()
         for attempt in range(2):
             doc = collect_all(read_subscriptions(), registry_lanes=reg)
@@ -735,10 +775,13 @@ def refresh(wait_for_lock=False):
             if _lane_ids(fresh) == _lane_ids(reg) or attempt == 1:
                 break
             reg = fresh
+        if _config_unreadable():
+            return prior
         if fresh is None:
             doc.pop("lanes", None)
         else:
             doc["lanes"] = lanes_mod.cache_view(fresh)
+            carry_forward(doc, prior)
         write_cache(doc)
         return doc
     finally:
