@@ -22,13 +22,13 @@ export function modelName(id: string): string {
   return alias[id] ?? id
 }
 
-export type CliLane = { lane: 'Gemini' | 'Grok' | 'Codex'; model?: string; effort?: string; isReview: boolean }
+export type CliLane = { lane: string; model?: string; effort?: string; isReview: boolean }
 
 const PREFIX_WORDS = new Set(['env', 'npx', 'sudo', 'time'])
 const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g
 
 /** Classify one command segment by its first real word (after env/npx/sudo/time and any path). */
-function segmentLane(words: string[]): { lane: CliLane['lane']; rest: string[] } | null {
+function segmentLane(words: string[]): { lane: string; rest: string[] } | null {
   let i = 0
   while (i < words.length) {
     const w = words[i]!
@@ -38,6 +38,16 @@ function segmentLane(words: string[]): { lane: CliLane['lane']; rest: string[] }
   const first = words[i]
   if (!first) return null
   const base = first.slice(first.lastIndexOf('/') + 1)
+  if (/^python3?(\.\d+)?$/.test(base)) {
+    const j = words.findIndex((w, k) => k > i && w.slice(w.lastIndexOf('/') + 1) === 'invoke.py')
+    if (j > 0) {
+      const rest = words.slice(j + 1)
+      const l = rest.findIndex(w => w === '--lane' || w.startsWith('--lane='))
+      const id = l < 0 ? undefined : rest[l]!.startsWith('--lane=') ? rest[l]!.slice(7) : rest[l + 1]
+      if (id) return { lane: id, rest }
+    }
+    return null
+  }
   if (base === 'agy') return { lane: 'Gemini', rest: words.slice(i + 1) }
   if (base === 'grok') return { lane: 'Grok', rest: words.slice(i + 1) }
   if (base === 'codex' && words[i + 1] === 'exec') return { lane: 'Codex', rest: words.slice(i + 2) }

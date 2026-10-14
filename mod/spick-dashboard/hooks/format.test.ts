@@ -23,6 +23,14 @@ test('parseCli recognises the three CLIs and their model/effort flags', () => {
     { lane: 'Codex', isReview: false })
 })
 
+test('parseCli takes the lane id from invoke.py --lane', () => {
+  expect(parseCli('python3 ~/.claude/skills/spick/scripts/invoke.py --lane glm --prompt-file /tmp/p.txt --model glm-5')).toEqual(
+    { lane: 'glm', model: 'glm-5', isReview: false })
+  expect(parseCli('cd x && python3 invoke.py --prompt-file p.txt --lane=qwen-local')).toEqual(
+    { lane: 'qwen-local', isReview: false })
+  expect(parseCli('python3 invoke.py --prompt-file p.txt')).toBeNull()
+})
+
 test('parseCli ignores CLI names inside quoted strings and ordinary words', () => {
   expect(parseCli('echo "remember to run agy later"')).toBeNull()
   expect(parseCli('ls agyfolder')).toBeNull()
