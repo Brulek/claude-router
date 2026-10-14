@@ -30,6 +30,7 @@ THIRD_PARTY_KINDS = ("api-key", "relay")
 ID_RE = re.compile(r"^[a-z0-9-]+$")
 KEY_REF_RE = re.compile(r"^(keychain:[A-Za-z0-9._-]+|env:[A-Za-z_][A-Za-z0-9_]*)$")
 B64_RE = re.compile(r"^[A-Za-z0-9+/]{32,}={0,2}$")
+PRESETS_PATH = os.path.join(HERE, "..", "assets", "meter-presets.json")
 
 
 def config_dir():
@@ -52,6 +53,16 @@ def read_config(path=None):
 def builtins():
     with open(BUILTIN_PATH) as f:
         return json.load(f)
+
+
+def meter_presets():
+    """assets/meter-presets.json without its _comment keys; {} when unreadable."""
+    try:
+        with open(PRESETS_PATH) as f:
+            d = json.load(f)
+        return {k: v for k, v in d.items() if isinstance(v, dict) and not k.startswith("_")}
+    except Exception:
+        return {}
 
 
 def has_registry(cfg):
@@ -118,6 +129,10 @@ def looks_like_secret(s):
     return s.startswith("sk-") or bool(B64_RE.match(s))
 
 
+def _nonempty(v):
+    return isinstance(v, str) and bool(v.strip())
+
+
 def validate(cfg):
     """List of problems (strings). Secret values are never echoed."""
     errs = []
@@ -148,6 +163,12 @@ def validate(cfg):
             mt = meter.get("type") if isinstance(meter, dict) else None
             if mt not in METER_TYPES:
                 errs.append("lane %s: meter.type must be one of %s" % (lid, ", ".join(METER_TYPES)))
+            elif mt in ("balance-endpoint", "usage-endpoint"):
+                if not (_nonempty(meter.get("preset")) or _nonempty(meter.get("url"))):
+                    errs.append("lane %s: meter.type %s needs meter.preset or meter.url" % (lid, mt))
+            elif mt == "local-file":
+                if not _nonempty(meter.get("path")):
+                    errs.append("lane %s: meter.type local-file needs meter.path" % lid)
         if "key_ref" in rec:
             kr = rec["key_ref"]
             if not (isinstance(kr, str) and KEY_REF_RE.match(kr)):

@@ -30,6 +30,7 @@ import datetime
 import glob
 import json
 import os
+import re
 import select
 import shutil
 import signal
@@ -39,6 +40,7 @@ import time
 import urllib.error
 import urllib.request
 
+import invoke as invoke_mod   # the one key resolver (read_key) and the no-redirect handler
 import lanes as lanes_mod
 
 FRESH_S = 30 * 60          # status word boundary: "fresh" below this age (a label, not a routing rule)
@@ -48,6 +50,8 @@ CODEX_TIMEOUT = 20
 AGY_TIMEOUT = 90
 GROK_TIMEOUT = 20
 HEALTH_TIMEOUT = 3
+METER_TIMEOUT = 10
+METER_ERR_CHARS = 80
 PROVIDERS = ("claude", "codex", "gemini", "grok")
 
 
@@ -421,20 +425,170 @@ def health_fact(url):
         return "health: unreachable (%s)" % type(ex).__name__
 
 
+# ---------- generic meters (balance-endpoint, usage-endpoint, local-file) ----------
+
+class _Unknown(Exception):
+    """A meter that could not produce a fact; str() is the reason shown as "unknown (<reason>)"."""
+
+
+def _clean(text, key=None):
+    """Response text for an error: whitespace collapsed, Bearer tokens and the key replaced by ***, 80 chars."""
+    text = invoke_mod.BEARER_RE.sub("***", str(text))
+    if key:
+        text = text.replace(key, "***")
+    return " ".join(text.split())[:METER_ERR_CHARS]
+
+
+def dig(obj, path):
+    """Value at a dotted path; a number segment indexes a list. Raises _Unknown when it is not there."""
+    cur = obj
+    for seg in str(path).split("."):
+        if isinstance(cur, dict) and seg in cur:
+            cur = cur[seg]
+        elif isinstance(cur, list) and seg.isdigit() and int(seg) < len(cur):
+            cur = cur[int(seg)]
+        else:
+            raise _Unknown("unexpected response")
+    return cur
+
+
+def _number(v):
+    """A JSON number, or a string holding one. Anything else is an unexpected response."""
+    if isinstance(v, str):
+        try:
+            v = float(v.strip())
+        except ValueError:
+            raise _Unknown("unexpected response")
+    n = num(v)
+    if n is None or n != n or n in (float("inf"), float("-inf")):
+        raise _Unknown("unexpected response")
+    return n
+
+
+def _currency(obj, m):
+    cur = m.get("currency")
+    if m.get("currency_path"):
+        try:
+            cur = dig(obj, m["currency_path"])
+        except _Unknown:
+            cur = None
+    return cur.strip() if isinstance(cur, str) and re.fullmatch(r"[A-Za-z0-9._-]{1,12}", cur.strip()) else None
+
+
+def meter_fact_from(obj, m):
+    """The fact string for a parsed JSON document and a resolved meter. Pure."""
+    kind = m.get("kind") or ("used-total" if m.get("type") == "usage-endpoint" else "balance")
+    value = _number(dig(obj, m.get("value_path") or ""))
+    cur = _currency(obj, m)
+    tail = " " + cur if cur else ""
+    if kind == "balance":
+        return "balance %.2f%s" % (value, tail)
+    if kind == "used-total":
+        if not m.get("total_path"):
+            raise _Unknown("meter has no total_path")
+        return "used %.2f of %.2f%s" % (value, _number(dig(obj, m["total_path"])), tail)
+    raise _Unknown("unknown meter kind")
+
+
+def resolve_meter(lane):
+    """The lane's meter with its preset folded in; fields written on the meter win over the preset."""
+    m = lane.get("meter") if isinstance(lane.get("meter"), dict) else {}
+    name = m.get("preset")
+    base = {}
+    if name is not None:
+        base = lanes_mod.meter_presets().get(name)
+        if base is None:
+            raise _Unknown("unknown preset %s" % _clean(name))
+    out = dict(base)
+    out.update({k: v for k, v in m.items() if k != "preset"})
+    out["preset"] = name
+    return out
+
+
+def _fetch_json(url, key, method, auth):
+    if method != "GET":
+        raise _Unknown("unsupported method")
+    if auth != "bearer":
+        raise _Unknown("unsupported auth")
+    if not (isinstance(url, str) and url.startswith(("http://", "https://"))):
+        raise _Unknown("url not http(s)")
+    req = urllib.request.Request(url, headers={"Authorization": "Bearer " + key, "Accept": "application/json"}, method="GET")
+    opener = urllib.request.build_opener(invoke_mod._NoRedirect)
+    try:
+        with opener.open(req, timeout=METER_TIMEOUT) as r:
+            raw = r.read(1_000_000)
+    except urllib.error.HTTPError as ex:
+        try:
+            snippet = _clean(ex.read().decode("utf-8", "replace"), key)
+        except Exception:
+            snippet = ""
+        ex.close()
+        raise _Unknown("HTTP %d%s" % (ex.code, ": " + snippet if snippet else ""))
+    except Exception as ex:
+        reason = getattr(ex, "reason", ex)
+        raise _Unknown("unreachable (%s)" % ("timeout" if isinstance(reason, TimeoutError) else type(reason).__name__))
+    try:
+        return json.loads(raw.decode("utf-8"))
+    except Exception:
+        raise _Unknown("unexpected response")
+
+
+def meter_http(lane):
+    """One GET with the lane's key; the fact string, or "unknown (<reason>)". The key never leaves this function."""
+    try:
+        m = resolve_meter(lane)
+        if not m.get("url"):
+            raise _Unknown("preset has no collector" if m.get("preset") else "meter has no url")
+        ref = lane.get("key_ref")
+        if not ref:
+            raise _Unknown("key not found: lane has no key_ref")
+        try:
+            key = invoke_mod.read_key(ref)
+        except invoke_mod.Fail as f:
+            raise _Unknown(f.msg)
+        return meter_fact_from(_fetch_json(m["url"], key, m.get("method", "GET"), m.get("auth", "bearer")), m)
+    except _Unknown as ex:
+        return "unknown (%s)" % ex
+    except Exception as ex:
+        return "unknown (%s)" % type(ex).__name__
+
+
+def meter_local_file(lane):
+    """Reads a JSON file at meter.path; same value_path / total_path / kind rules as the endpoint meters."""
+    try:
+        m = resolve_meter(lane)
+        try:
+            with open(os.path.expanduser(str(m.get("path") or "")), "rb") as f:
+                obj = json.loads(f.read(1_000_000).decode("utf-8"))
+        except FileNotFoundError:
+            raise _Unknown("file not found")
+        except (OSError, ValueError):
+            raise _Unknown("unexpected response")
+        return meter_fact_from(obj, m)
+    except _Unknown as ex:
+        return "unknown (%s)" % ex
+    except Exception as ex:
+        return "unknown (%s)" % type(ex).__name__
+
+
 def meter_entry(lane, now):
     """Facts for a lane whose meter is not a built-in collector. Declared fields only; nothing is judged."""
     m = lane.get("meter") if isinstance(lane.get("meter"), dict) else {}
     t = m.get("type", "none")
+    measured = False
     if t == "none":
         facts = ["no meter (declared plan only)"]
     elif t == "builtin":
         facts = ["no built-in collector for %s" % lane["id"]]
+    elif t in ("balance-endpoint", "usage-endpoint", "local-file"):
+        facts = [(meter_local_file if t == "local-file" else meter_http)(lane)]
+        measured = not facts[0].startswith("unknown (")
     else:
         facts = ["meter %s: no collector in this version" % t]
     probed = isinstance(m.get("health_url"), str)
     if probed:
         facts.append(health_fact(m["health_url"]))
-    e = entry(lane["id"], "lane_registry", now if probed else None)
+    e = entry(lane["id"], "lane_registry", now if (probed or measured) else None)
     e["facts"] = facts
     return e
 

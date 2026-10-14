@@ -1,0 +1,39 @@
+{
+  "_comment": "Meter presets. EVERY preset here is UNVERIFIED (verified: false): the url and the response paths are written from memory of each service's docs and have not been called with a key. The user verifies one with their own key before trusting it: set KEY locally, run curl -s -H \"Authorization: Bearer $KEY\" <url>, and compare the JSON with value_path / total_path / currency_path. Dotted paths: a number segment indexes a list. Keys starting with _ are ignored.",
+  "deepseek": {
+    "url": "https://api.deepseek.com/user/balance",
+    "method": "GET",
+    "auth": "bearer",
+    "value_path": "balance_infos.0.total_balance",
+    "currency_path": "balance_infos.0.currency",
+    "kind": "balance",
+    "verified": false,
+    "note": "UNVERIFIED. total_balance is believed to be a numeric string; the collector accepts numeric strings."
+  },
+  "openrouter": {
+    "url": "https://openrouter.ai/api/v1/credits",
+    "method": "GET",
+    "auth": "bearer",
+    "value_path": "data.total_usage",
+    "total_path": "data.total_credits",
+    "currency_path": null,
+    "currency": "USD",
+    "kind": "used-total",
+    "verified": false,
+    "note": "UNVERIFIED. The fields are believed to sit under a top-level data object; if the real response has no data wrapper, use total_usage / total_credits as value_path / total_path."
+  },
+  "new-api": {
+    "method": "GET",
+    "auth": "bearer",
+    "kind": "used-total",
+    "verified": false,
+    "note": "NOTE ONLY, no collector in v1. Needs two calls on the relay's own host: GET <base>/v1/dashboard/billing/subscription (hard_limit_usd) and GET <base>/v1/dashboard/billing/usage (total_usage, often in cents). One meter makes one call, so this shows as unknown (preset has no collector)."
+  },
+  "one-api": {
+    "method": "GET",
+    "auth": "bearer",
+    "kind": "used-total",
+    "verified": false,
+    "note": "NOTE ONLY, no collector in v1. Same two-call shape as new-api (billing/subscription plus billing/usage)."
+  }
+}
