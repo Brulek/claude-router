@@ -123,6 +123,7 @@ class MeterTest(unittest.TestCase):
         self.assertEqual(quota.meter_http(lane), "unknown (key not found: env SPICK_TEST_NOT_SET)")
         self.assertEqual(SEEN, [])
 
+    @unittest.skipUnless(sys.platform == "darwin", "exercises the macOS keychain")
     def test_missing_keychain_key(self):
         lane = self.lane("/balance")
         lane["key_ref"] = "keychain:spick-test-no-such-item-0001"

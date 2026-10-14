@@ -235,6 +235,7 @@ class Refusals(InvokeCase):
         self.assertIn("key not found: env SPICK_TEST_KEY", r.stderr)
         self.assertEqual(r.stdout, "")
 
+    @unittest.skipUnless(sys.platform == "darwin", "exercises the macOS keychain")
     def test_missing_keychain_item_exits_3_naming_only_the_item(self):
         lane = self.api_lane(key_ref="keychain:spick-no-such-item-xyz")
         r = self.run_invoke(lane, "--lane", "t")
