@@ -653,7 +653,7 @@ test('every /spick answer is one line starting with spick:', async ($, on) => {
   session(on)
   await $.session.start(START)
   const answer = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text ?? ''
-  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|lane <id> [<field> <value>]|hide|show|quota]')
+  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|lane <id> [<field> <value>]|hide|show|quota]')
   expect(await answer('lane glm')).toBe('spick: unknown lane id glm')
   expect(await answer('hide')).toBe('spick: band hidden · /spick show restores it')
   expect(await answer('show')).toBe('spick: band shown')
@@ -678,7 +678,7 @@ test('/spick with no UI surface prints a one-paragraph status', async ($, on) =>
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
   const text = (await $.command.run({ command: 'spick', args: '', ...RUN })).text ?? ''
-  expect(text).toBe('spick: routing on, routes (Haiku 5.5 session); review auto; lanes: Gemini on, Grok on, Codex off, openrouter on; band shown; quota unknown (no local data for claude or codex).')
+  expect(text).toBe('spick: routing on, routes (Haiku 5.5 session); review auto; gate on; lanes: Gemini on, Grok on, Codex off, openrouter on; band shown; quota unknown (no local data for claude or codex).')
   expect(text).not.toContain('\n')
 })
 
@@ -724,7 +724,9 @@ test('lanes in the cache switch line 2 to the capability wording and add the Lan
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const lines = ((await contextOf($))[0] ?? '').split('\n')
-  expect(lines[2]).toContain('a task an outside lane is tagged for')
+  // item 2 is a block of seven lines (head, five bullets, tail); the registry swaps its lane bullet
+  expect(lines.slice(2, 9).join('\n')).toContain('   - a task an outside lane is tagged for')
+  expect(lines.slice(2, 9).join('\n')).not.toContain('Gemini (agy)')
   expect(lines.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): gemini search data:public · glm cheap data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
   expect(lines.at(-1)).toBe('Quota (cache 4m old): glm: no meter (declared plan only).')
   expect((await $.command.run({ command: 'spick', args: 'lane glm off', ...RUN })).text).toBe('spick: glm enabled: yes -> no. Backup: spick.json.bak.')
@@ -788,4 +790,138 @@ test('the prompt path runs no process', async ($, on) => {
   await contextOf($)
   await $.prompt.submit(PROMPT)
   expect(fake.calls).toEqual([])
+})
+
+test('the Hint line comes from the prompt itself: a comparison gets it after item 2, a plain question does not', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  await $.session.start(START)
+  const judged = ((await $.prompt.submit({ ...PROMPT, text: '把 spick 和对方的分流机制对比一下，看看有没有差距' })).context ?? [])[0] ?? ''
+  const lines = judged.split('\n')
+  const at = lines.findIndex(l => l.startsWith('   Hint (keywords in this prompt, not a verdict): judgement words (对比, 差距) -> start from Agent(deep, high)'))
+  expect(at).toBeGreaterThan(2)
+  expect((lines[at - 1] ?? '').startsWith('   A prompt that mixes kinds')).toBe(true)
+  expect((lines[at + 1] ?? '').startsWith('3. Goal-shaped?')).toBe(true)
+  // the other tests' prompt ("fix the bug") carries an edit word; a plain question carries none
+  expect((await contextOf($))[0] ?? '').toContain('   Hint (keywords in this prompt, not a verdict): edit words (fix) -> Agent(coder) once nothing is left to decide.')
+  const plain = ((await $.prompt.submit({ ...PROMPT, text: '现在几点了?' })).context ?? [])[0] ?? ''
+  expect(plain.startsWith('[spick triage')).toBe(true)
+  expect(plain).not.toContain('   Hint')
+  // routing off: no checklist, so no hint
+  await $.command.run({ command: 'spick', args: 'off', ...RUN })
+  expect(((await $.prompt.submit({ ...PROMPT, text: '对比一下' })).context ?? [])[0]).toBe(OFF)
+})
+
+// --- the gate: a hinted verdict the main session kept is sent back once at stop time -------------------------------
+const GATE_STOP = { stop_hook_active: false as const }
+const LONG_REPLY = 'The two routers differ in five ways. '.repeat(14)
+const VERDICT = '为什么这两个脚本的输出不一样'
+
+test('a hinted verdict answered by the main session alone is blocked once at stop, with a toast; the next stop passes', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const world = session(on)
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async () => ({ result: {} as never }))
+  await $.session.start(START)
+  const text = '把 spick 和对方的分流机制对比一下，看看有没有差距'
+  await $.prompt.submit({ ...PROMPT, text })
+  await $.turn.start({ text, turnId: 't1' })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'wc -l a b' })
+  const r = await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })
+  expect(r.block).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and nothing was delegated this turn')
+  expect(r.block).toContain('dispatch Agent(deep, high)')
+  expect(r.block).toContain('`Kept:`')
+  expect(world.toasts).toContain('spick: gate — verdict kept by the triage session; sent back once')
+  // once per turn: the stop after a block (Claude Code marks it stop_hook_active) passes, and so would one without the mark
+  expect((await $.classic.Stop({ stop_hook_active: true, last_assistant_message: LONG_REPLY })).block).toBeUndefined()
+  expect((await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })).block).toBeUndefined()
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(1)
+})
+
+test('the gate stays quiet when something was delegated, on a short reply or a Kept: line, without a verdict hint, on a delivery, and when it or routing is off', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const world = session(on)
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async () => ({ result: {} as never }))
+  await $.session.start(START)
+  const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
+  const stop = async (msg: string) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
+  // delegated to an Agent: no gate
+  await turn('t1', VERDICT)
+  await $.tool.call({ ...agentCall('a1', 'deep'), model: 'opus', effort: 'high' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // delegated to an outside CLI: no gate
+  await turn('t2', VERDICT)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'agy -p "why" --model gemini-3.8-flash --effort low' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  // a short reply with no tool call is a question back: no gate; a long one with no tool call is a verdict: gated
+  await turn('t3', VERDICT)
+  expect(await stop('你指的是哪两个脚本?')).toBeUndefined()
+  expect(await stop(LONG_REPLY)).toContain('spick gate')
+  await $.turn.complete({ turnId: 't3', ...DONE })
+  // a Kept: line is the stated reason: no gate (the Chinese form too)
+  await turn('t4', VERDICT)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b4', command: 'diff a b' })
+  expect(await stop(LONG_REPLY + '\nKept: the deliverable is a diff, a plain lookup.')).toBeUndefined()
+  expect(await stop(LONG_REPLY + '\n自留：交付物是一份 diff，纯查阅。')).toBeUndefined()
+  await $.turn.complete({ turnId: 't4', ...DONE })
+  // an edit-word prompt is coder's bucket, not the gate's business
+  await turn('t5', 'fix the bug in a.py')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b5', command: 'cat a.py' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't5', ...DONE })
+  // a delivery (no checklist) carries no hint, whatever its words
+  await $.prompt.submit({ ...PROMPT, text: VERDICT, origin: { kind: 'task-notification' as const } })
+  await $.turn.start({ text: VERDICT, turnId: 't6' })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b6', command: 'cat a.py' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't6', ...DONE })
+  // /spick gate off silences it; gate on restores; routing off silences it too
+  expect((await $.command.run({ command: 'spick', args: 'gate off', ...RUN })).text).toBe('spick: gate off')
+  await turn('t7', VERDICT)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b7', command: 'cat a.py' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't7', ...DONE })
+  expect((await $.command.run({ command: 'spick', args: 'gate on', ...RUN })).text).toBe('spick: gate on')
+  expect((await $.command.run({ command: 'spick', args: 'off', ...RUN })).text).toBe('spick: routing off')
+  await turn('t8', VERDICT)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b8', command: 'cat a.py' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't8', ...DONE })
+  expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(1)
+})
+
+test('gate off persists to the store and comes back at the next session.start', async ($, on) => {
+  mock.clock(on)
+  const held = new Map<string, unknown>()
+  on('store.get', async (_$, e) => ({ value: held.get(e.key) }))
+  on('store.set', async (_$, e) => { held.set(e.key, e.value); return { value: undefined } })
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async () => ({ result: {} as never }))
+  await $.session.start(START)
+  expect((await $.command.run({ command: 'spick', args: 'gate off', ...RUN })).text).toBe('spick: gate off')
+  expect(held.get('spick:gate')).toBe('off')
+  await $.session.start(START)
+  await $.prompt.submit({ ...PROMPT, text: VERDICT })
+  await $.turn.start({ text: VERDICT, turnId: 't1' })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'diff a b' })
+  expect((await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })).block).toBeUndefined()
+  await $.turn.complete({ turnId: 't1', ...DONE })
 })

@@ -1,0 +1,91 @@
+// The triage Hint line: the keywords of a prompt and the default route they imply, as one line of the checklist.
+// A pure function of the text, the twin of skills/spick/scripts/triage_hint.py (same table, same words; both are
+// tested against skills/spick/scripts/testdata/triage_hints.json). A hint is advice the model may overrule with a
+// one-line reason, never a verdict: the main session is the smallest model and the one that profits from keeping
+// a task, so a deterministic pass names the default route before that model reads the checklist.
+export type HintKind = 'judgement' | 'review' | 'design' | 'code' | 'web' | 'x'
+
+// hints:start — a copy of skills/spick/assets/triage-hints.json without its "_" note (test_triage_hint.py checks they match)
+export const KEYWORDS: Record<HintKind, readonly string[]> = {
+  "judgement": ["对比", "比较", "差距", "差异", "优劣", "利弊", "评估", "评价", "复盘", "诊断", "分析", "为什么", "为何", "原因", "根因", "哪个更", "哪个好", "哪种更", "值不值", "要不要", "该不该", "是否合理", "有没有问题", "有什么问题", "建议", "推荐", "怎么看", "看法", "判断", "对吗", "对不对", "行不行", "靠谱", "合适吗", "妥当", "好不好", "正确吗", "问题出在", "怎么回事", "怎么会",
+    "compare", "comparison", "versus", "vs", "gap", "gaps", "evaluate", "evaluation", "assess", "assessment", "critique", "diagnose", "diagnosis", "why", "root cause", "which is better", "should we", "should i", "recommend", "recommendation", "trade-off", "tradeoff", "tradeoffs", "pros and cons", "worth it", "analyse", "analyze", "analysis", "verdict", "opinion", "is it correct", "is this right", "look right", "what do you think", "thoughts", "sanity check", "make sense", "any issues", "any problems"],
+  "review": ["审查", "审阅", "评审", "review", "audit"],
+  "design": ["怎么设计", "设计", "方案", "架构", "怎么做", "如何做", "怎么实现", "如何实现", "规划", "技术选型",
+    "how should", "design", "architecture", "approach", "roadmap", "which file", "data model", "schema"],
+  "code": ["修改", "改成", "改为", "改一下", "修一下", "修复", "实现", "添加", "新增", "加一个", "加上", "加个", "删除", "去掉", "重构", "重写", "写一个", "写个", "做一个", "补上",
+    "fix", "implement", "add", "remove", "delete", "refactor", "rewrite", "rename", "write a", "create"],
+  "web": ["最新", "版本号", "价格", "搜一下", "搜索", "联网",
+    "latest", "newest", "price", "search the web", "google", "release notes", "current version"],
+  "x": ["推特", "推文", "twitter", "x.com", "tweet", "tweets"]
+}
+// hints:end
+
+/** what each kind's keywords imply, around the matched words */
+const PHRASES: Record<HintKind, (t: string) => string> = {
+  judgement: t => `judgement words (${t}) -> start from Agent(deep, high)`,
+  review: t => `review words (${t}) -> the review lane for a diff, else Agent(deep)`,
+  design: t => `design words (${t}) -> Agent(planner) before any coder`,
+  code: t => `edit words (${t}) -> Agent(coder) once nothing is left to decide`,
+  web: t => `web signs (${t}) -> the search lane fetches, judging what it finds is still deep's`,
+  x: t => `X words (${t}) -> the x-data lane`,
+}
+export const HINT_HEAD = '   Hint (keywords in this prompt, not a verdict): '
+export const HINT_TAIL = '. Keeping a hinted task yourself needs a one-line reason in the reply, on a line starting with `Kept:`.'
+const MAX_SHOWN = 3
+const URL_RE = /https?:\/\/\S+/i
+const WEB_ADDRESS = 'a web address'
+
+const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const isAscii = (s: string) => /^[\x00-\x7f]+$/.test(s)
+/** an ASCII entry on word boundaries, case-insensitively (spaces match any whitespace); any other entry as a substring */
+const matches = (text: string, low: string, word: string): boolean => {
+  if (!isAscii(word)) return text.includes(word)
+  const pat = '(?<![a-z0-9])' + word.toLowerCase().split(/\s+/).map(esc).join('\\s+') + '(?![a-z0-9])'
+  return new RegExp(pat).test(low)
+}
+
+export type Hint = { kind: HintKind; words: string[] }
+
+/** the kinds that fired, in the table's order, each with its matched words; a word a longer match already covers is left out */
+export function findHints(text: string): Hint[] {
+  const t = text ?? ''
+  const low = t.toLowerCase()
+  const out: Hint[] = []
+  for (const kind of Object.keys(KEYWORDS) as HintKind[]) {
+    const found: string[] = []
+    if (kind === 'web' && URL_RE.test(t)) found.push(WEB_ADDRESS)
+    for (const w of KEYWORDS[kind]) if (matches(t, low, w) && !found.some(f => f.includes(w))) found.push(w)
+    if (found.length) out.push({ kind, words: found })
+  }
+  return out
+}
+
+/** the Hint line for these findings, or null when there are none */
+export const lineOf = (hints: readonly Hint[]): string | null =>
+  hints.length ? HINT_HEAD + hints.map(h => PHRASES[h.kind](h.words.slice(0, MAX_SHOWN).join(', '))).join('; ') + HINT_TAIL : null
+
+/** the Hint line for the checklist, or null when no keyword matched */
+export function hintLine(text: string): string | null {
+  return lineOf(findHints(text))
+}
+
+/** the kinds the gate acts on: a verdict (judgement, review) or a design, neither the main session's to deliver */
+const GATED: readonly HintKind[] = ['judgement', 'review', 'design']
+
+export type GateReason = { kind: 'verdict' | 'design'; text: string }
+
+/**
+ * Why a stop is sent back once: the hinted kind the main session answered itself, and what to do instead. Null when
+ * none of the findings is the gate's business (edit words, web signs and X words are other lanes' affairs). The text
+ * is what Claude Code hands the model as its reason to continue.
+ */
+export function gateReason(hints: readonly Hint[]): GateReason | null {
+  const hit = hints.filter(h => GATED.includes(h.kind))
+  if (!hit.length) return null
+  const verdict = hit.some(h => h.kind !== 'design')
+  const kind = verdict ? 'verdict' : 'design'
+  const who = verdict ? 'Agent(deep, high)' : 'Agent(planner, high)'
+  const words = hit.flatMap(h => h.words.slice(0, MAX_SHOWN)).join(', ')
+  const text = `spick gate: this prompt was hinted as a ${kind} (${words}) and nothing was delegated this turn, so the ${kind} came from the triage session itself. Do one of two things now: dispatch ${who} with the facts you gathered and relay its answer in place of yours; or, if the deliverable really was a plain lookup, reply with one line starting with \`Kept:\` that says why, and stop. This gate fires once per turn.`
+  return { kind, text }
+}

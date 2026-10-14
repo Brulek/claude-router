@@ -10,7 +10,8 @@ Spick is a triage layer for Claude Code. It selects the model and effort for eac
 
 ## Overview
 
-- The main session (Haiku) reads each prompt and makes a single routing decision.
+- The main session (Haiku) reads each prompt and makes a single routing decision, by the shape of the deliverable: a verdict goes to `deep`, a plan to `planner`, changed code to `coder`; the main session is the last line, for plain lookups.
+- A keyword pass over each prompt adds a `Hint` line to the checklist naming the default route; the main session keeps a hinted task only with a stated reason.
 - Subagents (`coder`, `planner`, `deep`) run on fixed models. Outside CLIs (Gemini, Grok, Codex) handle their specialised tasks.
 - Each reply names its participants in a label line or in the band.
 
@@ -61,10 +62,10 @@ flowchart TD
 
 | Task | Assigned to |
 |---|---|
-| Simple tasks: Q&A, file lookup, summaries | Main session (Haiku) |
+| Lookups: Q&A, file lookup, summaries | Main session (Haiku) |
 | Code changes | `coder` subagent (Sonnet) |
 | Planning and design | `planner` subagent (Opus) |
-| Complex reasoning, decisions, formal writing | `deep` subagent (Opus) |
+| Judgements: comparisons, evaluations, diagnoses, complex reasoning, decisions, formal writing | `deep` subagent (Opus) |
 | Web search, fact checking, long media | Gemini (`agy`) |
 | X / Twitter data | Grok (`grok`) |
 | Independent code review, image generation | Codex (`codex`) |
@@ -80,6 +81,8 @@ The band is an optional status line above the prompt that shows which participan
 ![The Spick pane](docs/images/pane.svg)
 
 `/spick` opens the pane, which contains hotkey switches and recent turns. Haiku reads a short quota line with each prompt; the pane shows local meters for Claude and Codex.
+
+The gate is the one place the mod intervenes: when a prompt's Hint line named a verdict (or a design) and the main session answered it without delegating anything, the stop is sent back once, telling it to dispatch `deep` (or `planner`) or to state in one line starting with `Kept:` why the deliverable was a plain lookup. It never fires twice in a turn, never on a short reply without tool calls (a question back), and `/spick gate off` switches it off.
 
 ## Installation
 
@@ -115,13 +118,14 @@ While the band is displayed, replies omit the label line.
 | `spick quota` | Displays the quota line |
 | `/spick on\|force\|off` | Routing switch: `on` routes in a Haiku session only, `force` on any model |
 | `/spick review on\|off` | Codex review step |
+| `/spick gate on\|off` | The gate: a hinted verdict the main session kept is sent back once at stop time |
 | `/spick lane <id>` | Shows one lane's record |
 | `/spick lane <id> on\|off` | Switches a lane on or off (field `enabled`, saved in `spick.json`) |
 | `/spick lane <id> <field> <value>` | Changes any field of a lane through `set_lane.py` (tags take a comma list) |
 | `/spick hide` / `show` | Hides or shows the band for the current session |
 | `/spick quota` | Refreshes the quota line |
 
-Pane hotkeys: `r` routing, `v` review, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
+Pane hotkeys: `r` routing, `v` review, `e` gate, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
 
 ## Requirements
 
@@ -137,7 +141,7 @@ Routing rules: `skills/spick/`. Band and pane: `mod/spick-dashboard/`.
 
 ## Known limitations
 
-A session cannot change its own model; the main session therefore runs on the lower-cost model.
+Spick does not change the main session's model. A mod can rewrite the model and effort of each request (`turn.step` in the engine types of Claude Code 2.1.299); claude-router and claude-agent-tools do that. Spick leaves it to them and composes with claude-router, so the main session runs on the lower-cost model and triages by checklist. The checklist is advice: the main session can still keep a task it should have delegated, which is what the Hint line and the deliverable-shaped item 2 are there to prevent.
 
 ## License
 

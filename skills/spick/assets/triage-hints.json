@@ -1,0 +1,13 @@
+{
+  "_": "Keyword table of the triage Hint line (scripts/triage_hint.py and mod/spick-dashboard/hooks/hint.ts carry the same table; test_triage_hint.py checks they match). Kinds in priority order. An ASCII entry matches on word boundaries, case-insensitively; any other entry as a substring.",
+  "judgement": ["对比", "比较", "差距", "差异", "优劣", "利弊", "评估", "评价", "复盘", "诊断", "分析", "为什么", "为何", "原因", "根因", "哪个更", "哪个好", "哪种更", "值不值", "要不要", "该不该", "是否合理", "有没有问题", "有什么问题", "建议", "推荐", "怎么看", "看法", "判断", "对吗", "对不对", "行不行", "靠谱", "合适吗", "妥当", "好不好", "正确吗", "问题出在", "怎么回事", "怎么会",
+    "compare", "comparison", "versus", "vs", "gap", "gaps", "evaluate", "evaluation", "assess", "assessment", "critique", "diagnose", "diagnosis", "why", "root cause", "which is better", "should we", "should i", "recommend", "recommendation", "trade-off", "tradeoff", "tradeoffs", "pros and cons", "worth it", "analyse", "analyze", "analysis", "verdict", "opinion", "is it correct", "is this right", "look right", "what do you think", "thoughts", "sanity check", "make sense", "any issues", "any problems"],
+  "review": ["审查", "审阅", "评审", "review", "audit"],
+  "design": ["怎么设计", "设计", "方案", "架构", "怎么做", "如何做", "怎么实现", "如何实现", "规划", "技术选型",
+    "how should", "design", "architecture", "approach", "roadmap", "which file", "data model", "schema"],
+  "code": ["修改", "改成", "改为", "改一下", "修一下", "修复", "实现", "添加", "新增", "加一个", "加上", "加个", "删除", "去掉", "重构", "重写", "写一个", "写个", "做一个", "补上",
+    "fix", "implement", "add", "remove", "delete", "refactor", "rewrite", "rename", "write a", "create"],
+  "web": ["最新", "版本号", "价格", "搜一下", "搜索", "联网",
+    "latest", "newest", "price", "search the web", "google", "release notes", "current version"],
+  "x": ["推特", "推文", "twitter", "x.com", "tweet", "tweets"]
+}

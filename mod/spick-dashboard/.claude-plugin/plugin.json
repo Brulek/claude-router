@@ -1,7 +1,7 @@
 {
   "name": "spick-dashboard",
-  "version": "0.10.2",
-  "description": "Shows who is working now (lane, model) above the prompt, and a /spick pane with switches (routing, review, lanes, band), lane totals, local quota and recent turns. The switches shape the per-prompt triage checklist; everything else is observed only.",
+  "version": "0.11.0",
+  "description": "Shows who is working now (lane, model) above the prompt, and a /spick pane with switches (routing, review, gate, lanes, band), lane totals, local quota and recent turns. The switches shape the per-prompt triage checklist, which carries a keyword Hint line per prompt; the gate sends a hinted verdict the main session kept back once at stop time; everything else is observed only.",
   "author": { "name": "Brulek" },
   "types": "./types/index.d.ts"
 }

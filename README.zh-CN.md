@@ -10,7 +10,8 @@ Spick 是 Claude Code 的分诊层，为每项任务选定模型与推理强度�
 
 ## 概述
 
-- 主会话（Haiku）读取每条请求，并作出一次分派决定。
+- 主会话（Haiku）读取每条请求，按交付物的形状作出一次分派决定：结论类交给 `deep`，方案交给 `planner`，改代码交给 `coder`；主会话排在最后，只接纯查阅。
+- 每条请求先过一遍关键词，清单里多出一行 `Hint`，写明默认该走哪条路；主会话要自己接下带 Hint 的任务，必须在回复里说明一句理由。
 - 子代理（`coder`、`planner`、`deep`）运行于固定模型；外部 CLI（Gemini、Grok、Codex）承担各自擅长的任务。
 - 每次回复均标明参与者，标明方式为标注行或状态带。
 
@@ -61,10 +62,10 @@ flowchart TD
 
 | 任务 | 执行者 |
 |---|---|
-| 简单任务：问答、文件查阅、摘要 | 主会话（Haiku） |
+| 查阅类：问答、文件查阅、摘要 | 主会话（Haiku） |
 | 代码修改 | `coder` 子代理（Sonnet） |
 | 规划与设计 | `planner` 子代理（Opus） |
-| 复杂推理、关键决策、正式文稿 | `deep` 子代理（Opus） |
+| 判断类：对比、评估、诊断、复杂推理、关键决策、正式文稿 | `deep` 子代理（Opus） |
 | 联网搜索、事实核查、长媒体 | Gemini（`agy`） |
 | X / Twitter 数据 | Grok（`grok`） |
 | 独立代码审核、图像生成 | Codex（`codex`） |
@@ -82,6 +83,8 @@ flowchart TD
 ![Spick 面板](docs/images/pane.svg)
 
 `/spick` 打开面板。面板包含快捷键开关与最近几轮记录。Haiku 随每条请求读取一行简短的额度信息；面板显示 Claude 与 Codex 的本机额度条。
+
+拦截（gate）是模组唯一会出手的地方：某条请求的 `Hint` 行判为结论类（或设计类），而主会话什么都没委派就自己答了，收工时会被退回一次，要求它派 `deep`（或 `planner`），或者用一行以 `Kept:` 开头的话说明交付物其实只是查阅。一轮最多退回一次；没调工具的短回复（反问）不退；`/spick gate off` 可关闭。
 
 ## 安装
 
@@ -117,13 +120,14 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 | `spick quota` | 显示额度信息 |
 | `/spick on\|force\|off` | 分流开关：`on` 只在 Haiku 会话里分流，`force` 任何模型都分流 |
 | `/spick review on\|off` | Codex 审核步骤开关 |
+| `/spick gate on\|off` | 拦截开关：主会话自己答了带 Hint 的结论类任务，收工时退回一次 |
 | `/spick lane <id>` | 显示单个 lane 的记录 |
 | `/spick lane <id> on\|off` | 开关某个 lane（字段 `enabled`，写入 `spick.json`） |
 | `/spick lane <id> <field> <value>` | 经 `set_lane.py` 修改 lane 的任意字段（tags 用逗号分隔） |
 | `/spick hide` / `show` | 隐藏或显示状态带，仅限本会话 |
 | `/spick quota` | 刷新额度信息 |
 
-面板快捷键：`r` 分流，`v` 审核，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
+面板快捷键：`r` 分流，`v` 审核，`e` 拦截，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
 
 ## 环境要求
 
@@ -140,7 +144,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 
 ## 已知限制
 
-会话无法更改自身的模型与推理强度，因此主会话采用低成本模型。
+Spick 不改主会话的模型。模组可以改写每次请求的模型与推理强度（Claude Code 2.1.299 引擎类型中的 `turn.step`），claude-router 与 claude-agent-tools 就是这样做的；Spick 把这件事留给它们、与 claude-router 配合使用，所以主会话跑在低成本模型上，靠清单分派。清单只是建议：主会话仍可能把本该委派的任务留给自己，`Hint` 行和按交付物形状排列的第二项就是为了防这一点。
 
 ## 许可证
 

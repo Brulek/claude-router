@@ -24,6 +24,10 @@ Read the config (`cat ~/.claude/spick.json`) at the start of a session. It tells
 
 Decide first what the task needs, then pick a lane that offers it. Go down the table top to bottom; the first matching row wins. Built-in defaults are named as "default …"; they apply when the Lanes line is absent (no `lane_registry`) or names no other lane with that tag.
 
+**Route by the shape of the deliverable, and read the table top to bottom.** A small model cannot tell hard from easy, but it can tell what the deliverable is: a verdict (compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend), a plan, changed code, or a plain lookup. The row that keeps work in this session is the last one that can claim a task: you take it only when no row above does. Reading files on the way does not make a task a lookup; read them to brief the delegate. Keeping a comparison because "I only read files and summarised" is the mis-route that sends analysis to the smallest model. The Agent tool's own advice ("when in doubt, don't spawn") is written for a model doing its own work; for the triage layer the rule is the opposite: when in doubt, spawn `deep`.
+
+**The Hint line.** The checklist may carry a `Hint` line: the keywords `scripts/triage_hint.py` (or the dashboard mod) found in the prompt and the default route they imply, for example `judgement words (对比, 差距) -> start from Agent(deep, high)`. It comes from a keyword table (`assets/triage-hints.json`), so it is advice, not a verdict: follow it unless you can say in one line why the deliverable is a plain lookup, and put that line in the reply, starting with `Kept:`, so the user can see the call. With the dashboard mod, a hinted verdict or design you answer yourself with nothing delegated and no `Kept:` line is sent back once at stop time (the gate); the `Kept:` line is what lets a justified keep pass.
+
 **You do not design.** A change that needs a decision the user did not make - a layout, an API, an algorithm, a data shape, which file to change - goes to `planner` first, however small the change; `coder` then executes the plan. Deciding it yourself and briefing `coder` with the result is the mis-route this skill exists to prevent: the design would be made by the smallest model and executed by a larger one.
 
 | The task needs | Lane | If no lane offers it |
@@ -34,12 +38,13 @@ Decide first what the task needs, then pick a lane that offers it. Go down the t
 | video generation | none | tell the user: Grok Imagine, Sora and Veo are web/app only |
 | long-context / multimodal: long video or audio, a document far beyond ~200 pages | tag `long-context` or `multimodal` (default Gemini) | `deep` (documents only) |
 | cheap / chinese: a draft where cost or Chinese output matters | a lane tagged `cheap` or `chinese`, if the user declared one | you, or `coder` / `deep` by difficulty |
-| chores: Q&A, find/read files, summarise, tidy, run an existing script, send an email with an existing tool | **You (Haiku)** | - |
+| verdict: compare two projects or approaches, evaluate, find gaps, diagnose why something happened, review another codebase or a design, recommend. Reading files on the way does not make it a lookup: read them to brief `deep`, not to answer yourself | **`deep`** (Opus) | - |
 | decision: a change that needs a layout, API, algorithm, data shape or file choice the user did not make | **`planner`** (Opus) first, then **`coder`** with the plan | `deep`, then `coder` |
 | code: write, change, debug, refactor or test code where what to change and where is already decided (except a one-line or config-only change) | **`coder`** (Sonnet); a lane tagged `code` (default Codex `exec` with workspace-write) is a second implementer | `coder` |
 | review: independent review of a diff | tag `review` (default Codex; see Step 3) | `deep` |
 | plan: plan, design, break a multi-step task down, "how should we do X" | **`planner`** (Opus) | `deep` |
 | reasoning: hard reasoning, important decisions, risky operations, complex debugging, formal long-form writing | **`deep`** (Opus) | - |
+| a plain lookup, nothing else: the answer is already in a file on this machine, a command's output or your own knowledge - Q&A, find/read files, summarise, tidy, run an existing script, send an email with an existing tool | **You (Haiku)** | - |
 | you cannot tell how hard it is | **`deep`** | - |
 | the user says "extremely important" or the task clearly exceeds Opus | `deep` first, then tell the user to switch the session to Fable in the model menu | - |
 
@@ -218,6 +223,7 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 | `/spick` | (dashboard mod) opens the pane; with no UI it prints a one-paragraph status |
 | `/spick on` / `force` / `off` | (dashboard mod) routing switch, remembered: `on` routes in a Haiku session only (a stronger model does the work itself), `force` routes on any model, `off` means do the work yourself, no Spick dispatch (`auto`, the old name of `on`, still works). A manual `/model` turns it off for the session |
 | `/spick review on` / `off` | (dashboard mod) Codex review step, remembered; when off write `Review: off` in the label line |
+| `/spick gate on` / `off` | (dashboard mod) the gate, remembered: a prompt whose Hint line named a verdict or a design, answered by the main session with nothing delegated, is sent back once at stop time (dispatch `deep` / `planner`, or one `Kept:` line saying why it was a lookup) |
 | `/spick lane <id> on` / `off` | (dashboard mod) one lane (a built-in or a registered id): writes `enabled` through `scripts/set_lane.py`, so it persists in `spick.json`; an off lane is left out |
 | `/spick lane <id> <field> <value>` / `/spick lane <id>` | (dashboard mod) changes one field through `scripts/set_lane.py` (any field; secrets and unknown ids refused) / shows the lane's record. The pane's lanes page (`l`) does the same |
 | `/spick hide` / `show` | (dashboard mod) band visibility, this session only |
@@ -233,5 +239,6 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 - `scripts/set_lane.py` - changes one field of one lane (`--list` shows tags, data, enabled, notes; `--field enabled --value yes|no` is the one on/off switch; backup, validation, `--dry-run`). The user may change any field; never hand-edit `spick.json`.
 - `scripts/invoke.py` - calls a registered lane (`--list-models`).
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
+- `scripts/triage_hint.py` - the Hint line: the keywords of a prompt and the default route they imply (`--stdin-json` from the hook, `--text` by hand); table in `assets/triage-hints.json`, twin in the dashboard mod's `hint.ts`.
 - `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection and install.
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.

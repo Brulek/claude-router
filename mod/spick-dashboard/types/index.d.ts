@@ -61,9 +61,12 @@ export type LaneInfo = { id: string; kind?: string; tags: string[]; data?: strin
 export type LaneRow = { id: string; name: string; enabled: boolean; tags: string[]; data: string | null; notes: string | null; kind: string | null }
 /** the lanes page's last edit and last refusal, both one line */
 export type LaneNote = { change: string; error: string }
+/** gate: `on` sends a verdict the main session kept (no delegate, a hinted prompt) back once at stop time, `off` never */
+export type Gate = 'on' | 'off'
 export type Controls = {
   routing: Routing
   review: Review
+  gate: Gate
   /** the user picked a model by hand this session: routing is off until /spick on or /spick force */
   manualModel: boolean
 }
