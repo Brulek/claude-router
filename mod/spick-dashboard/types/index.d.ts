@@ -37,12 +37,15 @@ export type LaneTotals = {
 export type Routing = 'auto' | 'on' | 'off'
 /** review: `auto` follows the skill's review triggers, `off` skips Codex review */
 export type Review = 'auto' | 'off'
-export type LaneKey = 'gemini' | 'grok' | 'codex'
+/** a lane id: the built-ins 'gemini' | 'grok' | 'codex' or any id the user registered in lane_registry */
+export type LaneKey = string
+/** a declared lane as the quota cache carries it (notes, urls and key_ref are never in the cache) */
+export type LaneInfo = { id: string; kind?: string; tags: string[]; prefer: string[]; data?: string | null }
 export type Controls = {
   routing: Routing
   review: Review
   /** true = the outside lane may be used */
-  lanes: { gemini: boolean; grok: boolean; codex: boolean }
+  lanes: Record<LaneKey, boolean>
   /** the user picked a model by hand this session: routing is off until /spick on or /spick auto */
   manualModel: boolean
 }

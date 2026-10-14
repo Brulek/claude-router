@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
-import { DEFAULT_CONTROLS, NO_LABEL_LINE, checklist, drawsBand, isDelivery, offSentence, reviewOffNote, effectiveRouting, laneOffNote, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
+import { DEFAULT_CONTROLS, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, offSentence, reviewOffNote, effectiveRouting, laneOffNote, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
 const FABLE = 'claude-fable-5-1'
@@ -142,4 +142,36 @@ test('a quota line is appended as the last line, only while routing is on', () =
   expect(checklist(ctl(), HAIKU, true, undefined)).toBe(base)
   expect(checklist(ctl(), HAIKU, true, '')).toBe(base)
   expect(checklist(ctl({ routing: 'off' }), HAIKU, true, line)).toBe(offSentence(true))
+})
+
+// ---- declared lanes (lane_registry): the cache carries them ----
+const DECLARED = [
+  { id: 'gemini', kind: 'cli-subscription', tags: ['search'], prefer: ['search'], data: 'code' },
+  { id: 'glm', kind: 'api-key', tags: ['chinese', 'cheap'], prefer: ['chinese'], data: 'text' },
+]
+
+test('with declared lanes: capability line 2, the Lanes line before the quota line, no fixed fallback wording', () => {
+  const block = checklist(ctl(), HAIKU, true, 'Quota (cache 1m old): x.', DECLARED).split('\n')
+  expect(block[2]).toBe(REGISTRY_LANE_LINE)
+  expect(block[2]).not.toContain('Gemini (agy)')
+  expect(block.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): gemini search prefer:search data:code · glm chinese,cheap prefer:chinese data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
+  expect(block.at(-1)).toBe('Quota (cache 1m old): x.')
+})
+
+test('without declared lanes the checklist is the old one', () => {
+  expect(checklist(ctl(), HAIKU, true, undefined, undefined)).toBe(checklist(ctl(), HAIKU, true))
+  expect(checklist(ctl(), HAIKU, true, undefined, [])).toBe(checklist(ctl(), HAIKU, true))
+})
+
+test('a declared lane switched off leaves the Lanes line and adds the plain off note', () => {
+  const block = checklist(ctl({ lanes: { glm: false } }), HAIKU, true, undefined, DECLARED).split('\n')
+  expect(block.at(-2)).toBe('glm lane is off for this session')
+  expect(block.at(-1)).not.toContain('glm chinese')
+  expect(laneOffNote('grok', true)).toBe('grok lane is off for this session')
+})
+
+test('/spick lane accepts the ids it is told are registered', () => {
+  expect(parseSpick('lane glm off', ['gemini', 'glm'])).toEqual({ kind: 'lane', lane: 'glm', on: false })
+  expect(parseSpick('lane glm off')).toEqual({ kind: 'usage' })
+  expect(parseLanes(JSON.stringify({ gemini: false, glm: false, 'Bad Id': false }))).toEqual({ gemini: false, grok: true, codex: true, glm: false })
 })

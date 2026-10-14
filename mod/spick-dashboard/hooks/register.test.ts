@@ -565,3 +565,19 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   expect(isChecklist(without)).toBe(true)
   expect(without[0]).not.toContain('Quota')
 })
+
+test('lanes in the cache switch line 2 to the capability wording and add the Lanes line; /spick lane takes a registered id', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[{"id":"glm","kind":"api-key","tags":["cheap"],"prefer":[],"data":"text"}]}'
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
+  await $.session.start(START)
+  const lines = ((await contextOf($))[0] ?? '').split('\n')
+  expect(lines[2]).toContain('a task an outside lane is tagged for')
+  expect(lines.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): glm cheap data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
+  expect(lines.at(-1)).toBe('Quota (cache 4m old): glm: no meter (declared plan only).')
+  expect((await $.command.run({ command: 'spick', args: 'lane glm off', ...RUN })).text).toBe('spick: glm lane off')
+  expect(((await contextOf($))[0] ?? '').split('\n').at(-2)).toBe('glm lane is off for this session')
+})

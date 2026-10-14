@@ -7,6 +7,7 @@ import unittest
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
+import lanes  # noqa: E402
 import quota  # noqa: E402
 
 DATA = os.path.join(HERE, "testdata")
@@ -222,7 +223,28 @@ class Line(unittest.TestCase):
         now = quota.parse_iso("2026-10-13T15:34:00Z")
         with open(os.path.join(DATA, "cache_sample.line.txt")) as f:
             expected = f.read().rstrip("\n")
-        self.assertEqual(quota.build_line(load("cache_sample.json"), now), expected)
+        doc = load("cache_sample.json")
+        self.assertEqual(lanes.build_line(doc["lanes"]) + "\n" + quota.build_line(doc, now), expected)
+
+    def test_facts_replace_the_unknown_prefix(self):
+        doc = {"written_at": "2026-10-13T15:30:00Z", "providers": [
+            {"provider": "glm", "plan": None, "sampled_at": None, "windows": [], "facts": ["no meter (declared plan only)"]},
+            {"provider": "grok", "plan": None, "sampled_at": None, "windows": [], "facts": [], "reason": "login needed"}]}
+        line = quota.build_line(doc, quota.parse_iso("2026-10-13T15:34:00Z"))
+        self.assertIn("glm: no meter (declared plan only)", line)
+        self.assertIn("grok: unknown (login needed)", line)
+
+    def test_collect_all_without_registry_adds_no_new_keys(self):
+        doc = quota.collect_all({})
+        self.assertEqual(sorted(doc), ["providers", "written_at"])
+
+    def test_collect_all_with_registry_adds_facts_and_lanes(self):
+        reg = lanes.load_effective({"lane_registry": {"glm": {"kind": "api-key", "data": "text", "meter": {"type": "none"}}}})
+        doc = quota.collect_all({}, registry_lanes=reg)
+        self.assertEqual([e["provider"] for e in doc["providers"]], ["glm"])
+        self.assertEqual(doc["providers"][0]["facts"], ["no meter (declared plan only)"])
+        self.assertEqual([l["id"] for l in doc["lanes"]], ["gemini", "grok", "codex", "glm"])
+        self.assertNotIn("meter", doc["lanes"][0])
 
     def test_stale_reset_and_unknown_are_stated_as_facts(self):
         line = quota.build_line(load("cache_sample.json"), quota.parse_iso("2026-10-13T15:34:00Z"))

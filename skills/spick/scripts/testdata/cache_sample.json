@@ -22,7 +22,8 @@
      "reset": false
     }
    ],
-   "status": "stale"
+   "status": "stale",
+   "facts": []
   },
   {
    "provider": "codex",
@@ -39,7 +40,8 @@
      "reset": false
     }
    ],
-   "status": "fresh"
+   "status": "fresh",
+   "facts": []
   },
   {
    "provider": "gemini",
@@ -62,7 +64,8 @@
      "reset": false
     }
    ],
-   "status": "fresh"
+   "status": "fresh",
+   "facts": []
   },
   {
    "provider": "grok",
@@ -73,7 +76,97 @@
    "age_s": null,
    "windows": [],
    "status": "unknown",
-   "reason": "login needed"
+   "reason": "login needed",
+   "facts": []
+  },
+  {
+   "provider": "glm",
+   "plan": null,
+   "price": null,
+   "source": "lane_registry",
+   "sampled_at": null,
+   "age_s": null,
+   "windows": [],
+   "status": "unknown",
+   "facts": [
+    "no meter (declared plan only)"
+   ]
+  },
+  {
+   "provider": "proxy",
+   "plan": null,
+   "price": null,
+   "source": "lane_registry",
+   "sampled_at": "2026-10-13T15:29:40Z",
+   "age_s": null,
+   "windows": [],
+   "status": "fresh",
+   "facts": [
+    "balance 12.30 USD"
+   ]
+  }
+ ],
+ "lanes": [
+  {
+   "id": "gemini",
+   "kind": "cli-subscription",
+   "tags": [
+    "search",
+    "long-context",
+    "multimodal",
+    "image"
+   ],
+   "prefer": [
+    "search",
+    "long-context"
+   ],
+   "data": "code"
+  },
+  {
+   "id": "grok",
+   "kind": "cli-subscription",
+   "tags": [
+    "x-data"
+   ],
+   "prefer": [
+    "x-data"
+   ],
+   "data": "code"
+  },
+  {
+   "id": "codex",
+   "kind": "cli-subscription",
+   "tags": [
+    "code",
+    "review",
+    "image"
+   ],
+   "prefer": [
+    "review",
+    "image"
+   ],
+   "data": "code"
+  },
+  {
+   "id": "glm",
+   "kind": "api-key",
+   "tags": [
+    "chinese",
+    "cheap"
+   ],
+   "prefer": [
+    "chinese"
+   ],
+   "data": "text"
+  },
+  {
+   "id": "proxy",
+   "kind": "relay",
+   "tags": [
+    "code"
+   ],
+   "prefer": [],
+   "data": null
   }
  ]
 }

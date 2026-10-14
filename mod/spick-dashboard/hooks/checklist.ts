@@ -1,5 +1,6 @@
-import type { Controls, LaneKey, Review, Routing } from '../types'
+import type { Controls, LaneInfo, LaneKey, Review, Routing } from '../types'
 import { modelName } from './format'
+import { lanesLine } from './quotaline'
 
 export const DEFAULT_CONTROLS: Controls = { routing: 'auto', review: 'auto', lanes: { gemini: true, grok: true, codex: true }, manualModel: false }
 export const LANE_KEYS: readonly LaneKey[] = ['gemini', 'grok', 'codex']
@@ -11,8 +12,14 @@ export const offSentence = (labelLine: boolean): string =>
   OFF_HEAD + (labelLine ? 'still end with the label line.' : 'the status band shows who worked, so print no label line.')
 export const reviewOffNote = (labelLine: boolean): string =>
   labelLine ? 'Codex review is off: skip the review step and write `Review: off` in the label line.' : 'Codex review is off: skip the review step.'
-export const laneOffNote = (lane: LaneKey): string =>
-  `${LANE_NAMES[lane]} lane is off: use the fallback chain.${lane === 'grok' ? ' X data has no fallback: say so.' : ''}`
+export const laneName = (lane: LaneKey): string => LANE_NAMES[lane] ?? lane
+/** with a declared lane_registry the lane is simply off; the fixed fallback chain no longer exists */
+export const laneOffNote = (lane: LaneKey, registry = false): string =>
+  registry ? `${lane} lane is off for this session`
+    : `${laneName(lane)} lane is off: use the fallback chain.${lane === 'grok' ? ' X data has no fallback: say so.' : ''}`
+/** checklist line 2 when the user declared lane_registry: same words as scripts/triage-hook.sh */
+export const REGISTRY_LANE_LINE = "2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line, preferring lanes whose prefer: list has that tag; never send anything above a lane's data: level. Pick an effort for every delegate."
+export const isLaneOn = (c: Controls, lane: LaneKey): boolean => c.lanes[lane] !== false
 export const NO_LABEL_LINE = 'Reply starts with the deliverable; the status band shows who worked, so print no label line.'
 
 /** True where an AbovePrompt band is drawn: terminal and desktop. */
@@ -43,9 +50,11 @@ export function effectiveRouting(c: Controls, sessionModel: string): Effective {
  * The one context block attached to each prompt: the three-question triage checklist
  * (lanes that are off left out, their notes and the review note appended) while routing
  * is effectively on, the off sentence while it is off. `quotaLine`, when given, is appended
- * as the last line (plain facts from the quota cache; see quotaline.ts).
+ * as the last line (plain facts from the quota cache; see quotaline.ts). `lanes`, when the cache
+ * carries them (the user declared lane_registry), switches line 2 to the capability wording and
+ * prints the Lanes line before the quota line, left without the lanes switched off here.
  */
-export function checklist(c: Controls, sessionModel: string, labelLine: boolean, quotaLine?: string): string {
+export function checklist(c: Controls, sessionModel: string, labelLine: boolean, quotaLine?: string, lanes?: readonly LaneInfo[]): string {
   if (!effectiveRouting(c, sessionModel).on) return offSentence(labelLine)
   // the label example names the session's own model (forced on may run on any)
   const main = sessionModel ? modelName(sessionModel) : 'Haiku 5.5'
@@ -54,17 +63,23 @@ export function checklist(c: Controls, sessionModel: string, labelLine: boolean,
   const xData = grok ? '; X data -> Grok' : ''
   const review = c.review === 'off' ? 'Review: off' : codex ? 'Review: Codex gpt-6-astra (medium)' : 'Review: skipped'
   const who = c.review !== 'off' && codex ? 'every participant, reviewer included, carries its own model and effort' : 'every participant carries its own model and effort'
+  const declared = lanes ?? []
+  const registry = declared.length > 0
   const lines = [
     '[spick triage - answer all three before the first tool call]',
     '1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).',
-    `2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); ${search}${xData}. Pick an effort for every delegate.`,
+    registry ? REGISTRY_LANE_LINE : `2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); ${search}${xData}. Pick an effort for every delegate.`,
     '3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.',
     labelLine
       ? `Reply starts with the deliverable; end with the label line: no delegate -> \`[Model: ${main} | Effort: medium]\`; with delegates -> \`[Model: ${main} (medium) → coder Sonnet 5.5 (high) | ${review}]\` — ${who}. Never write \`→ none\` or \`→ 无\`.`
       : NO_LABEL_LINE,
   ]
-  for (const k of LANE_KEYS) if (!c.lanes[k]) lines.push(laneOffNote(k))
+  for (const k of registry ? declared.map(l => l.id) : LANE_KEYS) if (!isLaneOn(c, k)) lines.push(laneOffNote(k, registry))
   if (c.review === 'off') lines.push(reviewOffNote(labelLine))
+  if (registry) {
+    const shown = lanesLine(declared.filter(l => isLaneOn(c, l.id)))
+    if (shown) lines.push(shown)
+  }
   if (quotaLine) lines.push(quotaLine)
   return lines.join('\n')
 }
@@ -76,15 +91,14 @@ export function parseRouting(v: unknown): Routing {
 export function parseReview(v: unknown): Review {
   return v === 'off' || v === 'auto' ? v : DEFAULT_CONTROLS.review
 }
-/** `spick:lanes` is a JSON string; a missing or malformed lane stays on */
+/** `spick:lanes` is a JSON string; a missing or malformed lane stays on; registered ids are kept too */
 export function parseLanes(v: unknown): Controls['lanes'] {
   const out = { ...DEFAULT_CONTROLS.lanes }
   if (typeof v !== 'string') return out
   try {
     const o = JSON.parse(v) as unknown
-    if (o && typeof o === 'object') for (const k of LANE_KEYS) {
-      const b = (o as Record<string, unknown>)[k]
-      if (typeof b === 'boolean') out[k] = b
+    if (o && typeof o === 'object') for (const [k, b] of Object.entries(o as Record<string, unknown>)) {
+      if (LANE_ID.test(k) && typeof b === 'boolean') out[k] = b
     }
   } catch {}
   return out
@@ -100,10 +114,12 @@ export type SpickCommand =
   | { kind: 'quota' }
   | { kind: 'usage' }
 
+const LANE_ID = /^[a-z0-9-]+$/
 export const ARGUMENT_HINT = '[on|off|auto|review on|off|lane <gemini|grok|codex> on|off|hide|show|quota]'
 export const USAGE = `spick: usage /spick ${ARGUMENT_HINT}`
 
-export function parseSpick(args: string): SpickCommand {
+/** `known` are the lane ids `/spick lane` accepts: the three built-ins plus whatever the cache registers */
+export function parseSpick(args: string, known: readonly LaneKey[] = LANE_KEYS): SpickCommand {
   const w = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const [a, b, c] = w
   if (w.length === 0) return { kind: 'open' }
@@ -111,6 +127,6 @@ export function parseSpick(args: string): SpickCommand {
   if (w.length === 1 && (a === 'hide' || a === 'show')) return { kind: 'band', hidden: a === 'hide' }
   if (w.length === 1 && a === 'quota') return { kind: 'quota' }
   if (w.length === 2 && a === 'review' && (b === 'on' || b === 'off')) return { kind: 'review', value: b === 'on' ? 'auto' : 'off' }
-  if (w.length === 3 && a === 'lane' && (b === 'gemini' || b === 'grok' || b === 'codex') && (c === 'on' || c === 'off')) return { kind: 'lane', lane: b, on: c === 'on' }
+  if (w.length === 3 && a === 'lane' && b !== undefined && known.includes(b) && (c === 'on' || c === 'off')) return { kind: 'lane', lane: b, on: c === 'on' }
   return { kind: 'usage' }
 }

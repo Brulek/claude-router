@@ -1,11 +1,11 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderSurface } from 'claude-code'
-import type { Controls, LaneKey, LaneTotals, Quota, QuotaWindows, Review, Routing, TurnRecord } from '../types'
-import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
+import type { Controls, LaneInfo, LaneKey, LaneTotals, Quota, QuotaWindows, Review, Routing, TurnRecord } from '../types'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, LANE_NAMES, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, parseLanes, parseReview, parseRouting, parseSpick } from './checklist'
 import { MAIN_LANE, bandSegments, estimateCost, fmtAge, fmtCost, fmtDuration, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaMeters, table } from './format'
 import type { BandView, Seg } from './format'
 import { readQuota } from './quota'
-import { quotaLineFromCache } from './quotaline'
+import { lanesFromCache, quotaLineFromCache } from './quotaline'
 
 const P = 'spick-dashboard'
 const current = atom({ plugin: 'spick-dashboard', key: 'current' } as const, null)
@@ -45,6 +45,21 @@ async function quotaLineNow($: EngineInterface): Promise<string | null> {
     if (!home) return null
     return quotaLineFromCache(await $.fs.read(`${home}/.claude/spick-quota.json`), await $.clock.now())
   } catch { return null }
+}
+
+/** The lanes the user declared (lane_registry), from the same cache; null for a user without one, or when it cannot be read. */
+async function lanesNow($: EngineInterface): Promise<LaneInfo[] | null> {
+  try {
+    const home = await $.env.get('HOME')
+    if (!home) return null
+    return lanesFromCache(await $.fs.read(`${home}/.claude/spick-quota.json`))
+  } catch { return null }
+}
+
+/** the ids `/spick lane` accepts: the built-ins and every lane the cache registers */
+async function knownLaneIds($: EngineInterface): Promise<string[]> {
+  const extra = ((await lanesNow($)) ?? []).map(l => l.id).filter(id => !LANE_KEYS.includes(id))
+  return [...LANE_KEYS, ...extra]
 }
 
 /** The three remembered choices: routing, review and the lanes (a JSON string). */
@@ -131,7 +146,7 @@ async function quotaLine($: EngineInterface, force: boolean): Promise<string> {
 async function statusParagraph($: EngineInterface): Promise<string> {
   const c = await read($, controls)
   const eff = effectiveRouting(c, await readSessionModel($))
-  const lanes = LANE_KEYS.map(k => `${LANE_NAMES[k]} ${c.lanes[k] ? 'on' : 'off'}`).join(', ')
+  const lanes = (await knownLaneIds($)).map(k => `${laneName(k)} ${c.lanes[k] !== false ? 'on' : 'off'}`).join(', ')
   const quotaText = await quotaLine($, false).catch(() => 'spick: quota not read')
   return `spick: routing ${c.routing}, ${eff.why}; review ${c.review}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
 }
@@ -255,7 +270,7 @@ export const register: Register = on => {
           if (fresh && fresh !== before) await modelPickedByHand($, fresh)
         }
         const surfaces = await $.session.surfaces().catch(() => [] as readonly RenderSurface[])
-        block = checklist(await read($, controls), fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)), (await quotaLineNow($)) ?? undefined)
+        block = checklist(await read($, controls), fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)), (await quotaLineNow($)) ?? undefined, (await lanesNow($)) ?? undefined)
         // keep the bash hook silent through long sessions: refresh the marker hourly
         const now = await $.clock.now()
         if (now - markerAt >= MARKER_REFRESH_MS) {
@@ -467,7 +482,7 @@ export const register: Register = on => {
 
   // Every change answers one line; the pane redraws from the state it reads.
   on('command.run', { command: 'spick' }, async ($, e) => {
-    const cmd = parseSpick(e.args)
+    const cmd = parseSpick(e.args, await knownLaneIds($))
     switch (cmd.kind) {
       case 'band':
         await update($, hidden, () => cmd.hidden)
@@ -482,7 +497,7 @@ export const register: Register = on => {
         return { text: `spick: review ${cmd.value}` }
       case 'lane':
         await setControls($, c => ({ ...c, lanes: { ...c.lanes, [cmd.lane]: cmd.on } }))
-        return { text: `spick: ${LANE_NAMES[cmd.lane]} lane ${cmd.on ? 'on' : 'off'}` }
+        return { text: `spick: ${laneName(cmd.lane)} lane ${cmd.on ? 'on' : 'off'}` }
       case 'quota':
         return { text: await quotaLine($, true).catch(() => 'spick: quota not read') }
       case 'usage':
