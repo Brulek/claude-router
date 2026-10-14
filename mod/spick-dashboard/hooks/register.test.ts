@@ -331,7 +331,7 @@ test('auto on a model that is not Haiku is off', async ($, on) => {
   session(on, 'claude-fable-5-1')
   await $.session.start(START)
   expect(await contextOf($)).toEqual([OFF])
-  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · off: Fable 5.1 is not Haiku')
+  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · off (Fable 5.1 is not Haiku)')
 })
 
 test('a prompt that already carries context and attachments keeps them, with one block appended', async ($, on) => {
@@ -436,7 +436,7 @@ test('/model by the user turns routing off for the session with one toast; /spic
   expect(world.toasts).toHaveLength(1)
 
   await $.command.run({ command: 'model', args: 'haiku', ...RUN })
-  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · on for this session (Haiku 5.5)')
+  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · on (Haiku 5.5 session)')
   expect(isChecklist(await contextOf($))).toBe(true)
 })
 
@@ -514,7 +514,7 @@ test('/spick quota answers with the meters text', async ($, on) => {
   const claudeJson = JSON.stringify({ cachedUsageUtilization: { utilization: { five_hour: { utilization: 5 }, seven_day: { utilization: 8 } } } })
   on('fs.read', async ($, e) => (e.path === '/h/.claude.json' ? { value: claudeJson } : { deny: 'missing' }))
   on('fs.list', async () => ({ value: [] }))
-  expect((await $.command.run({ command: 'spick', args: 'quota', ...RUN })).text).toBe('spick: quota claude ▰▱▱▱▱▱▱▱▱▱ 8%')
+  expect((await $.command.run({ command: 'spick', args: 'quota', ...RUN })).text).toBe('spick: quota claude 7d ▰▱▱▱▱▱▱▱▱▱ 8%')
 })
 
 test('every /spick answer is one line starting with spick:', async ($, on) => {
@@ -545,7 +545,7 @@ test('/spick with no UI surface prints a one-paragraph status', async ($, on) =>
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
   const text = (await $.command.run({ command: 'spick', args: '', ...RUN })).text ?? ''
-  expect(text).toBe('spick: routing auto (on for this session (Haiku 5.5)); review auto; lanes: Gemini on, Grok on, Codex off; band shown; quota unknown (no provider known; grok and gemini report unknown).')
+  expect(text).toBe('spick: routing auto, on (Haiku 5.5 session); review auto; lanes: Gemini on, Grok on, Codex off; band shown; quota unknown (no local data for claude or codex).')
   expect(text).not.toContain('\n')
 })
 
@@ -559,7 +559,7 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   await $.session.start(START)
   const withLine = await contextOf($)
   expect(withLine.length).toBe(1)
-  expect((withLine[0] ?? '').split('\n').at(-1)).toBe('Quota (cache 4m old): codex Pro Lite: 7d 53% used (resets 10-20 05:38Z).')
+  expect((withLine[0] ?? '').split('\n').at(-1)).toBe('Quota (cache 4m old): codex Pro Lite: 7d 53% (resets in 6d).')
   cache = null
   const without = await contextOf($)
   expect(isChecklist(without)).toBe(true)

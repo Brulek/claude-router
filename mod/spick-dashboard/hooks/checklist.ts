@@ -32,11 +32,11 @@ export type Effective = { on: boolean; why: string }
  * `auto` is on only while the session model is Haiku; a manual model pick turns it off for the session.
  */
 export function effectiveRouting(c: Controls, sessionModel: string): Effective {
-  if (c.manualModel) return { on: false, why: 'off: model selected manually' }
+  if (c.manualModel) return { on: false, why: 'off (model selected manually)' }
   if (c.routing === 'off') return { on: false, why: 'off (forced)' }
   if (c.routing === 'on') return { on: true, why: 'on (forced)' }
-  if (/haiku/i.test(sessionModel)) return { on: true, why: `on for this session (${modelName(sessionModel)})` }
-  return { on: false, why: sessionModel ? `off: ${modelName(sessionModel)} is not Haiku` : 'off: session model unknown' }
+  if (/haiku/i.test(sessionModel)) return { on: true, why: `on (${modelName(sessionModel)} session)` }
+  return { on: false, why: sessionModel ? `off (${modelName(sessionModel)} is not Haiku)` : 'off (session model unknown)' }
 }
 
 /**

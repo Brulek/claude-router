@@ -129,7 +129,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     for (const want of ['SPICK', 'This session', 'Quota', 'just now', 'unknown', 'Recent turns']) expect(all).toContain(want)
     // one lane: no total row; the heading row carries the column headers
     expect(all.some(t => t.startsWith('total') || t.includes('  total'))).toBe(false)
-    expect(all.some(t => t.includes('turns') && t.includes('est. cost'))).toBe(true)
+    expect(all.some(t => t.includes('turns') && t.includes('at API rates'))).toBe(true)
     expect(all.some(t => /^ {2}main session +1 +\$3\.00$/.test(t))).toBe(true)
     expect(all.some(t => /^\d\d:\d\d  main session/.test(t))).toBe(true)
     expect(all.some(t => /\byou\b/.test(t))).toBe(false)
@@ -200,7 +200,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(all.indexOf('Controls')).toBeGreaterThan(-1)
     expect(all.indexOf('Controls')).toBeLessThan(all.findIndex(t => t.startsWith('Quota')))
     for (const label of ['Routing   ', 'Review    ', 'Lanes     ', 'Band      ']) expect(all).toContain(label)
-    expect(all).toContain('      on for this session (Haiku 5.5)')
+    expect(all).toContain('      on (Haiku 5.5 session)')
 
     const button = async (key: string) => (await ui.find({ type: 'Button', key }))?.props
     // r and v sit on the value they move to: auto -> on, auto -> off

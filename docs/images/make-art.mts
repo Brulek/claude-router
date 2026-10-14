@@ -130,7 +130,7 @@ const views: { caption: string; view: BandView }[] = [
   ]
   for (const r of rows) p.push(mono(LABEL, r.y, r.name, { fill: C.text }))
   let c = radio(BTN, 128, 'auto', true); c = radio(c, 128, 'on', false); c = radio(c, 128, 'off', false)
-  p.push(mono(c + 1, 128, 'on for this session (Haiku 5.5)', styleOf('dim')))
+  p.push(mono(c + 1, 128, 'on (Haiku 5.5 session)', styleOf('dim')))
   c = radio(BTN, 160, 'auto', true); radio(c, 160, 'off', false)
   c = plain(BTN, 192, 'Gemini on', true); c = plain(c, 192, 'Grok on', true); plain(c, 192, 'Codex on', true)
   plain(BTN, 224, 'shown', true)

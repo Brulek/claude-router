@@ -232,25 +232,25 @@ test('an idle band shows no duration at any width', () => {
 })
 
 test('quotaMeters counts only finite values: a NaN weekly falls back to a finite five-hour, none at all omits the provider', () => {
-  expect(quotaMeters({ claude: { sevenDay: NaN, fiveHour: 12 }, codex: { sevenDay: 37 }, readAt: 0 })).toEqual([{ name: 'claude', pct: 12 }, { name: 'codex', pct: 37 }])
+  expect(quotaMeters({ claude: { sevenDay: NaN, fiveHour: 12 }, codex: { sevenDay: 37 }, readAt: 0 })).toEqual([{ name: 'claude', window: '5h', pct: 12 }, { name: 'codex', window: '7d', pct: 37 }])
   expect(quotaMeters({ claude: { sevenDay: NaN }, codex: { sevenDay: Infinity, fiveHour: NaN }, readAt: 0 })).toEqual([])
 })
 
 test('quotaMeters takes the weekly window per known provider, five-hour when the weekly is unknown', () => {
-  expect(quotaMeters({ claude: { fiveHour: 5, sevenDay: 8 }, codex: { sevenDay: 37 }, readAt: 0 })).toEqual([{ name: 'claude', pct: 8 }, { name: 'codex', pct: 37 }])
-  expect(quotaMeters({ claude: { fiveHour: 12 }, codex: null, readAt: 0 })).toEqual([{ name: 'claude', pct: 12 }])
+  expect(quotaMeters({ claude: { fiveHour: 5, sevenDay: 8 }, codex: { sevenDay: 37 }, readAt: 0 })).toEqual([{ name: 'claude', window: '7d', pct: 8 }, { name: 'codex', window: '7d', pct: 37 }])
+  expect(quotaMeters({ claude: { fiveHour: 12 }, codex: null, readAt: 0 })).toEqual([{ name: 'claude', window: '5h', pct: 12 }])
   expect(quotaMeters({ claude: null, codex: null, readAt: 0 })).toEqual([])
   expect(quotaMeters(null)).toEqual([])
 })
 
 test('table pads columns and right-aligns numbers, with em dash for unpriced', () => {
   const rows = table([
-    ['lane', 'turns', 'est. cost'],
+    ['lane', 'turns', 'at API rates'],
     ['main session', '11', '$0.04'],
     ['Gemini', '2', '—'],
   ], ['l', 'r', 'r'])
-  expect(rows[1]).toBe('main session     11      $0.04')
-  expect(rows[2]).toBe('Gemini            2          —')
+  expect(rows[1]).toBe('main session     11         $0.04')
+  expect(rows[2]).toBe('Gemini            2             —')
   expect(new Set(rows.map(r => r.length)).size).toBe(1)
 })
 

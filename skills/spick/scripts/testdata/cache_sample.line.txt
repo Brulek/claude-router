@@ -1,1 +1,1 @@
-Quota (cache 4m old): claude Max 20x $200/mo: 5h reset passed, 7d 9% used (resets 10-20 00:59Z) [stale, 6h old] · codex Pro Lite: 7d 53% used (resets 10-20 05:38Z) · gemini AI Pro: Gemini 7d 1% used (resets 10-15 01:43Z), Gemini 5h 0% used (resets 10-13 20:34Z) · grok SuperGrok: unknown (login needed).
+Quota (cache 4m old): claude Max 20x: 5h reset passed, 7d 9% (resets in 6d) [stale, 6h old] · codex Pro Lite: 7d 53% (resets in 6d) · gemini AI Pro: Gemini 7d 1% (resets in 1d), Gemini 5h 0% (resets in 5h) · grok SuperGrok: unknown (login needed).

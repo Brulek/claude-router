@@ -66,9 +66,9 @@ test('review off adds its note and the label example reads Review: off', () => {
 })
 
 test('effectiveRouting states the value for this session and why', () => {
-  expect(effectiveRouting(ctl(), HAIKU)).toEqual({ on: true, why: 'on for this session (Haiku 5.5)' })
-  expect(effectiveRouting(ctl(), FABLE)).toEqual({ on: false, why: 'off: Fable 5.1 is not Haiku' })
-  expect(effectiveRouting(ctl({ manualModel: true }), HAIKU)).toEqual({ on: false, why: 'off: model selected manually' })
+  expect(effectiveRouting(ctl(), HAIKU)).toEqual({ on: true, why: 'on (Haiku 5.5 session)' })
+  expect(effectiveRouting(ctl(), FABLE)).toEqual({ on: false, why: 'off (Fable 5.1 is not Haiku)' })
+  expect(effectiveRouting(ctl({ manualModel: true }), HAIKU)).toEqual({ on: false, why: 'off (model selected manually)' })
   expect(effectiveRouting(ctl({ routing: 'on' }), FABLE)).toEqual({ on: true, why: 'on (forced)' })
   expect(effectiveRouting(ctl({ routing: 'off' }), HAIKU).on).toBe(false)
 })
@@ -135,7 +135,7 @@ test('the band test and the delivery origins', () => {
 })
 
 test('a quota line is appended as the last line, only while routing is on', () => {
-  const line = 'Quota (cache 4m old): codex Pro Lite: 7d 53% used (resets 10-20 05:38Z).'
+  const line = 'Quota (cache 4m old): codex Pro Lite: 7d 53% (resets in 6d).'
   const base = checklist(ctl(), HAIKU, true)
   expect(checklist(ctl(), HAIKU, true, line)).toBe(base + '\n' + line)
   expect(checklist(ctl({ review: 'off' }), HAIKU, true, line).split('\n').at(-1)).toBe(line)

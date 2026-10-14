@@ -78,7 +78,7 @@ flowchart TD
 
 ![Spick 面板](docs/images/pane.svg)
 
-面板用 `/spick` 打开。里面有分流、审核和外部 CLI 的快捷键开关，最近几轮记录，一行由 Haiku 判断的额度信息，以及本会话每个外部 CLI 的估算成本。
+`/spick` 打开面板：分流、审核、外家通道的开关和快捷键；「This session」表按通道列出轮数和按 API 标价折算的费用（订阅用户并不实际支付）；Claude 与 Codex 的本机额度条；最后是最近几轮，含模型与 effort。Haiku 读的那行额度信息不在面板里，而是随每条提示进入分诊清单（技能第 4 步）。
 
 ## 安装
 

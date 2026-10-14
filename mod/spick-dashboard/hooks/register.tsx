@@ -123,8 +123,8 @@ async function routingLine($: EngineInterface): Promise<string> {
 /** the quota meters as one line of text */
 async function quotaLine($: EngineInterface, force: boolean): Promise<string> {
   const q = await refreshQuota($, force)
-  const meters = quotaMeters(q).map(m => `${m.name} ${quotaBar(m.pct)} ${Math.round(m.pct)}%`)
-  return meters.length > 0 ? `spick: quota ${meters.join('   ')}` : 'spick: quota unknown (no provider known; grok and gemini report unknown)'
+  const meters = quotaMeters(q).map(m => `${m.name} ${m.window} ${quotaBar(m.pct)} ${Math.round(m.pct)}%`)
+  return meters.length > 0 ? `spick: quota ${meters.join('   ')}` : 'spick: quota unknown (no local data for claude or codex)'
 }
 
 /** `/spick` where nothing can draw a pane: one paragraph of status. */
@@ -133,7 +133,7 @@ async function statusParagraph($: EngineInterface): Promise<string> {
   const eff = effectiveRouting(c, await readSessionModel($))
   const lanes = LANE_KEYS.map(k => `${LANE_NAMES[k]} ${c.lanes[k] ? 'on' : 'off'}`).join(', ')
   const quotaText = await quotaLine($, false).catch(() => 'spick: quota not read')
-  return `spick: routing ${c.routing} (${eff.why}); review ${c.review}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
+  return `spick: routing ${c.routing}, ${eff.why}; review ${c.review}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
 }
 
 async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promise<void> {
@@ -554,7 +554,7 @@ export const register: Register = on => {
     const lanes = Object.entries(t).sort((a, b) => b[1].turns - a[1].turns)
     const totalCost = lanes.reduce<number | null>((acc, [, v]) => (v.costUsd === null ? acc : (acc ?? 0) + v.costUsd), null)
     const sessionTable = table([
-      ['This session', 'turns', 'est. cost'],
+      ['This session', 'turns', 'at API rates'],
       ...lanes.map(([lane, v]) => ['  ' + lane, String(v.turns), fmtCost(v.costUsd)]),
       ...(lanes.length > 1 ? [['  total', String(lanes.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)]] : []),
     ], ['l', 'r', 'r'])

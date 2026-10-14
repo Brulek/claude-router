@@ -226,11 +226,24 @@ class Line(unittest.TestCase):
 
     def test_stale_reset_and_unknown_are_stated_as_facts(self):
         line = quota.build_line(load("cache_sample.json"), quota.parse_iso("2026-10-13T15:34:00Z"))
-        self.assertIn("claude Max 20x $200/mo: 5h reset passed, 7d 9% used (resets 10-20 00:59Z) [stale, 6h old]", line)
+        self.assertIn("claude Max 20x: 5h reset passed, 7d 9% (resets in 6d) [stale, 6h old]", line)
         self.assertIn("grok SuperGrok: unknown (login needed)", line)
         self.assertIn("cache 4m old", line)
         for banned in ("should", "must", "avoid", "prefer", "tight"):
             self.assertNotIn(banned, line)
+
+    def test_window_past_its_reset_reads_as_reset_passed(self):
+        doc = {"written_at": "2026-10-13T15:30:00Z", "providers": [{"provider": "codex", "plan": "Pro", "sampled_at": "2026-10-13T15:29:00Z",
+               "windows": [{"name": "5h", "used_pct": 40.0, "resets_at": "2026-10-13T15:00:00Z", "reset": False}]}]}
+        line = quota.build_line(doc, quota.parse_iso("2026-10-13T15:34:00Z"))
+        self.assertIn("codex Pro: 5h reset passed.", line)
+
+    def test_unknown_percent_and_missing_reset_time(self):
+        doc = {"written_at": "2026-10-13T15:30:00Z", "providers": [{"provider": "codex", "plan": "Pro", "sampled_at": "2026-10-13T15:29:00Z",
+               "windows": [{"name": "7d", "used_pct": None, "resets_at": "2026-10-15T15:34:00Z", "reset": False},
+                           {"name": "5h", "used_pct": 12.0, "resets_at": None, "reset": False}]}]}
+        line = quota.build_line(doc, quota.parse_iso("2026-10-13T15:34:00Z"))
+        self.assertIn("codex Pro: 7d unknown (resets in 2d), 5h 12%.", line)
 
     def test_text_output(self):
         out = quota.text_output(load("cache_sample.json"), quota.parse_iso("2026-10-13T15:34:00Z"))

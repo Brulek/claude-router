@@ -114,7 +114,7 @@ Review findings go back to `coder` for one fix round. Do not review the fix agai
 
 ## Step 4 - quota
 
-Read the `Quota` line at the end of the checklist (or run `bash <skill-dir>/scripts/quota.sh`). It lists, per subscribed provider, the plan, the price, each window's used share with its reset time, and how old the sample is. Weigh task size, plan and remaining share yourself; no fixed thresholds.
+Read the `Quota` line at the end of the checklist (or run `bash <skill-dir>/scripts/quota.sh`). It lists, per subscribed provider, the plan, each window's used share and time to reset, and how old the sample is. Weigh task size, plan and remaining share yourself; no fixed thresholds.
 
 - The line states facts only. A window marked `reset passed` has rolled over since the sample, so its old figure is gone; `unknown` and `stale` mean unmeasured or old, not "fine".
 - If a call comes back with a quota or rate-limit error, treat that lane as exhausted for the rest of the session and move down the fallback chain.

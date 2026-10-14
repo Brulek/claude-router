@@ -9,7 +9,6 @@ type QProvider = { provider: string; plan?: string | null; price?: string | null
 const FRESH_S = 30 * 60
 
 const fmtAge = (s: number): string => (s < 60 ? `${s}s` : s < 3600 ? `${Math.floor(s / 60)}m` : s < 86400 ? `${Math.floor(s / 3600)}h` : `${Math.floor(s / 86400)}d`)
-const fmtReset = (r: string): string => `${r.slice(5, 10)} ${r.slice(11, 16)}Z`
 const pct = (p: number): string => `${Math.floor(p + 0.5)}%`
 const secs = (iso: unknown): number | null => {
   if (typeof iso !== 'string') return null
@@ -20,13 +19,13 @@ const secs = (iso: unknown): number | null => {
 function windowPhrase(w: QWindow, now: number): string {
   const r = secs(w.resets_at)
   if (w.reset || (r !== null && r <= now)) return `${w.name} reset passed`
-  const resets = w.resets_at ? ` (resets ${fmtReset(w.resets_at)})` : ''
-  if (typeof w.used_pct !== 'number') return `${w.name} ${w.resets_at ? `resets ${fmtReset(w.resets_at)}` : 'n/a'}`
-  return `${w.name} ${pct(w.used_pct)} used${resets}`
+  const rel = r === null ? '' : ` (resets in ${fmtAge(Math.max(0, Math.floor(r - now)))})`
+  if (typeof w.used_pct !== 'number') return `${w.name} unknown${rel}`
+  return `${w.name} ${pct(w.used_pct)}${rel}`
 }
 
 function providerPhrase(e: QProvider, now: number): string {
-  const head = [e.provider, e.plan, e.price].filter(Boolean).join(' ')
+  const head = [e.provider, e.plan].filter(Boolean).join(' ')
   const sampled = secs(e.sampled_at)
   const age = sampled === null ? null : Math.max(0, Math.floor(now - sampled))
   const parts = (e.windows ?? []).map(w => windowPhrase(w, now))

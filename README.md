@@ -78,7 +78,7 @@ The band is a status line above the prompt. It shows who is working now, or who 
 
 ![The Spick pane](docs/images/pane.svg)
 
-The pane opens with `/spick`. It has switches for routing, review and outside CLIs, the recent turns, a quota line judged by Haiku, and the estimated cost per outside CLI this session.
+`/spick` opens the pane: the routing, review and lane switches with hotkeys; a `This session` table of turns per lane and what they would have cost at API list rates; local quota meters for Claude and Codex; then the recent turns with model and effort. The quota line Haiku reads is not in the pane: it is appended to each prompt's triage checklist (Step 4 of the skill).
 
 ## Install
 

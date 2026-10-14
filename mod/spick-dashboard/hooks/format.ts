@@ -101,7 +101,7 @@ export type BandView = {
   routingOff?: boolean
 }
 /** one provider's quota: the weekly window, else the five-hour one */
-export type QuotaMeter = { name: string; pct: number }
+export type QuotaMeter = { name: string; window: '7d' | '5h'; pct: number }
 /** left: the status sentence; right: at most one item: the attention cause, the main model or the hint */
 export type Band = { left: Seg[]; right: Seg[] }
 const SEP: Seg = { text: ' · ', style: 'dim' }
@@ -125,8 +125,9 @@ export function quotaMeters(q: Quota | null | undefined): QuotaMeter[] {
   const out: QuotaMeter[] = []
   for (const [name, w] of [['claude', q?.claude], ['codex', q?.codex]] as const) {
     // only a finite number counts as known: a NaN weekly value must not hide a good five-hour one
-    const pct = [w?.sevenDay, w?.fiveHour].find((p): p is number => typeof p === 'number' && Number.isFinite(p))
-    if (pct !== undefined) out.push({ name, pct })
+    const ok = (p: number | undefined): p is number => typeof p === 'number' && Number.isFinite(p)
+    if (ok(w?.sevenDay)) out.push({ name, window: '7d', pct: w.sevenDay })
+    else if (ok(w?.fiveHour)) out.push({ name, window: '5h', pct: w.fiveHour })
   }
   return out
 }

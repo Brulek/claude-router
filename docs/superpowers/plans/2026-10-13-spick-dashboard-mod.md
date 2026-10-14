@@ -229,7 +229,7 @@ test('bandSegments attention note replaces the hint and carries its color', () =
 
 test('table pads columns and right-aligns numbers, with em dash for unpriced', () => {
   const rows = table([
-    ['lane', 'turns', 'est. cost'],
+    ['lane', 'turns', 'at API rates'],
     ['you', '11', '$0.04'],
     ['Gemini', '2', '—'],
   ], ['l', 'r', 'r'])
@@ -770,7 +770,7 @@ Note for the implementer: the `left` line above is scaffolding to delete; the tw
     const laneRows = Object.entries(t).sort((a, b) => b[1].turns - a[1].turns)
     const totalCost = laneRows.reduce<number | null>((acc, [, v]) => (v.costUsd === null ? acc : (acc ?? 0) + v.costUsd), null)
     const sessionTable = table([
-      ['lane', 'turns', 'est. cost'],
+      ['lane', 'turns', 'at API rates'],
       ...laneRows.map(([lane, v]) => [lane, String(v.turns), fmtCost(v.costUsd)]),
       ['total', String(laneRows.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)],
     ], ['l', 'r', 'r'])

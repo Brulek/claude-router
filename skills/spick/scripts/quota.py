@@ -527,10 +527,6 @@ def fmt_age(s):
     return "%dd" % (s // 86400)
 
 
-def fmt_reset(r):
-    return r[5:10] + " " + r[11:16] + "Z"
-
-
 def pct(p):
     return "%d%%" % int(p + 0.5)
 
@@ -543,18 +539,19 @@ def view(doc, now):
     return doc
 
 
-def window_phrase(w):
+def window_phrase(w, now):
     if w.get("reset"):
         return "%s reset passed" % w["name"]
+    r = parse_iso(w.get("resets_at"))
+    rel = "" if r is None else " (resets in %s)" % fmt_age(max(0, int(r - now)))
     if w.get("used_pct") is None:
-        return "%s %s" % (w["name"], "resets " + fmt_reset(w["resets_at"]) if w.get("resets_at") else "n/a")
-    s = "%s %s used" % (w["name"], pct(w["used_pct"]))
-    return s + (" (resets %s)" % fmt_reset(w["resets_at"]) if w.get("resets_at") else "")
+        return "%s unknown%s" % (w["name"], rel)
+    return "%s %s%s" % (w["name"], pct(w["used_pct"]), rel)
 
 
-def provider_phrase(e):
-    head = " ".join(x for x in (e["provider"], e.get("plan"), e.get("price")) if x)
-    parts = [window_phrase(w) for w in e.get("windows", [])]
+def provider_phrase(e, now):
+    head = " ".join(x for x in (e["provider"], e.get("plan")) if x)
+    parts = [window_phrase(w, now) for w in e.get("windows", [])]
     if e["status"] == "unknown":
         parts.insert(0, "unknown (%s)" % e.get("reason", "no data"))
     body = ", ".join(parts)
@@ -570,7 +567,7 @@ def build_line(doc, now):
     v = view(doc, now)
     if not v["providers"]:
         return ""
-    return "Quota (cache %s old): %s." % (fmt_age(cache_age(v, now)), " · ".join(provider_phrase(e) for e in v["providers"]))
+    return "Quota (cache %s old): %s." % (fmt_age(cache_age(v, now)), " · ".join(provider_phrase(e, now) for e in v["providers"]))
 
 
 def text_output(doc, now):

@@ -94,11 +94,11 @@ SPICK                                                                  [ Close ]
 Controls
   ...
 
-This session    turns  est. cost
-  main session     11      $0.04
-  coder             3      $0.21
-  Gemini            2          —
-  total            16      $0.25
+This session    turns  at API rates
+  main session     11         $0.04
+  coder             3         $0.21
+  Gemini            2             —
+  total            16         $0.25
 
 Quota  4m ago  [ Refresh ]
   claude  5h  ▰▰▱▱▱▱▱▱▱▱   5%     7d  ▰▱▱▱▱▱▱▱▱▱   1%
@@ -114,6 +114,7 @@ Rules:
 - The title row carries `SPICK` bold on the left and the `[ Close ]` button (hotkey `x`, role `dismiss`) on the right, `space-between`. No tagline.
 - `This session` is the table's heading and its column-header row at once. The total row appears only when more than one lane ran. No price note; the em dash marks "not priced" for outside lanes.
 - Table columns are padded with spaces to fixed widths computed from the longest value in the column; costs are right-aligned to two decimals.
+- The cost column header reads `at API rates`: it names the unit (API list rates), so a subscriber does not read the figure as a bill.
 - Quota: title row `Quota  <age>  [ Refresh ]` (`Refresh` keeps hotkey `q`). Age reads `just now` under a minute, then `4m ago`, `2h ago`. Only `claude` and `codex` get rows, and a provider with no window data gets none; if neither has data the section shows one subtle `unknown` line; before the first read, one subtle `not read` line. Grok and Gemini have no rows. Bars are ten cells of `▰` (used) and `▱` (free), five cells when the pane is under 80 columns; the bar carries no warning color, the model judges the numbers. The Mod reads the two local files at most every ten minutes.
 - Recent turns shows the newest first, as many as the pane's rows allow after the other sections; the whole section is hidden when there are no turns; the trailing note column carries attention causes in their colors.
 - No borders inside the pane. Structure comes from spacing and weight, as in Claude Code's own panes.
@@ -158,13 +159,13 @@ The pane's first section, under the title row:
 
 ```
 Controls
-  Routing   [ ◉ auto ] [ ○ on ] [ ○ off ]      on for this session (Haiku 5.5)
+  Routing   [ ◉ auto ] [ ○ on ] [ ○ off ]      on (Haiku 5.5 session)
   Review    [ ◉ auto ] [ ○ off ]
   Lanes     [ Gemini on ] [ Grok on ] [ Codex off ]
   Band      [ shown ]
 ```
 
-Buttons carry hotkeys: `r` cycles routing, `v` toggles review, `g` / `k` / `c` toggle the lanes, `b` the band, `q` refreshes quota (the Refresh button in the Quota title row), `x` or `Esc` closes (the Close button in the title row). The active value of a button group uses `variant: 'primary'`, the others `secondary`. The text after the routing group states the effective value for this session and why (`on for this session (Haiku 5.5)`, `off: model selected manually`, `off: Fable 5.1 is not Haiku`); under 80 columns it sits on its own line under the routing row. No borders; same spacing rules as the other sections.
+Buttons carry hotkeys: `r` cycles routing, `v` toggles review, `g` / `k` / `c` toggle the lanes, `b` the band, `q` refreshes quota (the Refresh button in the Quota title row), `x` or `Esc` closes (the Close button in the title row). The active value of a button group uses `variant: 'primary'`, the others `secondary`. The text after the routing group states the effective value for this session and why (`on (Haiku 5.5 session)`, `off (model selected manually)`, `off (Fable 5.1 is not Haiku)`); under 80 columns it sits on its own line under the routing row. No borders; same spacing rules as the other sections.
 
 ### Band
 
@@ -177,7 +178,7 @@ While routing is effectively off, the wordmark reads `SPICK off` with `off` in `
 ### Verification additions
 
 8. `/spick off` then a code request: the model does the work itself and the band reads `SPICK off`; `/spick on` restores the checklist.
-9. `/model opus` in a Haiku session: toast appears, pane says `off: model selected manually`, `/spick auto` returns to on.
+9. `/model opus` in a Haiku session: toast appears, pane says `off (model selected manually)`, `/spick auto` returns to on.
 10. `/spick lane gemini off`, then a web lookup: the checklist names Grok as the search lane; the preference survives a new session.
 11. With the mod loaded, the bash hook prints nothing (marker fresh); after uninstalling the mod, the hook resumes within 24 hours.
 
