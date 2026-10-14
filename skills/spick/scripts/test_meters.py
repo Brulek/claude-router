@@ -34,6 +34,8 @@ class Stub(BaseHTTPRequestHandler):
         p = self.path
         if p == "/balance":
             return self._send(200, {"balance_infos": [{"currency": "CNY", "total_balance": "12.4"}]})
+        if p == "/kimi":
+            return self._send(200, {"code": 0, "data": {"available_balance": 495.19}})
         if p == "/credits":
             return self._send(200, {"data": {"total_credits": 10, "total_usage": 3.2}})
         if p == "/key":
@@ -77,6 +79,10 @@ class MeterTest(unittest.TestCase):
         f = quota.meter_http(self.lane("/balance", currency_path="balance_infos.0.currency"))
         self.assertEqual(f, "balance 12.40 CNY")
         self.assertEqual(SEEN, [("/balance", "Bearer " + KEY)])
+
+    def test_kimi_shape_static_currency(self):
+        f = quota.meter_http(self.lane("/kimi", value_path="data.available_balance", currency="CNY"))
+        self.assertEqual(f, "balance 495.19 CNY")
 
     def test_used_total_two_decimals(self):
         m = {"type": "usage-endpoint", "url": self.base + "/credits", "value_path": "data.total_usage",
@@ -144,10 +150,10 @@ class MeterTest(unittest.TestCase):
 
     def test_preset_verification_flags(self):
         presets = lanes.meter_presets()
-        self.assertEqual(sorted(presets), ["deepseek", "new-api", "one-api", "openrouter"])
-        for name in ("deepseek", "openrouter"):
+        self.assertEqual(sorted(presets), ["deepseek", "kimi", "new-api", "one-api", "openrouter"])
+        for name in ("deepseek", "openrouter", "kimi"):
             self.assertEqual(presets[name]["verified"], "docs", name)
-            self.assertIs(presets[name]["live"], False, name)
+            self.assertIs(presets[name]["live"], True, name)
         for name in ("new-api", "one-api"):
             self.assertIs(presets[name]["verified"], False, name)
             self.assertNotIn("url", presets[name])

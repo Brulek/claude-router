@@ -43,7 +43,7 @@ Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <h
 
 Tell the user what was written, file by file.
 
-Optional: the user may declare extra lanes (other APIs, relays, local models) or override a built-in one by writing `lane_registry` into `~/.claude/spick.json` by hand; setup does not write it. Leaving it out is the normal case and changes nothing. The field list is in `references/providers.md` (Lane registry); `python3 <skill-dir>/scripts/lanes.py --validate` checks it.
+Optional: the user may declare extra lanes (other APIs, relays, local models) or override a built-in one by writing `lane_registry` into `~/.claude/spick.json` by hand; setup does not write it. Leaving it out is the normal case and changes nothing. Put `key_ref` at the top level of each lane record, next to `invoke`, not inside it. The field list is in `references/providers.md` (Lane registry); `python3 <skill-dir>/scripts/lanes.py --validate` checks it.
 
 ## 4. Finish
 

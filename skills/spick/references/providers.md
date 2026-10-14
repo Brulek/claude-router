@@ -101,7 +101,7 @@ Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`.
 | `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data:unset` and nothing is blocked |
 | `price` | free-form object; built-ins use `{"model": "subscription"}`; the plan and price from `subscriptions` are folded in |
 | `meter` | `{"type": ...}` with `none`, `builtin` (+ `collector`), `local-file`, `balance-endpoint` or `usage-endpoint`; an optional `health_url` adds one GET-status fact. See Meters below |
-| `key_ref` | where the key lives: `keychain:<name>` or `env:<VAR>`; never the key itself, never printed |
+| `key_ref` | top level of the lane record (not inside `invoke`); where the key lives: `keychain:<name>` or `env:<VAR>`; never the key itself, never printed |
 | `invoke` | how to call it; built-ins point here (`see references/providers.md`) |
 | `notes` | free text for the model; never printed in the checklist |
 
@@ -112,7 +112,8 @@ Example:
 ```json
 "lane_registry": {
   "glm": {"kind": "api-key", "tags": ["cheap", "chinese"], "prefer": ["chinese"], "data": "text",
-          "key_ref": "keychain:glm-api", "meter": {"type": "none"}},
+          "key_ref": "keychain:glm-api", "meter": {"type": "none"},
+          "invoke": {"api": "openai-chat", "base_url": "https://example.invalid/v1", "model": "glm-x"}},
   "qwen-local": {"kind": "local", "tags": ["cheap"], "data": "code",
                  "meter": {"type": "none", "health_url": "http://127.0.0.1:11434/api/tags"}}
 }
@@ -133,7 +134,7 @@ Endpoint meters make one `GET` with `Authorization: Bearer <key>` (key from the 
 
 Failures print as facts, never as a guess: `unknown (HTTP 401)` (with at most 80 characters of the response, key and Bearer tokens replaced by `***`), `unknown (key not found: keychain <name>)` / `env <VAR>`, `unknown (unexpected response)` when the path is missing or not a number, `unknown (unreachable (...))`, `unknown (file not found)`. The key is never printed, cached or logged.
 
-Presets are in `assets/meter-presets.json`: `deepseek`, `openrouter`, and note-only `new-api` / `one-api` (two calls needed; no collector in v1, shown as `unknown (preset has no collector)`). `deepseek` and `openrouter` carry `"verified": "docs"` and `"live": false`: the endpoints and field names were read from the official documentation on 2026-10-14 (DeepSeek `GET /user/balance`; OpenRouter `GET /api/v1/key`, fields `data.usage` and `data.limit`), and no live key has called them. "docs" means the field names were read from the official documentation; only the user's own curl run confirms the live response. When OpenRouter reports `limit: null` (no cap) the fact is `used 3.20 USD (no cap)`. `new-api` / `one-api` stay `"verified": false` (note only). With your own key, set locally and never pasted into chat or a file:
+Presets are in `assets/meter-presets.json`: `deepseek`, `openrouter`, `kimi` (China site, static currency CNY), and note-only `new-api` / `one-api` (two calls needed; no collector in v1, shown as `unknown (preset has no collector)`). `deepseek`, `openrouter` and `kimi` carry `"verified": "docs"` and `"live": true`: the endpoints and field names were read from the official documentation (DeepSeek `GET /user/balance`; OpenRouter `GET /api/v1/key`, fields `data.usage` and `data.limit`; Kimi `GET https://api.moonshot.cn/v1/users/me/balance`, field `data.available_balance`) and a real call with a user key succeeded on 2026-10-14. "live" means a real call succeeded on that date; it does not mean every field of every response was checked. When OpenRouter reports `limit: null` (no cap) the fact is `used 3.20 USD (no cap)`. `new-api` / `one-api` stay `"verified": false` (note only). With your own key, set locally and never pasted into chat or a file:
 
 ```
 read -s KEY && export KEY      # then
@@ -150,7 +151,17 @@ Compare the JSON with the preset's `value_path` / `total_path` / `currency_path`
 python3 scripts/invoke.py --lane <id> --prompt-file <path> [--system-file <path>] [--model <m>] [--max-tokens <n>] [--timeout <s>] [--contains public|text|code]
 ```
 
-Write the brief to a scratchpad file first and pass only the path; never put the brief on the command line and never pass secrets. `invoke` in the lane record is one of: `{"api": "openai-chat" | "anthropic-messages", "base_url": ..., "model": ...}` (POST `{base_url}/chat/completions`, or `{base_url}/v1/messages`) or `{"cli": "<command with {prompt_file}>"}` (run as argv without a shell; without `{prompt_file}` the prompt goes on stdin). A `key_ref` is required for an api lane except `kind: local`; `keychain:<name>` is read as service `<name>`, account `spick`. stdout is the answer only; stderr is one fact line (`spick-invoke: <id> <model> <in> in / <out> out tokens, <s>s`). `--contains` is a self-report: a lane whose declared `data` is lower gets one warning line and the call proceeds. Exit codes: 0 ok, 2 usage error or unknown lane, 3 web-only lane or missing key or auth 401/403, 4 quota or rate 402/429, 5 anything else. No retries, no streaming. Step 6 checks the answer as usual.
+Write the brief to a scratchpad file first and pass only the path; never put the brief on the command line and never pass secrets. `invoke` in the lane record is one of: `{"api": "openai-chat" | "anthropic-messages", "base_url": ..., "model": ...}` (POST `{base_url}/chat/completions`, or `{base_url}/v1/messages`) or `{"cli": "<command with {prompt_file}>"}` (run as argv without a shell; without `{prompt_file}` the prompt goes on stdin). `key_ref` sits at the top level of the lane record, next to `invoke`, never inside it (example: `{"kind": "api-key", "key_ref": "keychain:kimi", "invoke": {"api": "openai-chat", "base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2.6"}}`). A `key_ref` is required for an api lane except `kind: local`; `keychain:<name>` is read as service `<name>`, account `spick`. stdout is the answer only; stderr is one fact line (`spick-invoke: <id> <model> <in> in / <out> out tokens, <s>s`). `--contains` is a self-report: a lane whose declared `data` is lower gets one warning line and the call proceeds. Exit codes: 0 ok, 2 usage error or unknown lane, 3 web-only lane or missing key or auth 401/403, 4 quota or rate 402/429, 5 anything else. No retries, no streaming. Step 6 checks the answer as usual.
+
+Reasoning models (deepseek-flash, kimi-k2.6) spend output tokens on reasoning before the answer, so a small `--max-tokens` (for example 20) returns an empty answer. Use 400 or more even for a short answer.
+
+### Verified providers
+
+Called end to end with a user key on 2026-10-14:
+
+- deepseek: chat, balance (2026-10-14)
+- openrouter: chat, balance (2026-10-14)
+- kimi (China site, api.moonshot.cn): chat, balance (2026-10-14)
 
 ## Subscriptions and the quota cache
 

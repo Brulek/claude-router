@@ -1,5 +1,5 @@
 {
-  "_comment": "Meter presets. verified: \"docs\" means the url and field names were read from the service's official documentation (date in each note), not called with a key; live: false means no live response has confirmed them. Only the user's own curl run confirms the live response: set KEY locally, run curl -s -H \"Authorization: Bearer $KEY\" <url>, and compare the JSON with value_path / total_path / currency_path. verified: false means unchecked (new-api / one-api are note-only, no url). Dotted paths: a number segment indexes a list. Keys starting with _ are ignored.",
+  "_comment": "Meter presets. verified: \"docs\" means the url and field names were read from the service's official documentation (date in each note). live: true means a real call succeeded with a user key on the date given in the note; it does not mean every field of every response was checked. live: false means no live response has confirmed them. To check yourself: set KEY locally, run curl -s -H \"Authorization: Bearer $KEY\" <url>, and compare the JSON with value_path / total_path / currency_path. verified: false means unchecked (new-api / one-api are note-only, no url). Dotted paths: a number segment indexes a list. Keys starting with _ are ignored.",
   "deepseek": {
     "url": "https://api.deepseek.com/user/balance",
     "method": "GET",
@@ -8,8 +8,8 @@
     "currency_path": "balance_infos.0.currency",
     "kind": "balance",
     "verified": "docs",
-    "live": false,
-    "note": "Field names read from https://api-docs.deepseek.com/api/get-user-balance on 2026-10-14. total_balance is a numeric string; currency is CNY or USD. Not yet confirmed with a live key."
+    "live": true,
+    "note": "Field names read from https://api-docs.deepseek.com/api/get-user-balance on 2026-10-14. total_balance is a numeric string; currency is CNY or USD. Live-verified 2026-10-14 with a user key."
   },
   "openrouter": {
     "url": "https://openrouter.ai/api/v1/key",
@@ -21,8 +21,20 @@
     "currency": "USD",
     "kind": "used-total",
     "verified": "docs",
-    "live": false,
-    "note": "Field names read from https://openrouter.ai/docs/api/reference/limits on 2026-10-14. usage is all-time credits used; limit is null when unlimited, which prints as 'used <n> USD (no cap)'. Not yet confirmed with a live key."
+    "live": true,
+    "note": "Field names read from https://openrouter.ai/docs/api/reference/limits on 2026-10-14. usage is all-time credits used; limit is null when unlimited, which prints as 'used <n> USD (no cap)'. Live-verified 2026-10-14 with a user key."
+  },
+  "kimi": {
+    "url": "https://api.moonshot.cn/v1/users/me/balance",
+    "method": "GET",
+    "auth": "bearer",
+    "value_path": "data.available_balance",
+    "currency_path": null,
+    "currency": "CNY",
+    "kind": "balance",
+    "verified": "docs",
+    "live": true,
+    "note": "Live-verified 2026-10-14 on the China site (api.moonshot.cn); currency is CNY there. The international site uses a different host and is not covered."
   },
   "new-api": {
     "method": "GET",
