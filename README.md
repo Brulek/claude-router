@@ -101,6 +101,8 @@ bash ~/.claude/skills/spick/scripts/setup.sh --check
 bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
+Before it writes anything, `--install` copies `CLAUDE.md`, `settings.json` and `spick.json` into `~/.claude/spick-backup/<timestamp>/`, together with a `manifest.json` that records what the run changed.
+
 In the desktop app, select Haiku once in the model menu.
 
 ### Dashboard mod (optional)

@@ -35,6 +35,7 @@ Nothing is required except Claude itself. With no outside CLI installed the skil
 
 Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <haiku|sonnet|opus> --effort <level>`. It:
 
+- first copies `~/.claude/CLAUDE.md`, `settings.json` and `spick.json` (those that exist) into `~/.claude/spick-backup/<YYYYmmdd-HHMMSS>/` with a `manifest.json` listing what this run wrote (agents, CLAUDE.md block, hook, `model`/`effortLevel` before and after); every run makes a new folder and old ones are never deleted, and each file is written to a temp file then swapped in, so a symlinked file stays a link,
 - copies `assets/agents/*.md` into `~/.claude/agents/` (existing files are kept unless `--force`),
 - writes `~/.claude/spick.json` with the enabled lanes and thresholds,
 - inserts `assets/claude-md-snippet.md` into `~/.claude/CLAUDE.md` between `<!-- spick:start -->` / `<!-- spick:end -->` markers (re-running replaces the block, never duplicates it),

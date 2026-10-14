@@ -241,5 +241,5 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 - `scripts/invoke.py` - calls a registered lane (`--list-models`).
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/triage_hint.py` - the Hint line: the keywords of a prompt and the default route they imply (`--stdin-json` from the hook, `--text` by hand); table in `assets/triage-hints.json`, twin in the dashboard mod's `hint.ts`.
-- `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection and install.
+- `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection, install and backup (every install first copies CLAUDE.md, settings.json and spick.json into `~/.claude/spick-backup/<timestamp>/` with a `manifest.json`).
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.
