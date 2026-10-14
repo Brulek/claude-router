@@ -2,36 +2,38 @@
 
 <p align="center"><img src="docs/images/hero.svg" alt="Spick hero: the band while coder works" width="880"></p>
 
-**Stop picking, just start.** Spick is a triage layer for Claude Code. It picks the model and effort for each task and sends some tasks to subscription CLIs you already pay for.
+**Stop picking, just start.**
+
+Spick is a triage layer for Claude Code. It selects the model and effort for each task and delegates some tasks to existing subscription CLIs.
 
 [中文说明](README.zh-CN.md)
 
-## In 30 seconds
+## Overview
 
-- The main session (Haiku) reads each prompt and decides once who does the work.
-- Subagents (`coder`, `planner`, `deep`) run on fixed models. Outside CLIs (Gemini, Grok, Codex) take what they do best.
-- Each reply shows who worked, in a label line or the band.
+- The main session (Haiku) reads each prompt and makes a single routing decision.
+- Subagents (`coder`, `planner`, `deep`) run on fixed models. Outside CLIs (Gemini, Grok, Codex) handle their specialised tasks.
+- Each reply names its participants in a label line or in the band.
 
-## How a request flows
+## Request flow
 
 ```mermaid
 flowchart TD
-    IN["Your prompt"]
-    HOOK["Checklist hook: plan mode?<br/>who does it? pass/fail check?"]
+    IN["User prompt"]
+    HOOK["Checklist hook: plan mode?<br/>assignee? pass/fail check?"]
     QUOTA["Quota line"]
-    TRIAGE{"Main session (Haiku)<br/>decides once"}
-    PLAN["Plan mode: planner<br/>writes, you approve"]
-    GOAL["A ready /goal line"]
-    SELF["Haiku does it"]
+    TRIAGE{"Main session (Haiku)<br/>single routing decision"}
+    PLAN["Plan mode: planner drafts,<br/>user approves"]
+    GOAL["Ready /goal line"]
+    SELF["Main session executes"]
     SUB["Subagents<br/>coder · planner · deep"]
     CLI["Outside CLIs<br/>Gemini · Grok · Codex"]
-    NEXT["Next CLI in the chain"]
+    NEXT["Next CLI in the fallback chain"]
     REV{"Review trigger fired?"}
     CODEX["Codex review,<br/>one fix round"]
-    CHECK["Main session checks,<br/>retries once"]
-    BAND{"Is the band<br/>showing?"}
+    CHECK["Main session verifies,<br/>retries once"]
+    BAND{"Band<br/>displayed?"}
     LABEL["Label line"]
-    SHOWN["Band shows who worked"]
+    SHOWN["Band shows participants"]
 
     IN --> HOOK --> TRIAGE
     QUOTA -.-> TRIAGE
@@ -53,87 +55,87 @@ flowchart TD
 ```
 
 - Fallback chains: `skills/spick/references/providers.md`. Review triggers: `skills/spick/SKILL.md`.
-- Label line: `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]`
+- Label line format: `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]`
 
-## Who does what
+## Roles and models
 
-| Task | Done by |
+| Task | Assigned to |
 |---|---|
-| Simple tasks: Q&A, files, summaries | Main session (Haiku) |
+| Simple tasks: Q&A, file lookup, summaries | Main session (Haiku) |
 | Code changes | `coder` subagent (Sonnet) |
 | Planning and design | `planner` subagent (Opus) |
-| Hard reasoning, decisions, formal writing | `deep` subagent (Opus) |
-| Web search, fact checks, long media | Gemini (`agy`) |
+| Complex reasoning, decisions, formal writing | `deep` subagent (Opus) |
+| Web search, fact checking, long media | Gemini (`agy`) |
 | X / Twitter data | Grok (`grok`) |
 | Independent code review, image generation | Codex (`codex`) |
 
 Default effort: `coder` medium, `planner` high, `deep` high.
 
-## The dashboard (optional)
+## Dashboard
 
 ![The Spick band in six states](docs/images/band-states.svg)
 
-The band is a status line above the prompt. It shows who works.
+The band is an optional status line above the prompt that shows which participant is working.
 
 ![The Spick pane](docs/images/pane.svg)
 
-`/spick` opens the pane: switches with hotkeys, and recent turns. Haiku reads a short quota line with each prompt; the pane shows local meters for Claude and Codex.
+`/spick` opens the pane, which contains hotkey switches and recent turns. Haiku reads a short quota line with each prompt; the pane shows local meters for Claude and Codex.
 
-## Install
+## Installation
 
 ```bash
 npx skills add Brulek/spick
 ```
 
-Then in Claude Code say `spick setup`. It detects your CLIs, installs the subagents and registers the checklist hook.
+Then enter `spick setup` in Claude Code. Setup detects the installed CLIs, installs the subagents and registers the checklist hook.
 
-Manual:
+Manual installation:
 
 ```bash
 bash ~/.claude/skills/spick/scripts/setup.sh --check
 bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
-In the desktop app, pick Haiku once in the model menu.
+In the desktop app, select Haiku once in the model menu.
 
 ### Dashboard mod (optional)
 
-In a terminal:
+Run in a terminal:
 
     /plugin install spick-dashboard --marketplace Brulek/spick
 
-While the band shows, replies have no label line.
+While the band is displayed, replies omit the label line.
 
 ## Commands
 
-| Say | Effect |
+| Command | Effect |
 |---|---|
-| `spick setup` | first-run setup |
-| `spick doctor` | which CLIs are installed and logged in |
-| `spick quota` | shows the quota line |
-| `/spick on\|off\|auto` | routing switch |
-| `/spick review on\|off` | the Codex review step |
-| `/spick lane <gemini\|grok\|codex> on\|off` | one outside CLI |
-| `/spick hide` / `show` | the band, this session only |
-| `/spick quota` | refresh the quota line |
+| `spick setup` | First-run setup |
+| `spick doctor` | Lists installed and logged-in CLIs |
+| `spick quota` | Displays the quota line |
+| `/spick on\|off\|auto` | Routing switch |
+| `/spick review on\|off` | Codex review step |
+| `/spick lane <gemini\|grok\|codex> on\|off` | Toggles one outside CLI |
+| `/spick hide` / `show` | Hides or shows the band for the current session |
+| `/spick quota` | Refreshes the quota line |
 
 Pane hotkeys: `r` routing, `v` review, `g` `k` `c` Gemini / Grok / Codex, `b` band, `q` refresh quota, `x` close.
 
 ## Requirements
 
-Claude Code 2.1 or later, bash and python3. Optional: `codex`, `grok` and `agy`, logged in.
+Claude Code 2.1 or later, bash and python3. Optional: `codex`, `grok` and `agy`, each logged in.
 
-## Layout
+## Project layout
 
-Rules: `skills/spick/`. Band and pane: `mod/spick-dashboard/`.
+Routing rules: `skills/spick/`. Band and pane: `mod/spick-dashboard/`.
 
-## Pairs well with
+## Related projects
 
-[alexei-led/claude-router](https://github.com/alexei-led/claude-router) switches the main session's model each turn.
+[alexei-led/claude-router](https://github.com/alexei-led/claude-router) switches the main session's model on each turn and can run alongside Spick.
 
-## Known limits
+## Known limitations
 
-A session cannot change its own model, so the main session runs on the cheap one.
+A session cannot change its own model; the main session therefore runs on the lower-cost model.
 
 ## License
 
