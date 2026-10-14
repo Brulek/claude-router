@@ -4,13 +4,32 @@
 // text below is hard-coded to match what the mod shows.
 import { writeFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { bandSegments, quotaCells, recentLines, tagLine, usageLines, HOTKEY_W, LABEL_W, MAIN_LANE } from '../../mod/spick-dashboard/hooks/format.ts'
+import { bandSegments, quotaCells, recentLines, usageLines, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE } from '../../mod/spick-dashboard/hooks/format.ts'
 import type { BandView, Seg } from '../../mod/spick-dashboard/hooks/format.ts'
 
 const OUT = fileURLToPath(new URL('.', import.meta.url))
 const MONO = 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace'
 const SANS = '-apple-system, BlinkMacSystemFont, "Segoe UI", "Noto Sans", Helvetica, Arial, sans-serif'
-const C = { bg: '#0d1117', line: '#30363d', text: '#e6edf3', subtle: '#8b949e', brand: '#d77757', warning: '#d29922', error: '#f85149', well: '#010409', panel: '#161b22' }
+const SERIF = 'Georgia, "Times New Roman", "Noto Serif", serif'
+/** Claude's light palette: warm paper, terracotta brand, Claude Code's light-theme status colours */
+const C = {
+  paper: '#FAF9F5', // card background (Claude off-white)
+  sand: '#F0EEE6', // band bars; a warmer take on the band's #F0F0EF in the desktop app
+  rule: '#E0DDD4', // card stroke
+  ink: '#191919', // headings, lane names (bold)
+  inkSoft: '#3D3D3A', // plain band text, subtitle
+  muted: '#87867F', // dim text (the desktop's "Idle" measures #898781)
+  brand: '#D77757', // Claude Code's theme colour `claude`, rgb(215,119,87)
+  success: '#2C7A39', // Claude Code light theme: success
+  warning: '#966C1E', // Claude Code light theme: warning
+  error: '#AB2B3F', // Claude Code light theme: error
+}
+/**
+ * A switch's value in force, in its own colour. Copied from VALUE_COLORS in
+ * mod/spick-dashboard/hooks/register.tsx:458 (on success, force and auto claude, off subtle);
+ * register.tsx pulls in the mod runtime, so it cannot be imported here.
+ */
+const VALUE_COLORS: Record<string, string> = { on: C.success, force: C.brand, auto: C.brand, off: C.muted }
 const CELL = 9 // monospace column width in px at 15px font size
 const X0 = 24
 const gx = (col: number) => X0 + col * CELL
@@ -22,11 +41,11 @@ type Style = { fill: string; bold?: boolean }
 const styleOf = (s: Seg['style']): Style => {
   switch (s) {
     case 'brand': return { fill: C.brand, bold: true }
-    case 'lane': return { fill: C.text, bold: true }
-    case 'dim': return { fill: C.subtle }
+    case 'lane': return { fill: C.ink, bold: true }
+    case 'dim': return { fill: C.muted }
     case 'warning': return { fill: C.warning }
     case 'error': return { fill: C.error }
-    default: return { fill: C.text }
+    default: return { fill: C.inkSoft }
   }
 }
 
@@ -40,13 +59,22 @@ function mono(col: number, y: number, text: string, st: Style, size = 15): strin
 
 const widthOf = (segs: Seg[]) => segs.reduce((n, s) => n + [...s.text].length, 0)
 
-/** a band line: left group from column 0, right group ending at `columns` */
-function band(v: BandView, columns: number, y: number): { svg: string; plain: string } {
-  const { left, right } = bandSegments(v, columns)
+/**
+ * a band line: the wordmark, one column, the routing switch's value (bold, in its VALUE_COLORS colour), the rest of
+ * the left group; the right group ends at `columns`. The order is register.tsx's band (left[0], switch, left.slice(1)).
+ */
+function band(v: BandView, columns: number, y: number, routing = 'on'): { svg: string; plain: string } {
+  const { left, right } = bandSegments(v, columns, BAND_SWITCH_GAP.terminal + routing.length)
   const out: string[] = []
+  const runs: [string, Style][] = [
+    [left[0]!.text, styleOf(left[0]!.style)],
+    [' '.repeat(BAND_SWITCH_GAP.terminal), styleOf('plain')],
+    [routing, { fill: VALUE_COLORS[routing] ?? C.brand, bold: true }],
+    ...left.slice(1).map(s => [s.text, styleOf(s.style)] as [string, Style]),
+  ]
   let col = 0
-  for (const s of left) { out.push(mono(col, y, s.text, styleOf(s.style))); col += [...s.text].length }
-  let plain = left.map(s => s.text).join('')
+  for (const [t, st] of runs) { out.push(mono(col, y, t, st)); col += [...t].length }
+  let plain = runs.map(r => r[0]).join('')
   if (right.length) {
     col = columns - widthOf(right)
     for (const s of right) { out.push(mono(col, y, s.text, styleOf(s.style))); col += [...s.text].length }
@@ -55,7 +83,7 @@ function band(v: BandView, columns: number, y: number): { svg: string; plain: st
   return { svg: out.join(''), plain }
 }
 
-const card = (w: number, h: number) => `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="10" fill="${C.bg}" stroke="${C.line}"/>`
+const card = (w: number, h: number) => `<rect x="0.5" y="0.5" width="${w - 1}" height="${h - 1}" rx="16" fill="${C.paper}" stroke="${C.rule}"/>`
 const wrap = (w: number, h: number, title: string, body: string) =>
   `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="${esc(title)}">\n<title>${esc(title)}</title>\n${card(w, h)}\n${body}\n</svg>\n`
 
@@ -69,17 +97,17 @@ const views: { caption: string; view: BandView }[] = [
   { caption: 'idle', view: { lane: 'coder', model: 'Sonnet 5.5', agents: 0, isIdle: true } },
 ]
 
-// ---- hero.svg (880x220)
+// ---- hero.svg (880x260)
 {
-  const b = band(views[1]!.view, COLUMNS, 177)
+  const b = band(views[1]!.view, COLUMNS, 202)
   const body = [
-    `<text x="24" y="66" font-family='${SANS}' font-size="28" font-weight="700" fill="${C.text}">Stop picking, just start.</text>`,
-    `<text x="24" y="98" font-family='${SANS}' font-size="15" fill="${C.subtle}">Haiku triages each prompt; Sonnet, Opus, Gemini, Grok or Codex does the work.</text>`,
-    `<rect x="12.5" y="130.5" width="855" height="62" rx="8" fill="${C.well}" stroke="${C.line}"/>`,
-    `<circle cx="30" cy="146" r="3.5" fill="${C.error}"/><circle cx="44" cy="146" r="3.5" fill="${C.warning}"/><circle cx="58" cy="146" r="3.5" fill="#3fb950"/>`,
+    `<text x="24" y="42" font-family='${MONO}' font-size="13" font-weight="700" fill="${C.brand}">SPICK</text>`,
+    `<text x="24" y="92" font-family='${SERIF}' font-size="36" fill="${C.ink}">Stop picking, just start.</text>`,
+    `<text x="24" y="126" font-family='${SANS}' font-size="16" fill="${C.inkSoft}">Haiku triages each prompt; Sonnet, Opus, Gemini, Grok or Codex does the work.</text>`,
+    `<rect x="12" y="174" width="856" height="48" rx="10" fill="${C.sand}"/>`,
     b.svg,
   ].join('\n')
-  writeFileSync(OUT + 'hero.svg', wrap(880, 220, 'Spick: the dashboard band while the coder subagent works', body))
+  writeFileSync(OUT + 'hero.svg', wrap(880, 260, 'Spick: the dashboard band while the coder subagent works', body))
   console.log('hero   ', b.plain)
 }
 
@@ -89,8 +117,8 @@ const views: { caption: string; view: BandView }[] = [
   views.forEach((v, i) => {
     const top = 18 + i * 68
     const b = band(v.view, COLUMNS, top + 49)
-    parts.push(`<text x="24" y="${top + 14}" font-family='${SANS}' font-size="12" fill="${C.subtle}">${esc(v.caption)}</text>`)
-    parts.push(`<rect x="12.5" y="${top + 22.5}" width="855" height="38" rx="6" fill="${C.well}" stroke="${C.line}"/>`)
+    parts.push(`<text x="24" y="${top + 14}" font-family='${SANS}' font-size="12" fill="${C.muted}">${esc(v.caption)}</text>`)
+    parts.push(`<rect x="12" y="${top + 22}" width="856" height="40" rx="10" fill="${C.sand}"/>`)
     parts.push(b.svg)
     console.log('state  ', b.plain)
   })
@@ -103,10 +131,10 @@ const views: { caption: string; view: BandView }[] = [
   const runs: string[] = []
   const lines: string[] = []
   type Run = [text: string, style: Style]
-  const T: Style = { fill: C.text }
-  const D: Style = { fill: C.subtle }
+  const T: Style = { fill: C.inkSoft }
+  const D: Style = { fill: C.muted }
   const B: Style = { fill: C.brand, bold: true }
-  const L: Style = { fill: C.text, bold: true }
+  const L: Style = { fill: C.ink, bold: true }
   /** one line of runs from column 0 of the content (the pane pads one column on each side) */
   let row = 0
   const put = (...rs: Run[]) => {
@@ -129,14 +157,30 @@ const views: { caption: string; view: BandView }[] = [
   const left = 'SPICK  routing on · b: band shown'
   put(['SPICK', B], ['  routing on · ', D], key('b'), ['band shown', D], pad(W - left.length - 8), key('x'), ['close', T])
   blank()
-  put(label('Routing'), key('r'), ['auto', B], [' · on · off', D])
-  put(none, pad(HOTKEY_W), ['on (Haiku 5.5 session)', D])
-  put(label('Review'), key('v'), ['auto', B], [' · off', D])
+  /**
+   * radio buttons as register.tsx draws them: ● the value in force, ○ the others; the hotkey sits in front of the
+   * value it moves to (the next one, wrapping), the others keep its room empty; the value in force bold in its colour
+   */
+  const radio = (all: string[], inForce: string, hotkey: string): Run[] => {
+    const next = all[(all.indexOf(inForce) + 1) % all.length]
+    return all.flatMap((v, i): Run[] => [
+      ...(i > 0 ? [pad(2)] : []),
+      v === next ? key(hotkey) : pad(HOTKEY_W),
+      v === inForce ? ['●', { fill: C.ink }] : ['○', D],
+      pad(1),
+      [v, v === inForce ? { fill: VALUE_COLORS[v] ?? C.brand, bold: true } : D],
+    ])
+  }
+  put(label('Routing'), ...radio(['on', 'force', 'off'], 'on', 'r'))
+  put(none, pad(HOTKEY_W), ['routes (Haiku 5.5 session)', D])
+  put(label('Review'), ...radio(['auto', 'off'], 'auto', 'v'))
+  put(label('Gate'), ...radio(['on', 'off'], 'on', 'e'))
+  put(label('Guard'), ...radio(['on', 'off'], 'on', 'd'))
   blank()
-  const tags: Record<string, string[]> = { gemini: ['search', 'long-context', 'multimodal', 'image'], grok: ['x-data'], codex: ['code', 'review', 'image'] }
-  const names: [string, string, string][] = [['g', 'Gemini', 'gemini'], ['k', 'Grok', 'grok'], ['c', 'Codex', 'codex']]
-  names.forEach(([k, name, id], i) => {
-    put(i === 0 ? label('Lanes') : none, key(k), [name.padEnd(6) + '  ', T], ['on', B], ['   ' + tagLine(tags[id]!, W - LABEL_W - HOTKEY_W - 6 - 2 - 3 - 2), D])
+  const names: [string, string][] = [['g', 'Gemini'], ['k', 'Grok'], ['c', 'Codex']]
+  const nameW = Math.max(...names.map(n => n[1].length))
+  names.forEach(([k, name], i) => {
+    put(i === 0 ? label('Lanes') : none, [name.padEnd(nameW + 2), T], ...radio(['on', 'off'], 'on', k))
   })
   put(none, key('l'), ['edit lanes', T], [' · every field, every declared lane', D])
   blank()

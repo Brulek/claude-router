@@ -1,23 +1,42 @@
 # Spick
 
-<p align="center"><img src="docs/images/hero.svg" alt="Spick hero: the band while coder works" width="880"></p>
+<p align="center"><img src="docs/images/hero.svg" alt="Spick: Stop picking, just start. The dashboard band while the coder subagent works" width="880"></p>
 
-**Stop picking, just start.**
+<p align="center">Spick is a triage layer for Claude Code. It selects the model and effort for each task and delegates some tasks to existing subscription CLIs.</p>
 
-Spick is a triage layer for Claude Code. It selects the model and effort for each task and delegates some tasks to existing subscription CLIs.
+<p align="center">
+<a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-D77757" alt="License: MIT"></a>
+<a href="#requirements"><img src="https://img.shields.io/badge/Claude%20Code-2.1%2B-191919" alt="Claude Code 2.1+"></a>
+</p>
 
-[中文说明](README.zh-CN.md)
+<p align="center">
+<a href="#quick-start">Quick start</a> · <a href="#dashboard-optional">Dashboard</a> · <a href="#commands">Commands</a> · <a href="#faq">FAQ</a> · <a href="#buy-me-a-coffee">Buy me a coffee</a> · <a href="README.zh-CN.md">中文</a>
+</p>
 
-## Overview
+## What it does
 
-- The main session (Haiku) reads each prompt and makes a single routing decision, by the shape of the deliverable: a verdict goes to `deep`, a plan to `planner`, changed code to `coder`; the main session is the last line, for plain lookups.
-- A keyword pass over each prompt adds a `Hint` line to the checklist naming the default route; the main session keeps a hinted task only with a stated reason.
+- The main session (Haiku) reads each prompt and makes a single routing decision. It routes by the shape of the deliverable: a verdict goes to `deep`, a plan to `planner`, changed code to `coder`. The main session is the last line, for plain lookups.
+- A keyword pass over each prompt adds a `Hint` line to the checklist. The line names the default route. The main session keeps a hinted task only with a stated reason.
 - Subagents (`coder`, `planner`, `deep`) run on fixed models. Outside CLIs (Gemini, Grok, Codex) handle their specialised tasks.
-- Each reply names its participants in a label line or in the band.
+- Each reply names its participants, in a label line or in the band.
 
-## Request flow
+## Quick start
+
+1. Install the skill:
+
+   ```bash
+   npx skills add Brulek/spick
+   ```
+
+2. Enter `spick setup` in Claude Code. Setup detects the installed CLIs, installs the subagents and registers the checklist hook.
+3. In the desktop app, select Haiku once in the model menu.
+
+Manual installation, the dashboard mod and uninstall are under [Installation](#installation).
+
+## How it works
 
 ```mermaid
+%%{init: {"theme": "base", "themeVariables": {"background": "#FAF9F5", "primaryColor": "#F0EEE6", "primaryTextColor": "#191919", "primaryBorderColor": "#D77757", "lineColor": "#87867F", "secondaryColor": "#FAF9F5", "tertiaryColor": "#FAF9F5", "edgeLabelBackground": "#FAF9F5", "textColor": "#191919"}}}%%
 flowchart TD
     IN["User prompt"]
     HOOK["Checklist hook: plan mode?<br/>assignee? pass/fail check?"]
@@ -72,7 +91,7 @@ flowchart TD
 
 Default effort: `coder` medium, `planner` high, `deep` high.
 
-## Dashboard
+## Dashboard (optional)
 
 ![The Spick band in six states](docs/images/band-states.svg)
 
@@ -82,17 +101,27 @@ The band is an optional status line above the prompt that shows which participan
 
 `/spick` opens the pane, which contains hotkey switches and recent turns. Haiku reads a short quota line with each prompt; the pane shows local meters for Claude and Codex.
 
-The gate and the guard are the mod's only two interventions; everything else it shows is read only. The gate: when a prompt's Hint line named a verdict (or a design) and the main session answered it without delegating anything, the stop is sent back once, telling it to dispatch `deep` (or `planner`) or to state in one line starting with `Kept:` why the deliverable was a plain lookup. It never fires twice in a turn, never on a short reply without tool calls (a question back), and `/spick gate off` switches it off.
+The gate and the guard are the mod's only two interventions. Everything else it shows is read only.
 
-The guard does two things while routing is in force. It caps the main session's own source edits at 3 distinct files per turn: a fourth file is refused with a message that names the three and asks for `Agent(coder)` (edits to the same files, a subagent's edits, and notes, data or `.claude/` files do not count). And when any loop, a subagent included, edited source in a turn and no loop ran a check (a test runner, a build check, a linter or a type checker), the stop is sent back once, asking it to run the project's check, hand the user a `/goal` line, or state in one line starting with `Unchecked:` why there is none. The gate and the guard together send a turn back at most once. `/spick guard off` switches the guard off, and the choice is remembered.
+**The gate**
+
+- It acts when a prompt's Hint line named a verdict (or a design) and the main session answered it without delegating anything.
+- Then the stop is sent back once. The main session is told to dispatch `deep` (or `planner`), or to state why the deliverable was a plain lookup, in one line starting with `Kept:` (or `自留:`).
+- It never fires twice in a turn.
+- It never fires on a short reply without tool calls (a question back).
+- `/spick gate off` switches it off.
+
+**The guard** does two things while routing is in force.
+
+- Edit cap: the main session's own source edits are capped at 3 distinct files per turn. A fourth file is refused with a message that names the three and asks for `Agent(coder)`. Edits to the same files, a subagent's edits, and notes, data or `.claude/` files do not count.
+- Check at stop: when any loop, a subagent included, edited source in a turn and no loop ran a check (a test runner, a build check, a linter or a type checker), the stop is sent back once. The main session is asked to run the project's check, hand the user a `/goal` line, or state why there is none in one line starting with `Unchecked:` (or `未验证:`).
+- `/spick guard off` switches the guard off, and the choice is remembered.
+
+The gate and the guard together send a turn back at most once.
 
 ## Installation
 
-```bash
-npx skills add Brulek/spick
-```
-
-Then enter `spick setup` in Claude Code. Setup detects the installed CLIs, installs the subagents and registers the checklist hook.
+The usual path is the [Quick start](#quick-start) above.
 
 Manual installation:
 
@@ -119,7 +148,20 @@ While the band is displayed, replies omit the label line.
 bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 ```
 
-It backs up first, like `--install`, then removes only what the install wrote: the block between the spick markers in `CLAUDE.md`, the checklist hook in `settings.json`, and the three subagents. `model` and `effortLevel` go back to their value from before the install only if they still hold the value the install set. A subagent file you edited is kept unless you pass `--force`. `spick.json` is kept unless you pass `--purge`, which also removes `spick-quota.json` and `spick-spend/`. `spick-backup/` is never removed. Two steps remain for you: `claude plugin uninstall spick-dashboard` and deleting `~/.claude/skills/spick`.
+It backs up first, like `--install`. Then it removes only what the install wrote:
+
+- the block between the spick markers in `CLAUDE.md`;
+- the checklist hook in `settings.json`;
+- the three subagents.
+
+What it leaves alone:
+
+- `model` and `effortLevel` go back to their value from before the install only if they still hold the value the install set.
+- A subagent file you edited is kept unless you pass `--force`.
+- `spick.json` is kept unless you pass `--purge`, which also removes `spick-quota.json` and `spick-spend/`.
+- `spick-backup/` is never removed.
+
+Two steps remain for you: `claude plugin uninstall spick-dashboard` and deleting `~/.claude/skills/spick`.
 
 ## Commands
 
@@ -137,28 +179,74 @@ It backs up first, like `--install`, then removes only what the install wrote: t
 | `/spick lane <id> <field> <value>` | Changes any field of a lane through `set_lane.py` (tags take a comma list) |
 | `/spick hide` / `show` | Hides or shows the band for the current session |
 | `/spick quota` | Refreshes the quota line |
-| `/spick spend` | What the sessions cost in the last 7 days, by lane (`scripts/spend.py`; `--days N`, `--by lane\|day\|session`, `--json` when run by hand). The mod writes one file per session to `~/.claude/spick-spend/`: a row per turn that carried usage and a row per outside CLI call (tokens 0, unpriced). Without the mod there is no spend record: the bash hook sees no usage |
+| `/spick spend` | What the sessions cost in the last 7 days, by lane (`scripts/spend.py`; `--days N`, `--by lane\|day\|session`, `--json` when run by hand) |
+
+How `/spick spend` gets its data: the mod writes one file per session to `~/.claude/spick-spend/`, with a row per turn that carried usage and a row per outside CLI call (tokens 0, unpriced). Without the mod there is no spend record: the bash hook sees no usage.
 
 Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
 
 ## Requirements
 
-Claude Code 2.1 or later, bash and python3. Optional: `codex`, `grok` and `agy`, each logged in. A lane key stored as `keychain:<name>` works on macOS only; on Linux and Windows use `env:<VAR>`.
+- Claude Code 2.1 or later, bash and python3.
+- Optional: `codex`, `grok` and `agy`, each logged in.
+- A lane key stored as `keychain:<name>` works on macOS only; on Linux and Windows use `env:<VAR>`.
 
-## Project layout
+## FAQ
 
-Routing rules: `skills/spick/`. Band and pane: `mod/spick-dashboard/`.
+### Does Spick switch the main session's model?
 
-CI (`.github/workflows/ci.yml`) runs the python unit tests and the mod tests.
+No. Spick does not change the main session's model. To switch it on each turn, run claude-router alongside Spick. See [Known limitations](#known-limitations).
 
-## Related projects
+### Do I need Gemini, Grok and Codex?
 
-[alexei-led/claude-router](https://github.com/alexei-led/claude-router) switches the main session's model on each turn and can run alongside Spick.
+No. `codex`, `grok` and `agy` are optional; each one you want to use must be logged in. `spick doctor` lists which are installed and logged in.
+
+### What does setup change, and can I undo it?
+
+Before it writes anything, `--install` backs up `CLAUDE.md`, `settings.json` and `spick.json` into `~/.claude/spick-backup/<timestamp>/`. `--uninstall` removes only what the install wrote; see [Uninstall](#uninstall).
+
+### Can I use Spick without the dashboard mod?
+
+Yes. Without the band, replies name their participants in the label line. The spend record needs the mod: the bash hook sees no usage.
+
+### Where do lane keys go?
+
+A key stored as `keychain:<name>` works on macOS only. On Linux and Windows, use `env:<VAR>`.
 
 ## Known limitations
 
 Spick does not change the main session's model. A mod can rewrite the model and effort of each request (`turn.step` in the engine types of Claude Code 2.1.299); claude-router and claude-agent-tools do that. Spick leaves it to them and composes with claude-router, so the main session runs on the lower-cost model and triages by checklist. The checklist is advice: the main session can still keep a task it should have delegated, which is what the Hint line and the deliverable-shaped item 2 are there to prevent.
 
+## Related projects
+
+[alexei-led/claude-router](https://github.com/alexei-led/claude-router) switches the main session's model on each turn and can run alongside Spick.
+
+## Contributing
+
+Issues and pull requests are welcome.
+
+Layout: routing rules live in `skills/spick/`; the band and pane live in `mod/spick-dashboard/`.
+
+CI (`.github/workflows/ci.yml`) runs the python unit tests and the mod tests. To run them locally, from the repo root:
+
+- Python unit tests: `cd skills/spick/scripts && python3 -m unittest -q`
+- Mod tests: `claude plugin test mod/spick-dashboard`
+
+The images in this README are generated from the mod's own band and table code. To regenerate them, run `node --experimental-strip-types docs/images/make-art.mts` from the repo root.
+
+## Buy me a coffee
+
+Spick is free and MIT licensed. If it saves you time and you want to support the author, you can send a tip on BNB Smart Chain.
+
+<p><img src="docs/images/bnb-qr.jpg" alt="QR code of the author's BNB Smart Chain address" width="220"><br>
+<sub>BNB Smart Chain · for supporting the author</sub></p>
+
+Address (BNB Smart Chain):
+
+    0x25Ca60556e44a9Fe213cC45177F04413094975F9
+
+Send on BNB Smart Chain only. A transfer on another network may be lost.
+
 ## License
 
-MIT.
+MIT, see [LICENSE](LICENSE).
