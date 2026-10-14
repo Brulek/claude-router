@@ -216,7 +216,7 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 | `spick doctor` | `bash scripts/setup.sh --check` and report the table |
 | `spick quota` | `bash scripts/quota.sh` and report |
 | `/spick` | (dashboard mod) opens the pane; with no UI it prints a one-paragraph status |
-| `/spick on` / `off` / `auto` | (dashboard mod) routing switch, remembered; `off` means do the work yourself, no Spick dispatch; `auto` = on only in a Haiku session. A manual `/model` turns it off for the session |
+| `/spick on` / `force` / `off` | (dashboard mod) routing switch, remembered: `on` routes in a Haiku session only (a stronger model does the work itself), `force` routes on any model, `off` means do the work yourself, no Spick dispatch (`auto`, the old name of `on`, still works). A manual `/model` turns it off for the session |
 | `/spick review on` / `off` | (dashboard mod) Codex review step, remembered; when off write `Review: off` in the label line |
 | `/spick lane <id> on` / `off` | (dashboard mod) one lane (a built-in or a registered id): writes `enabled` through `scripts/set_lane.py`, so it persists in `spick.json`; an off lane is left out |
 | `/spick lane <id> <field> <value>` / `/spick lane <id>` | (dashboard mod) changes one field through `scripts/set_lane.py` (any field; secrets and unknown ids refused) / shows the lane's record. The pane's lanes page (`l`) does the same |

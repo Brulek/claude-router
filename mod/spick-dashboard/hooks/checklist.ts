@@ -2,7 +2,7 @@ import type { Controls, LaneInfo, Review, Routing } from '../types'
 import { modelName } from './format'
 import { lanesLine } from './quotaline'
 
-export const DEFAULT_CONTROLS: Controls = { routing: 'auto', review: 'auto', manualModel: false }
+export const DEFAULT_CONTROLS: Controls = { routing: 'on', review: 'auto', manualModel: false }
 /** the three built-in lanes the Controls row has a button for; the rest are edited on the lanes page or with /spick lane */
 export const LANE_KEYS: readonly string[] = ['gemini', 'grok', 'codex']
 export const LANE_NAMES: Record<string, string> = { gemini: 'Gemini', grok: 'Grok', codex: 'Codex' }
@@ -26,20 +26,22 @@ const DELIVERIES = new Set(['task-notification', 'peer', 'peer-send-message', 'p
 export const isDelivery = (kind: string): boolean => DELIVERIES.has(kind)
 
 /** the toast a manual model pick raises */
-export const MANUAL_TOAST = 'spick: routing off (model selected manually) · /spick on to resume'
+export const MANUAL_TOAST = 'spick: routing off (model selected manually) · /spick on or /spick force to resume'
 
 export type Effective = { on: boolean; why: string }
 
 /**
  * Whether routing applies this session, and the reason the pane prints beside the switch.
- * `auto` is on only while the session model is Haiku; a manual model pick turns it off for the session.
+ * `on` routes only while the session model is Haiku, `force` on any model; a manual model pick turns it off for the
+ * session whatever the switch says.
  */
 export function effectiveRouting(c: Controls, sessionModel: string): Effective {
-  if (c.manualModel) return { on: false, why: 'off (model selected manually)' }
-  if (c.routing === 'off') return { on: false, why: 'off (forced)' }
-  if (c.routing === 'on') return { on: true, why: 'on (forced)' }
-  if (/haiku/i.test(sessionModel)) return { on: true, why: `on (${modelName(sessionModel)} session)` }
-  return { on: false, why: sessionModel ? `off (${modelName(sessionModel)} is not Haiku)` : 'off (session model unknown)' }
+  // the reason says what routing does, not on or off: those name the switch's values
+  if (c.manualModel) return { on: false, why: 'routes nothing (model selected manually)' }
+  if (c.routing === 'off') return { on: false, why: 'routes nothing (switched off)' }
+  if (c.routing === 'force') return { on: true, why: 'routes (forced)' }
+  if (/haiku/i.test(sessionModel)) return { on: true, why: `routes (${modelName(sessionModel)} session)` }
+  return { on: false, why: sessionModel ? `routes nothing (${modelName(sessionModel)} is not Haiku)` : 'routes nothing (session model unknown)' }
 }
 
 /**
@@ -80,7 +82,14 @@ export function checklist(c: Controls, sessionModel: string, labelLine: boolean,
 
 /** a stored routing value, or the default when absent or malformed */
 export function parseRouting(v: unknown): Routing {
-  return v === 'on' || v === 'off' || v === 'auto' ? v : DEFAULT_CONTROLS.routing
+  return v === 'on' || v === 'force' || v === 'off' ? v : DEFAULT_CONTROLS.routing
+}
+/**
+ * A value stored under the old names (`auto` routed on Haiku only, `on` on any model) in its new name: auto -> on,
+ * on -> force; the default when absent or malformed. The old key is read only while the new one holds nothing.
+ */
+export function migrateRouting(v: unknown): Routing {
+  return v === 'auto' ? 'on' : v === 'on' ? 'force' : v === 'off' ? 'off' : DEFAULT_CONTROLS.routing
 }
 export function parseReview(v: unknown): Review {
   return v === 'off' || v === 'auto' ? v : DEFAULT_CONTROLS.review
@@ -100,7 +109,7 @@ export type SpickCommand =
   | { kind: 'quota' }
   | { kind: 'usage' }
 
-export const ARGUMENT_HINT = '[on|off|auto|review on|off|lane <id> [<field> <value>]|hide|show|quota]'
+export const ARGUMENT_HINT = '[on|force|off|review on|off|lane <id> [<field> <value>]|hide|show|quota]'
 export const USAGE = `spick: usage /spick ${ARGUMENT_HINT}`
 
 /**
@@ -126,7 +135,9 @@ export function parseSpick(args: string): SpickCommand {
   const w = args.trim().toLowerCase().split(/\s+/).filter(Boolean)
   const [a, b] = w
   if (w.length === 0) return { kind: 'open' }
-  if (w.length === 1 && (a === 'on' || a === 'off' || a === 'auto')) return { kind: 'routing', value: a }
+  if (w.length === 1 && (a === 'on' || a === 'force' || a === 'off')) return { kind: 'routing', value: a }
+  // the old name of on
+  if (w.length === 1 && a === 'auto') return { kind: 'routing', value: 'on' }
   if (w.length === 1 && (a === 'hide' || a === 'show')) return { kind: 'band', hidden: a === 'hide' }
   if (w.length === 1 && a === 'quota') return { kind: 'quota' }
   if (w.length === 2 && a === 'review' && (b === 'on' || b === 'off')) return { kind: 'review', value: b === 'on' ? 'auto' : 'off' }

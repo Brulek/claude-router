@@ -49,8 +49,8 @@ export type LaneTotals = {
   costUsd: number | null
 }
 
-/** routing: `auto` follows the session model (on for Haiku), `on` / `off` force it */
-export type Routing = 'auto' | 'on' | 'off'
+/** routing: `on` follows the session model (routes in a Haiku session), `force` routes on any model, `off` never */
+export type Routing = 'on' | 'force' | 'off'
 /** review: `auto` follows the skill's review triggers, `off` skips Codex review */
 export type Review = 'auto' | 'off'
 /** a lane id: the built-ins 'gemini' | 'grok' | 'codex' or any id the user registered in lane_registry */
@@ -64,7 +64,7 @@ export type LaneNote = { change: string; error: string }
 export type Controls = {
   routing: Routing
   review: Review
-  /** the user picked a model by hand this session: routing is off until /spick on or /spick auto */
+  /** the user picked a model by hand this session: routing is off until /spick on or /spick force */
   manualModel: boolean
 }
 

@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
-import { DEFAULT_CONTROLS, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, offSentence, reviewOffNote, effectiveRouting, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
+import { DEFAULT_CONTROLS, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
 const FABLE = 'claude-fable-5-1'
@@ -31,10 +31,10 @@ test('routing on: the three questions, the bash hook\'s substance, no notes', ()
 test('routing off: the off sentence alone', () => {
   expect(checklist(ctl({ routing: 'off' }), HAIKU, true)).toBe(offSentence(true))
   expect(checklist(ctl({ manualModel: true }), HAIKU, true)).toBe(offSentence(true))
-  // auto on a model that is not Haiku is off
+  // on, on a model that is not Haiku, routes nothing
   expect(checklist(ctl(), FABLE, true)).toBe(offSentence(true))
-  // forced on works on any model
-  expect(checklist(ctl({ routing: 'on' }), FABLE, true)).not.toBe(offSentence(true))
+  // force routes on any model
+  expect(checklist(ctl({ routing: 'force' }), FABLE, true)).not.toBe(offSentence(true))
 })
 
 test('a lane switched off is simply absent from the cache: no note, the Lanes line shows what is enabled', () => {
@@ -63,17 +63,26 @@ test('review off adds its note and the label example reads Review: off', () => {
 })
 
 test('effectiveRouting states the value for this session and why', () => {
-  expect(effectiveRouting(ctl(), HAIKU)).toEqual({ on: true, why: 'on (Haiku 5.5 session)' })
-  expect(effectiveRouting(ctl(), FABLE)).toEqual({ on: false, why: 'off (Fable 5.1 is not Haiku)' })
-  expect(effectiveRouting(ctl({ manualModel: true }), HAIKU)).toEqual({ on: false, why: 'off (model selected manually)' })
-  expect(effectiveRouting(ctl({ routing: 'on' }), FABLE)).toEqual({ on: true, why: 'on (forced)' })
-  expect(effectiveRouting(ctl({ routing: 'off' }), HAIKU).on).toBe(false)
+  expect(effectiveRouting(ctl(), HAIKU)).toEqual({ on: true, why: 'routes (Haiku 5.5 session)' })
+  expect(effectiveRouting(ctl(), FABLE)).toEqual({ on: false, why: 'routes nothing (Fable 5.1 is not Haiku)' })
+  expect(effectiveRouting(ctl({ manualModel: true }), HAIKU)).toEqual({ on: false, why: 'routes nothing (model selected manually)' })
+  expect(effectiveRouting(ctl({ routing: 'force' }), FABLE)).toEqual({ on: true, why: 'routes (forced)' })
+  expect(effectiveRouting(ctl({ routing: 'off' }), HAIKU)).toEqual({ on: false, why: 'routes nothing (switched off)' })
+  // a manual model pick wins over force too
+  expect(effectiveRouting(ctl({ routing: 'force', manualModel: true }), HAIKU)).toEqual({ on: false, why: 'routes nothing (model selected manually)' })
 })
 
 test('stored values parse, a malformed one falls back to the default', () => {
   expect(parseRouting('off')).toBe('off')
-  expect(parseRouting('bogus')).toBe('auto')
-  expect(parseRouting(undefined)).toBe('auto')
+  expect(parseRouting('force')).toBe('force')
+  expect(parseRouting('bogus')).toBe('on')
+  expect(parseRouting(undefined)).toBe('on')
+  // the old names: auto routed on Haiku only (now on), on routed on any model (now force)
+  expect(parseRouting('auto')).toBe('on')
+  expect(migrateRouting('auto')).toBe('on')
+  expect(migrateRouting('on')).toBe('force')
+  expect(migrateRouting('off')).toBe('off')
+  expect(migrateRouting(undefined)).toBe('on')
   expect(parseReview('off')).toBe('off')
   expect(parseReview(3)).toBe('auto')
 })
@@ -81,7 +90,10 @@ test('stored values parse, a malformed one falls back to the default', () => {
 test('/spick arguments parse; anything else is usage', () => {
   expect(parseSpick('')).toEqual({ kind: 'open' })
   expect(parseSpick(' Off ')).toEqual({ kind: 'routing', value: 'off' })
-  expect(parseSpick('auto')).toEqual({ kind: 'routing', value: 'auto' })
+  expect(parseSpick('on')).toEqual({ kind: 'routing', value: 'on' })
+  expect(parseSpick('force')).toEqual({ kind: 'routing', value: 'force' })
+  // auto, the old name of on, still works
+  expect(parseSpick('auto')).toEqual({ kind: 'routing', value: 'on' })
   expect(parseSpick('review on')).toEqual({ kind: 'review', value: 'auto' })
   expect(parseSpick('review off')).toEqual({ kind: 'review', value: 'off' })
   expect(parseSpick('lane grok off')).toEqual({ kind: 'lane-set', lane: 'grok', field: 'enabled', value: 'no' })
@@ -112,8 +124,8 @@ test('while the band shows (labelLine false) no sentence asks for the label line
   expect(checklist(ctl({ review: 'off' }), HAIKU, true).split('\n').at(-1)).toBe(reviewOffNote(true))
 })
 
-test('forced on, the label example names the session model', () => {
-  const block = checklist(ctl({ routing: 'on' }), FABLE, true)
+test('force: the label example names the session model', () => {
+  const block = checklist(ctl({ routing: 'force' }), FABLE, true)
   expect(block).toContain('no delegate -> `[Model: Fable 5.1 | Effort: medium]`')
   expect(block).toContain('`[Model: Fable 5.1 (medium) → coder')
   expect(block).not.toContain('Haiku 5.5')

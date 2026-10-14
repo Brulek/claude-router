@@ -113,7 +113,7 @@ While the band is displayed, replies omit the label line.
 | `spick setup` | First-run setup |
 | `spick doctor` | Lists installed and logged-in CLIs |
 | `spick quota` | Displays the quota line |
-| `/spick on\|off\|auto` | Routing switch |
+| `/spick on\|force\|off` | Routing switch: `on` routes in a Haiku session only, `force` on any model |
 | `/spick review on\|off` | Codex review step |
 | `/spick lane <id>` | Shows one lane's record |
 | `/spick lane <id> on\|off` | Switches a lane on or off (field `enabled`, saved in `spick.json`) |

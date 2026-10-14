@@ -190,6 +190,18 @@ test('bandSegments fits by measured width: a right group that would overflow goe
   expect(W(b)).toBeLessThanOrEqual(90)
 })
 
+test('bandSegments with reserved columns: the tiers go by the band width, the fit by what the reserve leaves', () => {
+  // 100 columns, 21 taken by the routing switch: the right group's tier (90) holds and it still fits in the 79 left
+  const b = bandSegments(coderActive, 100, 21)
+  expect(L(b)).toBe(L(bandSegments(coderActive, 100)))
+  expect(R(b)).toBe('main: Fable 5.1')
+  expect(W(b)).toBeLessThanOrEqual(79)
+  // a reserve that leaves too little: the right group goes first, then the left gives up its parts
+  const tight = bandSegments(coderActive, 100, 50)
+  expect(tight.right).toEqual([])
+  expect(W(tight)).toBeLessThanOrEqual(50)
+})
+
 test('bandSegments fits a narrow idle view by dropping the wording, then the model', () => {
   expect(L(bandSegments(coderIdle, 42))).toBe('SPICK   Idle · coder · Sonnet 5.5')
   expect(W(bandSegments(coderIdle, 42))).toBeLessThanOrEqual(42)

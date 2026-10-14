@@ -60,7 +60,7 @@ SPICK   Working · Haiku 5.5 · 8s                                              
 SPICK   coder is working · Sonnet 5.5 · 44s                                        review: codex          ← warning
 ```
 
-Routing off: the wordmark reads `SPICK off`, `off` in `warning`; the rest is unchanged.
+The routing switch sits after the wordmark and reads `on`, `force`, `off` or `on (not Haiku)` (see Band under Controls); the rest is unchanged.
 
 Segment rules:
 
@@ -91,13 +91,13 @@ Opened with `/spick` or the hint; title `SPICK`. Plain text in two columns, no b
 ```
 SPICK  routing on · b: band shown                                     x: close
 
-Routing   r: auto · on · off
-             on (Haiku 5.5 session)
-Review    v: auto · off
+Routing      ● on  r: ○ force     ○ off
+             routes (Haiku 5.5 session)
+Review       ● auto  v: ○ off
 
-Lanes     g: Gemini  on   search, long-context, multimodal, image
-          k: Grok    on   x-data
-          c: Codex   on   code, review, image
+Lanes     Gemini     ● on  g: ○ off
+          Grok       ● on  k: ○ off
+          Codex      ● on  c: ○ off
           l: edit lanes · every field, every declared lane
 
 Usage                   turns  at API rates
@@ -120,14 +120,15 @@ Recent    14:52  coder         Sonnet 5.5  high    3m 41s
 
 Rules:
 
-- Every row you can act on holds exactly one `Button` with `plain: true`. The engine draws a plain Button's hotkey itself, in front of its label (`r: `), so the pane draws no key hints, no help line listing keys, no brackets, no radio dots and no keycap chips. The nine Buttons and their hotkeys: `close` x, `band` b, `routing` r, `review` v, `lane-gemini` g, `lane-grok` k, `lane-codex` c, `edit-lanes` l, `refresh` q.
+- Every row you can act on holds one `Button` with `plain: true`, save a switch (Routing, Review, a built-in lane), whose values are radio buttons, one Button each (see the next rule). The engine draws a plain Button's hotkey itself, in front of its label (`r: `), so the pane draws no key hints, no help line listing keys, no brackets and no keycap chips. The nine hotkeys: `close` x, `band` b, routing r, review v, the lanes g k c, `edit-lanes` l, `refresh` q; a switch's hotkey sits on the Button of the value it moves to (`routing-force` while on is in force).
 - Title row: `SPICK` on the left, `routing on` (or `routing off`, in `warning`), ` · `, the band Button (`b: band shown` / `band hidden`); `x: close` at the right edge.
-- Colours: `SPICK`, the selected value of a choice and a lane that is `on` are brand bold (`claude`); unselected values, notes, tags, column heads and times are `subtle`; section labels are bold; `routing off` is `warning`.
+- A switch is a row of radio buttons: each value is a one-glyph plain Button (`●` the value in force, `○` the others; key `<row>-<value>`, as `routing-force`, `lane-gemini-off`) that sets that value, then a space and the value as Text beside it, outside the Button, because a desktop draws a Button's label alone, without the colour of its text. Values are two spaces apart. The row's hotkey sits on the value it would move to (the next one, wrapping), so a key press and a click on that Button do the same; the other values keep the hotkey's three cells empty, so nothing shifts when the value changes. A click on the value in force changes nothing (a lane's runs no process). A built-in lane's row: the lane's name, a label, then its on/off switch; no tags (the lanes page lists them; on a desktop the hotkey chips are wider than three cells and the tags ran into the switch). (Changed 2026-10-14 at the user's request: the earlier rule had one Button per row, colour alone and no radio dots, which read the same on and off in the desktop app; a lane's name was its Button.)
+- Colours: `SPICK` is brand bold (`claude`). A switch's value in force is bold in its own colour: `on` `success` (routing's and a lane's), `force` and review's `auto` brand, `off` `subtle` (off is not an error); the other values are `subtle`, as are notes, tags, column heads and times; section labels are bold; `routing off` in the title row is `warning`. The glyphs are Buttons' labels: no colour of their own on a desktop.
 - Usage: `Usage` shares its row with the column heads (`turns`, `at API rates`, subtle); the lane names sit in the value column under it, most turns first. The total row appears only from two lanes up. Costs are right-aligned; the em dash marks "not priced" for outside lanes. `at API rates` names the unit (API list rates), so a subscriber does not read the figure as a bill. With no turns yet the section reads `none yet`.
 - Quota: only `claude` and `codex` get rows, a provider with no window data gets none; `5h` before `7d`. If neither has data one subtle `unknown` line; the refresh row reads `q: refresh · read just now` (`3m ago`, `2h ago`), or `q: refresh · not read` before the first read. Grok and Gemini have no rows. Bars are ten cells of `▰` (used) and `▱` (free), five when narrow; no warning colour, the model judges the numbers. The Mod reads the two local files at most every ten minutes.
 - Running sits between Lanes and Usage and is hidden when nothing runs: `lane  model  elapsed`, at most five rows, then `and N more`.
 - Recent: newest first, as many as the pane's rows allow (the state keeps 50); hidden with no turns; attention causes follow the row in their colours.
-- Tags in the Lanes rows come from `set_lane.py --list` (read when the pane opens): `tagLine(tags, width)` joins them with `, ` and ends with ` +N` when they do not fit.
+- The Lanes rows carry no tags (removed 2026-10-14 at the user's request); the lanes page shows them, from `set_lane.py --list`, `tagLine(tags, width)` joining them with `, ` and ending with ` +N` when they do not fit.
 - Narrow (below 64 columns): the section label sits on its own line and the content is indented two; quota bars are five cells; Recent drops the effort column and shows at most five rows; the Edit lanes row drops its note.
 
 ### The lanes page
@@ -147,7 +148,7 @@ The mod gains switches. They are the one place the mod *does* act: by changing w
 | lane gemini / grok / codex | `on` · `off` | `on` | an off lane injects "<Lane> lane is off: use the fallback chain" (Grok adds "X data has no fallback: say so.") and the checklist omits it |
 | band | `shown` · `hidden` | `shown` | band render yields; label line returns (existing behaviour) |
 
-A manual `/model` (or a model change through settings) by the user sets routing to `off` for the session only, like the router mod does, with a toast `spick: routing off (model selected manually) · /spick on to resume`. `/spick on` or `/spick auto` resumes.
+A manual `/model` (or a model change through settings) by the user sets routing to `off` for the session only, like the router mod does, with a toast `spick: routing off (model selected manually) · /spick on or /spick force to resume`. `/spick on` (routes again in a Haiku session) or `/spick force` resumes; so does a click on the switch.
 
 ### Who injects the checklist
 
@@ -155,12 +156,12 @@ When the mod is loaded, it owns the per-prompt checklist: a `prompt.submit` hook
 
 ### Commands
 
-`/spick` is registered with `immediate: true` and `argumentHint: '[on|off|auto|review on|off|lane <gemini|grok|codex> on|off|hide|show|quota]'`.
+`/spick` is registered with `immediate: true` and `argumentHint: '[on|force|off|review on|off|lane <id> [<field> <value>]|hide|show|quota]'`.
 
 | Command | Result |
 |---|---|
 | `/spick` | opens the pane; with no UI surface prints a one-paragraph status |
-| `/spick on` / `off` / `auto` | routing switch; remembered |
+| `/spick on` / `force` / `off` | routing switch; remembered (`on` routes in a Haiku session only, `force` on any model; `auto`, the old name of `on`, still works) |
 | `/spick review on` / `off` | review switch; remembered |
 | `/spick lane <gemini\|grok\|codex> on\|off` | lane switch; remembered |
 | `/spick hide` / `show` | band visibility; session only |
@@ -170,32 +171,32 @@ Every change answers with one line of text and, when a pane is open, redraws it.
 
 ### Pane: Controls rows
 
-The first rows under the title row (see the sample above). Each is one plain Button; the hotkey is drawn by the engine:
+The first rows under the title row (see the sample above). Each is a switch of radio buttons; the hotkey is drawn by the engine:
 
 ```
-Routing   r: auto · on · off
-             on (Haiku 5.5 session)
-Review    v: auto · off
-Lanes     g: Gemini  on   search, ...
-          k: Grok    on   x-data
-          c: Codex   on   code, ...
+Routing      ● on  r: ○ force     ○ off
+             routes (Haiku 5.5 session)
+Review       ● auto  v: ○ off
+Lanes     Gemini     ● on  g: ○ off
+          Grok       ● on  k: ○ off
+          Codex      ● on  c: ○ off
           l: edit lanes · every field, every declared lane
 ```
 
-`r` cycles routing `auto -> on -> off -> auto`, `v` toggles review `auto <-> off`, `g` / `k` / `c` toggle the three lanes (through `set_lane.py`), `b` the band (title row), `l` opens the lanes page, `q` refreshes the quota (Quota section), `x` or `Esc` closes (title row). The selected value is brand bold, the others subtle. The line under routing states the effective value for this session and why (`on (Haiku 5.5 session)`, `off (model selected manually)`, `off (Fable 5.1 is not Haiku)`), aligned with the value, subtle. Every command and reply keeps its text.
+A click on a value sets it. `r` moves routing on `on -> force -> off -> on`, `v` review `auto <-> off`, `g` / `k` / `c` the three lanes `on <-> off` (through `set_lane.py`), each by pressing the value's Button that holds the key; `b` the band (title row), `l` opens the lanes page, `q` refreshes the quota (Quota section), `x` or `Esc` closes (title row). The line under routing says what routing does this session and why, in words other than the switch's values (`routes (Haiku 5.5 session)`, `routes (forced)`, `routes nothing (Fable 5.1 is not Haiku)`, `routes nothing (switched off)`, `routes nothing (model selected manually)`), aligned with the values, subtle. Every command and reply keeps its text.
 
 ### Band
 
-While routing is effectively off, the wordmark reads `SPICK off` with `off` in `warning`; everything else is unchanged. No buttons on the band. Command replies and toasts keep the lowercase `spick:` prefix.
+The routing switch sits on the band, after the wordmark: one plain Button that reads the setting, `SPICK  on   Idle · last turn: …` (`force`, `off`; `on` while it routes nothing, as on a model that is not Haiku, reads `on (not Haiku)` with ` (not Haiku)` in `warning`), and moves it on when clicked, `on -> force -> off -> on`, as `/spick on|force|off` does. Key `band-routing`, no hotkey (the band seldom holds the focus; `r` is the pane's). The value is bold in its colour (`on` `success`, `force` brand, `off` `subtle`); a desktop draws a Button's label without that colour, so while routing is off the Button is also `dimColor`. Its width is taken from the band before the segments are fitted (the width tiers still go by `bodyColumns`), and the wordmark no longer says `off`. Before the first turn the band is the wordmark and the switch. Command replies and toasts keep the lowercase `spick:` prefix. (Changed 2026-10-14 at the user's request: the band had no buttons and routing off showed on the wordmark; a first try put the pane's radio buttons there, too large for one line. The same day the values were renamed: `auto` is `on`, the old `on` is `force`.)
 
 ### State
 
-`$.state['spick-dashboard']` gains `controls: { routing: 'auto'|'on'|'off'; review: 'auto'|'off'; lanes: { gemini: boolean; grok: boolean; codex: boolean }; manualModel: boolean }`. `$.store` keys: `spick:routing`, `spick:review`, `spick:lanes` (JSON), read at `session.start` and written on every change.
+`$.state['spick-dashboard']` gains `controls: { routing: 'on'|'force'|'off'; review: 'auto'|'off'; lanes: { gemini: boolean; grok: boolean; codex: boolean }; manualModel: boolean }`. `$.store` keys: `spick:routing2` (falling back once to the old `spick:routing`, see below) and `spick:review`, read at `session.start` and written on every change.
 
 ### Verification additions
 
-8. `/spick off` then a code request: the model does the work itself and the band reads `SPICK off`; `/spick on` restores the checklist.
-9. `/model opus` in a Haiku session: toast appears, pane says `off (model selected manually)`, `/spick auto` returns to on.
+8. `/spick off` then a code request: the model does the work itself and the band reads `SPICK  off`; `/spick on` (in a Haiku session) or `/spick force` restores the checklist.
+9. `/model opus` in a Haiku session: toast appears, pane says `routes nothing (model selected manually)`, `/spick on` returns to on.
 10. `/spick lane gemini off`, then a web lookup: the checklist names Grok as the search lane; the preference survives a new session.
 11. With the mod loaded, the bash hook prints nothing (marker fresh); after uninstalling the mod, the hook resumes within 24 hours.
 
@@ -239,7 +240,7 @@ All values live in `$.state` under `spick-dashboard`, declared in `types/index.d
 - `hidden`: boolean
 - `controls`, `sessionModel`: the switches and the session model id (see Controls)
 
-`$.store` holds only the three remembered switches: `spick:routing`, `spick:review`, `spick:lanes` (JSON); everything else is per session by design.
+`$.store` holds only the remembered switches: `spick:routing2` (`on`, `force`, `off`; until 2026-10-14 `spick:routing` held `auto`, `on`, `off`, read once while `spick:routing2` is empty and taken over as auto -> on, on -> force), `spick:review`; `spick:lanes` is no longer written; everything else is per session by design.
 
 ## Files
 

@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 import type { Controls, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
-import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
-import { HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, estimateCost, fmtAge, isSourcePath, modelName, noteParts, padRight, parseCli, quotaBar, quotaCells, quotaMeters, recentLines, runningLines, table, tagLine, usageLines, wrapWords } from './format'
-import type { BandView, Seg } from './format'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
+import { HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
+import type { Align, BandView, Cells, Seg } from './format'
 import { readQuota } from './quota'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
 
@@ -63,7 +63,9 @@ async function lanesNow($: EngineInterface): Promise<LaneInfo[] | null> {
 
 /** The two remembered choices: routing and review. The lanes' on/off is not remembered here: it lives in spick.json. */
 async function loadControls($: EngineInterface): Promise<void> {
-  const routing = parseRouting(await $.store.get('spick:routing'))
+  // routing under its new names (on, force, off) in spick:routing2; a value stored before the rename is migrated
+  const stored = await $.store.get(ROUTING_KEY)
+  const routing = stored === undefined || stored === null ? migrateRouting(await $.store.get('spick:routing')) : parseRouting(stored)
   const review = parseReview(await $.store.get('spick:review'))
   // a manual model pick lasts one session only
   await update($, controls, () => ({ routing, review, manualModel: false }))
@@ -73,7 +75,7 @@ async function loadControls($: EngineInterface): Promise<void> {
 async function setControls($: EngineInterface, change: (c: Controls) => Controls): Promise<Controls> {
   const next = await update($, controls, change)
   try {
-    await $.store.set('spick:routing', next.routing)
+    await $.store.set(ROUTING_KEY, next.routing)
     await $.store.set('spick:review', next.review)
   } catch {}
   return next
@@ -158,10 +160,11 @@ async function laneRecordLine($: EngineInterface, id: string): Promise<string> {
   return `spick: ${l.id} · enabled ${f('enabled')} · name ${f('name')} · tags ${f('tags')} · data ${f('data')} · kind ${f('kind')} · notes ${f('notes')}`
 }
 
-/** a Controls lane button: flip enabled through set_lane.py; a refusal is a toast */
-async function toggleLane($: EngineInterface, id: string): Promise<void> {
-  const on = (await read($, laneRows))?.find(l => l.id === id)?.enabled ?? true
-  const r = await editLane($, id, 'enabled', on ? 'no' : 'yes')
+/** a lane's on or off Button: set enabled through set_lane.py, nothing when it already reads so; a refusal is a toast */
+async function setLane($: EngineInterface, id: string, on: boolean): Promise<void> {
+  const isOn = (await read($, laneRows))?.find(l => l.id === id)?.enabled ?? true
+  if (isOn === on) return
+  const r = await editLane($, id, 'enabled', on ? 'yes' : 'no')
   if (!r.ok) $.ui.toast(r.text)
 }
 
@@ -229,10 +232,10 @@ async function modelPickedByHand($: EngineInterface, model: string): Promise<voi
   $.ui.toast(MANUAL_TOAST)
 }
 
-/** the reply to a routing change: the reason only where the value alone does not say it (auto, a manual pick) */
+/** the reply to a routing change: the reason only where the value alone does not say it (on, a manual pick) */
 async function routingLine($: EngineInterface): Promise<string> {
   const c = await read($, controls)
-  if (c.routing !== 'auto' && !c.manualModel) return `spick: routing ${c.routing}`
+  if (c.routing !== 'on' && !c.manualModel) return `spick: routing ${c.routing}`
   return `spick: routing ${c.routing} · ${effectiveRouting(c, await readSessionModel($)).why}`
 }
 
@@ -348,9 +351,18 @@ function passThrough<E, R>($: unknown, e: E, next: (e: E) => R): R {
   return next(e)
 }
 
-const routingOptions: readonly Routing[] = ['auto', 'on', 'off']
+const routingOptions: readonly Routing[] = ['on', 'force', 'off']
 const reviewOptions: readonly Review[] = ['auto', 'off']
-const nextRouting = (r: Routing): Routing => (r === 'auto' ? 'on' : r === 'on' ? 'off' : 'auto')
+const nextRouting = (r: Routing): Routing => (r === 'on' ? 'force' : r === 'force' ? 'off' : 'on')
+/**
+ * A switch's value in force, in its own colour: on success green (routing's and a lane's alike), force and review's
+ * auto the brand's, off subtle (off is not an error).
+ */
+const VALUE_COLORS: Record<string, 'claude' | 'success' | 'subtle'> = { on: 'success', force: 'claude', auto: 'claude', off: 'subtle' }
+/** after the band switch's `on` while on routes nothing (a model that is not Haiku), in the warning colour */
+const NOT_HAIKU_NOTE = ' (not Haiku)'
+/** where routing is remembered, under its names since 2026-10-14 (on, force, off); spick:routing held auto, on, off */
+const ROUTING_KEY = 'spick:routing2'
 const LANE_HOTKEYS: Record<string, string> = { gemini: 'g', grok: 'k', codex: 'c' }
 /** the lanes page's field help, two lines at 80 columns (the fields set_lane.py takes) */
 const LANE_HELP = ['name tags data enabled notes kind base_url api model max_tokens', 'key_ref meter_type meter_preset health_url · enabled yes|no']
@@ -364,6 +376,8 @@ export const register: Register = on => {
   const callOfAgent = new Map<string, string>()
   /** tool_use_id -> lane of every Agent or CLI call in flight, oldest first; the band shows the most recent */
   const inFlight = new Map<string, Lane>()
+  /** Agent calls whose spawn said background: the call's run_in_background may be left out, background being the default */
+  const backgroundCalls = new Set<string>()
   /** whether the main session's turn is open: a background agent outlives it, and the band must not read idle meanwhile */
   let mainTurnOpen = false
   /** true for an Agent call whose subagent has spawned and not yet finished (a background agent, or a foreground one still running) */
@@ -543,7 +557,11 @@ export const register: Register = on => {
       return await next(e)
     } finally {
       try {
-        if (!e.run_in_background) {
+        // a background agent returns at once but its subagent still runs: its lane stays until turn.complete. Background
+        // is the default, so a call that leaves run_in_background out is one too; agent.spawn reports what was decided.
+        const isBackground = e.run_in_background === true || backgroundCalls.has(id)
+        backgroundCalls.delete(id)
+        if (!isBackground) {
           inFlight.delete(id)
           await refreshBand($, tracker)
         }
@@ -558,6 +576,7 @@ export const register: Register = on => {
         laneOfAgent.set(r.agentId, e.subagentType)
         callOfAgent.set(r.agentId, e.tool_use_id)
       }
+      if (e.background && !r.deny) backgroundCalls.add(e.tool_use_id)
       // the resolved type and model replace what the Agent call named (it may have named neither)
       const entry = inFlight.get(e.tool_use_id)
       if (entry && !r.deny) {
@@ -717,13 +736,32 @@ export const register: Register = on => {
       : l
         ? { lane: l.lane, model: l.model, agents: 0, isIdle: true }
         : null
-    if (!view) return next(e)
-    // routing off shows on the wordmark; under auto, only once the model is known
+    // routing off is shown once the model is known (under auto it depends on it)
     const ctl = await read($, controls)
     const model = (await read($, sessionModel)) || mainModel
-    view.routingOff = (model !== '' || ctl.routing !== 'auto' || ctl.manualModel) && !effectiveRouting(ctl, model).on
-    const { left, right } = bandSegments(view, e.props.bodyColumns)
-    const { Box, Text } = $.ui.resolve(e)
+    const routingOff = (model !== '' || ctl.routing !== 'on' || ctl.manualModel) && !effectiveRouting(ctl, model).on
+    const shownRouting: Routing = ctl.manualModel ? 'off' : ctl.routing
+    // The routing switch: one plain Button after the wordmark that reads the setting (`on`, `force`, `off`; on that
+    // routes nothing, `on (not Haiku)`) and moves it on when clicked, on -> force -> off -> on. A desktop draws a
+    // Button's label without the colour of its text, so routing off is also drawn dim there (dimColor). Its width is
+    // taken from the band before the segments are fitted; the width tiers still go by the band's columns.
+    const offNote = shownRouting === 'on' && routingOff
+    const switchW = 2 + shownRouting.length + (offNote ? NOT_HAIKU_NOTE.length : 0)
+    const { left, right } = view
+      ? bandSegments(view, e.props.bodyColumns, switchW)
+      // before the first turn: the wordmark and the switch
+      : { left: [{ text: 'SPICK', style: 'brand' } as Seg], right: [] as Seg[] }
+    const { Box, Text, Button } = $.ui.resolve(e)
+    const routingSwitch: RenderElement[] = [
+      <Box width={2} flexShrink={0} />,
+      <Button key="band-routing" plain dimColor={routingOff} onPress={() => {
+        // as /spick on|force|off: the user has decided, a /model still pending comparison no longer counts
+        modelBeforePick = null
+        void setControls($, c => ({ ...c, routing: nextRouting(shownRouting), manualModel: false })).catch(() => undefined)
+      }}>
+        {[<Text bold color={VALUE_COLORS[shownRouting] ?? 'claude'} wrap="truncate-end">{shownRouting}</Text>, ...(offNote ? [<Text color="warning" wrap="truncate-end">{NOT_HAIKU_NOTE}</Text>] : [])]}
+      </Button>,
+    ]
     const paint = (s: Seg) => {
       switch (s.style) {
         case 'brand': return <Text bold color="claude" wrap="truncate-end">{s.text}</Text>
@@ -735,15 +773,18 @@ export const register: Register = on => {
     }
     return (
       <Box flexDirection="row" flexWrap="nowrap" justifyContent="space-between" gap={2} width="100%">
-        <Box flexDirection="row" flexShrink={1}>{left.map(paint)}</Box>
+        <Box flexDirection="row" flexShrink={1}>{paint(left[0]!)}{routingSwitch}{left.slice(1).map(paint)}</Box>
         {right.length > 0 ? <Box flexDirection="row" flexShrink={1}>{right.map(paint)}</Box> : null}
       </Box>
     )
   })
 
-  // The pane: plain text in a label column (LABEL_W) and a value column, no borders, no chips. Each row you can act on
-  // holds one plain Button; the engine draws its hotkey in front of the value (`r: auto · on · off`). Below
-  // NARROW_BELOW columns a section's label sits on its own line and its content is indented two.
+  // The pane: two columns of fixed-width Boxes, no borders, no chips: a label column (LABEL_W cells) and a value
+  // column. Nothing lines up by spaces: a table's cells are Boxes as wide as their column (numbers to the right,
+  // justifyContent flex-end), so a desktop's proportional font aligns them as the terminal does. Each row you can
+  // act on holds one plain Button, the engine drawing its hotkey in front of the label (`l: edit lanes`); a switch
+  // (Routing, Review, a lane) is radio buttons, one per value (`radio`).
+  // Below NARROW_BELOW columns a section's label sits on its own line and its content is indented two.
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const ui = $.ui.resolve(e)
     const { Box, Text, Button } = ui
@@ -761,9 +802,44 @@ export const register: Register = on => {
 
     const sub = (text: string) => <Text color="subtle">{text}</Text>
     const strong = (text: string) => <Text bold color="claude">{text}</Text>
-    /** the selected value in brand bold, the others subtle, joined by ` · ` */
-    const choice = (all: readonly string[], picked: string): RenderElement[] =>
-      all.flatMap((v, i) => (i > 0 ? [sub(' · '), v === picked ? strong(v) : sub(v)] : [v === picked ? strong(v) : sub(v)]))
+    /** a subtle note that gives way at the right edge */
+    const note = (text: string) => <Text color="subtle" wrap="truncate-end">{text}</Text>
+    /** `n` empty cells */
+    const gap = (n: number): RenderElement => <Box width={n} flexShrink={0} />
+    /** the label column: the section's name on its first row, an empty cell of the same width under it */
+    const labelCell = (label?: string): RenderElement => <Box width={LABEL_W} flexShrink={0}>{label ? <Text bold>{label}</Text> : null}</Box>
+    /**
+     * A table row as cells: each column a Box as wide as the column (two cells of left padding from the second
+     * column on), its text to the left or, for a number, to the right; the text gives way before the Box does.
+     */
+    const cols = (row: readonly string[], widths: readonly number[], align: readonly Align[], style: (text: string) => RenderElement = text => <Text wrap="truncate-end">{text}</Text>): RenderElement[] =>
+      widths.map((w, i) => (
+        <Box width={w + (i > 0 ? 2 : 0)} paddingLeft={i > 0 ? 2 : 0} flexShrink={0} justifyContent={align[i] === 'r' ? 'flex-end' : 'flex-start'}>
+          {style(row[i] ?? '')}
+        </Box>
+      ))
+    /** a table: every column as wide as its longest cell; with `head`, the first row is the column heads, subtle */
+    const grid = (cells: Cells, head: boolean): RenderElement[][] => {
+      const widths = colWidths(cells.rows)
+      return cells.rows.map((r, i) => (head && i === 0 ? cols(r, widths, cells.align, sub) : cols(r, widths, cells.align)))
+    }
+    /**
+     * A choice as radio buttons: each value a one-glyph Button (`●` the value in force, `○` the others) that sets it,
+     * then the value as Text beside it, outside the Button, since a desktop draws a Button's label without colour: the
+     * value in force bold in its own colour (VALUE_COLORS), the others subtle. The row's hotkey sits on the value it
+     * would move to (the next one, wrapping), so a key press and a click on that Button do the same; the other values
+     * keep the hotkey's room empty, and nothing shifts when the value changes.
+     */
+    const radio = (row: string, all: readonly string[], inForce: string, hotkey: string, set: (v: string) => void): RenderElement[] => {
+      const next = all[(all.indexOf(inForce) + 1) % all.length]
+      return all.flatMap((v, i) => [
+        ...(i > 0 ? [gap(2)] : []),
+        ...(v === next ? [] : [gap(HOTKEY_W)]),
+        <Button key={`${row}-${v}`} plain {...(v === next ? { hotkey } : {})} onPress={() => set(v)}>{v === inForce ? '●' : '○'}</Button>,
+        gap(1),
+        v === inForce ? <Text bold color={VALUE_COLORS[v] ?? 'claude'}>{v}</Text> : sub(v),
+      ])
+    }
     /** a section: its label in the label column on the first row (own line when narrow), one row per entry */
     const part = (label: string, lines: RenderElement[][]): RenderElement => {
       used += lines.length + (isNarrow ? 1 : 0)
@@ -772,7 +848,7 @@ export const register: Register = on => {
           {isNarrow ? <Text bold>{label}</Text> : null}
           {lines.map((cells, i) => (
             <Box flexDirection="row">
-              {isNarrow ? <Text>{'  '}</Text> : i === 0 ? <Text bold>{padRight(label, LABEL_W)}</Text> : <Text>{' '.repeat(LABEL_W)}</Text>}
+              {isNarrow ? gap(2) : labelCell(i === 0 ? label : undefined)}
               {cells}
             </Box>
           ))}
@@ -784,37 +860,39 @@ export const register: Register = on => {
       used += 1
       return <Box flexDirection="column" marginTop={1}>{parts}</Box>
     }
-    const line = (text: string) => [<Text>{clip(text, contentW)}</Text>]
+    const line = (text: string) => [<Text wrap="truncate-end">{clip(text, contentW)}</Text>]
 
-    /** SPICK on the left, the right-hand controls at the edge */
-    const titleRow = (left: RenderElement[], leftLen: number, right: RenderElement[], rightLen: number): RenderElement => {
+    /** the title row: SPICK and its group on the left, the controls pinned to the right edge */
+    const titleRow = (left: RenderElement[], right: RenderElement[]): RenderElement => {
       used += 1
       return (
-        <Box flexDirection="row">
-          {left}
-          <Text>{' '.repeat(Math.max(1, W - leftLen - rightLen))}</Text>
-          {right}
+        <Box flexDirection="row" width="100%" justifyContent="space-between">
+          <Box flexDirection="row" flexShrink={1}>{left}</Box>
+          <Box flexDirection="row" flexShrink={0}>{right}</Box>
         </Box>
       )
     }
 
     if ((await read($, page)) === 'lanes') {
-      const note = await read($, laneNote)
+      const laneNoteNow = await read($, laneNote)
       const seq = await read($, editSeq)
       const header = titleRow(
-        [<Text bold color="claude">SPICK</Text>, <Text>{'  lanes'}</Text>], 12,
+        [<Text bold color="claude">SPICK</Text>, gap(2), <Text>lanes</Text>],
         [
           <Button key="back" plain label="back" onPress={() => { void update($, page, () => 'main').catch(() => undefined) }} />,
-          <Text>{'  '}</Text>,
+          gap(2),
           <Button key="close" plain label="close" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }} />,
-        ], 'back  close'.length)
+        ])
 
       // lane, tags, data, enabled: every declared lane, the disabled ones too, cells cut so a line fits
       const idMax = isNarrow ? 12 : 16
-      const laneTable = rowsNow === null ? [] : table([
-        ['lane', 'tags', 'data', isNarrow ? 'on' : 'enabled'],
-        ...rowsNow.map(l => [clip(l.id, idMax), l.tags.length > 0 ? tagLine(l.tags, isNarrow ? 12 : 30) : '-', l.data ?? 'unset', l.enabled ? 'yes' : 'no']),
-      ], ['l', 'l', 'l', 'l']).map(l => l.trimEnd())
+      const laneTable: Cells = {
+        rows: [
+          ['lane', 'tags', 'data', isNarrow ? 'on' : 'enabled'],
+          ...(rowsNow ?? []).map(l => [clip(l.id, idMax), l.tags.length > 0 ? tagLine(l.tags, isNarrow ? 12 : 30) : '-', l.data ?? 'unset', l.enabled ? 'yes' : 'no']),
+        ],
+        align: ['l', 'l', 'l', 'l'],
+      }
       const help = isNarrow ? wrapWords(LANE_HELP.join(' '), contentW) : LANE_HELP
       // the lanes page has no hotkeys: a letter typed into the field must not press anything
       const editRow = Input
@@ -823,12 +901,12 @@ export const register: Register = on => {
       return (
         <Box flexDirection="column" paddingX={1}>
           {header}
-          {block(part('Lanes', rowsNow === null ? [[sub('lanes not read')]] : laneTable.map((l, i) => (i === 0 ? [sub(l)] : line(l)))))}
+          {block(part('Lanes', rowsNow === null ? [[sub('lanes not read')]] : grid(laneTable, true)))}
           {block(part('Edit', [editRow, ...help.map(h => [sub(h)])]))}
-          {note.change || note.error
+          {laneNoteNow.change || laneNoteNow.error
             ? block(...[
-                note.change ? part('Changed', [line(note.change)]) : null,
-                note.error ? part('Refused', [[<Text color="error">{clip(note.error, contentW)}</Text>]]) : null,
+                laneNoteNow.change ? part('Changed', [line(laneNoteNow.change)]) : null,
+                laneNoteNow.error ? part('Refused', [[<Text color="error" wrap="truncate-end">{clip(laneNoteNow.error, contentW)}</Text>]]) : null,
               ].filter((x): x is RenderElement => x !== null))
             : null}
         </Box>
@@ -848,38 +926,36 @@ export const register: Register = on => {
     const header = titleRow(
       [
         <Text bold color="claude">SPICK</Text>,
-        <Text>{'  '}</Text>,
+        gap(2),
         eff.on ? sub('routing on') : <Text color="warning">routing off</Text>,
         sub(' · '),
         <Button key="band" plain hotkey="b" onPress={() => { void update($, hidden, v => !v) }}>{sub(isHidden ? 'band hidden' : 'band shown')}</Button>,
-      ], 7 + (eff.on ? 10 : 11) + 3 + HOTKEY_W + (isHidden ? 11 : 10),
-      [<Button key="close" plain hotkey="x" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }}>close</Button>],
-      HOTKEY_W + 5)
+      ],
+      [<Button key="close" plain hotkey="x" role="dismiss" onPress={() => { void $.ui.close({ id: PANE }).catch(() => undefined) }}>close</Button>])
 
     // routing and review sit together; the note under routing says why it reads as it does
     const controlsBlock = block(
       part('Routing', [
-        // r moves on to the next value: auto -> on -> off -> auto
-        [<Button key="routing" plain hotkey="r" onPress={() => { void setControls($, c => ({ ...c, routing: nextRouting(shownRouting), manualModel: false })).catch(() => undefined) }}>{choice(routingOptions, shownRouting)}</Button>],
-        [sub(' '.repeat(HOTKEY_W) + clip(eff.why, contentW - HOTKEY_W))],
+        // a click sets that value; r presses the next one: on -> force -> off -> on
+        radio('routing', routingOptions, shownRouting, 'r', v => { void setControls($, c => ({ ...c, routing: v as Routing, manualModel: false })).catch(() => undefined) }),
+        // the reason sits under the values, past the hotkey's room
+        [gap(HOTKEY_W), note(clip(eff.why, contentW - HOTKEY_W))],
       ]),
       part('Review', [
-        // v flips between the two
-        [<Button key="review" plain hotkey="v" onPress={() => { void setControls($, c => ({ ...c, review: c.review === 'auto' ? 'off' : 'auto' })).catch(() => undefined) }}>{choice(reviewOptions, ctl.review)}</Button>],
+        // a click sets that value; v presses the other one
+        radio('review', reviewOptions, ctl.review, 'v', v => { void setControls($, c => ({ ...c, review: v as Review })).catch(() => undefined) }),
       ]))
 
-    // g k c flip a built-in lane (spick.json's lane_registry.<id>.enabled, read from set_lane.py --list; on until that has been read)
+    // a built-in lane's switch (spick.json's lane_registry.<id>.enabled, read from set_lane.py --list; on until that has been
+    // read): the name a label, then on and off as the Routing row's radio buttons (g k c press the other one). No tags
+    // here: the lanes page lists them
     const nameW = Math.max(...LANE_KEYS.map(k => laneName(k).length))
-    const tagW = contentW - HOTKEY_W - nameW - 2 - 3 - 2
+    const laneOptions = ['on', 'off'] as const
     const laneLines = LANE_KEYS.map(k => {
-      const row = rowsNow?.find(l => l.id === k)
-      const isOn = row?.enabled ?? true
-      const tags = row && row.tags.length > 0 ? tagLine(row.tags, tagW) : ''
+      const isOn = rowsNow?.find(l => l.id === k)?.enabled ?? true
       return [
-        <Button key={`lane-${k}`} plain hotkey={LANE_HOTKEYS[k]} onPress={() => { void toggleLane($, k).catch(() => undefined) }}>
-          <Text>{padRight(laneName(k), nameW) + '  '}</Text>{isOn ? strong('on') : sub('off')}
-        </Button>,
-        ...(tags ? [sub(' '.repeat(isOn ? 3 : 2) + tags)] : []),
+        <Box width={nameW + 2} flexShrink={0}><Text>{laneName(k)}</Text></Box>,
+        ...radio(`lane-${k}`, laneOptions, isOn ? 'on' : 'off', LANE_HOTKEYS[k]!, v => { void setLane($, k, v === 'on').catch(() => undefined) }),
       ]
     })
     laneLines.push([
@@ -889,24 +965,32 @@ export const register: Register = on => {
     ])
     const lanesBlock = block(part('Lanes', laneLines))
 
-    const runningView = runningLines(runningNow, now)
+    const runningView = runningRows(runningNow, now)
     const runningBlock = runningNow.length > 0
-      ? block(part('Running', [...runningView.lines.map(line), ...(runningView.more > 0 ? [[sub(`and ${runningView.more} more`)]] : [])]))
+      ? block(part('Running', [...grid(runningView, false), ...(runningView.more > 0 ? [[sub(`and ${runningView.more} more`)]] : [])]))
       : null
 
     // lanes with turns, most turns first; the head row sits right of the label, the lane names under it
     const entries = Object.entries(t).sort((a, b) => b[1].turns - a[1].turns)
-    const usage = usageLines(entries)
-    const usageBlock = block(part('Usage', entries.length === 0 ? [[sub('none yet')]] : usage.map((l, i) => (i === 0 ? [sub(l)] : line(l)))))
+    const usageBlock = block(part('Usage', entries.length === 0 ? [[sub('none yet')]] : grid(usageRows(entries), true)))
 
-    // only claude and codex; a provider with no window data gets no row
+    // only claude and codex; a provider with no window data gets no row. The bars sit in no fixed cell (a glyph's
+    // width is the font's); every row draws the same count of cells, so they end together
     const barCells = isNarrow ? 5 : 10
     const quotaRows = ([['claude', q?.claude], ['codex', q?.codex]] as [string, QuotaWindows | null | undefined][])
-      .map(([name, w]) => ({ name, cells: quotaCells(w, barCells) }))
-      .filter(r => r.cells.length > 0)
+      .map(([name, w]) => ({ name, windows: quotaWindows(w, barCells) }))
+      .filter(r => r.windows.length > 0)
     const quotaBlock = block(part('Quota', [
       ...(q && quotaRows.length === 0 ? [[sub('unknown')]] : []),
-      ...quotaRows.map(r => [<Text>{padRight(r.name, 8) + r.cells.join('   ')}</Text>]),
+      ...quotaRows.map(r => [
+        <Box width={8} flexShrink={0}><Text>{r.name}</Text></Box>,
+        ...r.windows.flatMap((c, i) => [
+          ...(i > 0 ? [gap(3)] : []),
+          <Box width={3} flexShrink={0}><Text>{c.label}</Text></Box>,
+          <Text>{c.bar}</Text>,
+          <Box width={5} flexShrink={0} justifyContent="flex-end"><Text>{c.pct}</Text></Box>,
+        ]),
+      ]),
       [<Button key="refresh" plain hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }}>
         <Text>refresh</Text>{sub(q ? ` · read ${fmtAge(now - q.readAt)}` : ' · not read')}
       </Button>],
@@ -915,14 +999,19 @@ export const register: Register = on => {
     // what is left of the viewport after everything above and the blank line before Recent
     const room = Math.max(1, rows - used - 1 - (isNarrow ? 1 : 0))
     const recent = list.slice(0, Math.min(room, isNarrow ? NARROW_RECENT_ROWS : list.length))
+    const recentCells = recentRows(recent, isNarrow)
+    const recentWidths = colWidths(recentCells.rows)
+    const recentW = recentWidths.reduce((a, b) => a + b, 0) + 2 * Math.max(0, recentWidths.length - 1)
     const recentBlock = recent.length > 0
-      ? block(part('Recent', recentLines(recent, isNarrow).map((text, i) => {
-          const note = recent[i]?.note
-          if (!note) return line(text)
-          const fits = contentW - text.length - 2
-          if (fits < 6) return line(text)
-          const parts = noteParts({ ...note, text: clip(note.text, fits) })
-          return [<Text>{text + '  '}</Text>, ...parts.map(p => (p.style === 'warning' || p.style === 'error' ? <Text color={p.style}>{p.text}</Text> : <Text>{p.text}</Text>))]
+      ? block(part('Recent', recentCells.rows.map((r, i) => {
+          const cells = cols(r, recentWidths, recentCells.align)
+          const cause = recent[i]?.note
+          if (!cause) return cells
+          // the attention cause follows the row, two cells on, in its colours, when at least six cells are left
+          const fits = contentW - recentW - 2
+          if (fits < 6) return cells
+          const parts = noteParts({ ...cause, text: clip(cause.text, fits) })
+          return [...cells, gap(2), ...parts.map(p => (p.style === 'warning' || p.style === 'error' ? <Text color={p.style}>{p.text}</Text> : <Text>{p.text}</Text>))]
         })))
       : null
 

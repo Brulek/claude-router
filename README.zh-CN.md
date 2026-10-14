@@ -115,7 +115,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 | `spick setup` | 首次配置 |
 | `spick doctor` | 列出已安装及已登录的 CLI |
 | `spick quota` | 显示额度信息 |
-| `/spick on\|off\|auto` | 分流开关 |
+| `/spick on\|force\|off` | 分流开关：`on` 只在 Haiku 会话里分流，`force` 任何模型都分流 |
 | `/spick review on\|off` | Codex 审核步骤开关 |
 | `/spick lane <id>` | 显示单个 lane 的记录 |
 | `/spick lane <id> on\|off` | 开关某个 lane（字段 `enabled`，写入 `spick.json`） |

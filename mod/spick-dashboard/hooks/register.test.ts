@@ -212,6 +212,50 @@ test('a background agent survives a second main turn and the band stays on it un
   expect((await probe($)).current).toBeNull()
 })
 
+/** an Agent call as the model usually writes it: run_in_background left out */
+const defaultCall = (id: string, subagent_type: string) => {
+  const { run_in_background: _, ...call } = agentCall(id, subagent_type)
+  return call
+}
+
+test('an Agent call that leaves run_in_background out runs in the background (the default): the band stays on its lane', { plugins: [probePlugin] }, async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('agent.spawn', async () => ({ model: 'claude-opus-5-5', agentId: 'a1' }))
+  const tools = gatedTools(on)
+
+  // the engine spawns while the Agent call runs, then the call returns at once ("launched")
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  const call = $.tool.call(defaultCall('p1', 'planner'))
+  await tools.held('p1')
+  await $.agent.spawn({ ...bgSpawn('p1'), subagentType: 'planner' })
+  tools.release('p1')
+  await call
+  expect((await probe($)).current).toMatchObject({ lane: 'planner', model: 'Opus 5.5' })
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  expect((await probe($)).current).toMatchObject({ turnId: 't1', lane: 'planner' })
+
+  await $.turn.complete({ turnId: 'sub1', agentId: 'a1', ...DONE })
+  expect((await probe($)).current).toBeNull()
+})
+
+test('a foreground Agent call (the spawn says not background) leaves the band when it returns', { plugins: [probePlugin] }, async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('agent.spawn', async () => ({ model: 'claude-sonnet-5-5', agentId: 'a1' }))
+  const tools = gatedTools(on)
+
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  const call = $.tool.call(defaultCall('f1', 'coder'))
+  await tools.held('f1')
+  await $.agent.spawn({ ...bgSpawn('f1'), background: false })
+  expect((await probe($)).current).toMatchObject({ lane: 'coder' })
+  tools.release('f1')
+  await call
+  expect((await probe($)).current).toMatchObject({ lane: 'main session' })
+})
+
 test('agent.spawn names the lane of an Agent call that gave no subagent_type', { plugins: [probePlugin] }, async ($, on) => {
   mock.clock(on, { now: 1000 })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
@@ -347,7 +391,7 @@ test('a Haiku session gets the checklist, one block per prompt; /spick off swaps
   expect(isChecklist(await contextOf($))).toBe(true)
   expect((await $.command.run({ command: 'spick', args: 'off', ...RUN })).text).toBe('spick: routing off')
   expect(await contextOf($)).toEqual([OFF])
-  expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on')
+  expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on · routes (Haiku 5.5 session)')
   expect(isChecklist(await contextOf($))).toBe(true)
 })
 
@@ -376,13 +420,36 @@ test('with no band surface (claude -p) the label-line wording stays', async ($, 
   expect((await contextOf($))[0]?.split('\n').at(-1)).toBe('Codex review is off: skip the review step and write `Review: off` in the label line.')
 })
 
-test('auto on a model that is not Haiku is off', async ($, on) => {
+test('on, on a model that is not Haiku, routes nothing; force routes there; auto is the old name of on', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   session(on, 'claude-fable-5-1')
   await $.session.start(START)
   expect(await contextOf($)).toEqual([OFF])
-  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · off (Fable 5.1 is not Haiku)')
+  expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on · routes nothing (Fable 5.1 is not Haiku)')
+  expect((await $.command.run({ command: 'spick', args: 'force', ...RUN })).text).toBe('spick: routing force')
+  expect(isChecklist(await contextOf($))).toBe(true)
+  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing on · routes nothing (Fable 5.1 is not Haiku)')
+  expect(await contextOf($)).toEqual([OFF])
+})
+
+test('a routing value stored under the old names is read in its new name, and written under the new key only', async ($, on) => {
+  mock.clock(on)
+  const held = new Map<string, unknown>([['spick:routing', 'on']])
+  const written: string[] = []
+  on('store.get', async (_$, e) => ({ value: held.get(e.key) }))
+  on('store.set', async (_$, e) => { written.push(e.key); held.set(e.key, e.value); return { value: undefined } })
+  session(on, 'claude-fable-5-1')
+  await $.session.start(START)
+  // the old on routed on any model: it is force now, so a Fable session gets the checklist
+  expect(isChecklist(await contextOf($))).toBe(true)
+  expect((await $.command.run({ command: 'spick', args: 'off', ...RUN })).text).toBe('spick: routing off')
+  expect(held.get('spick:routing2')).toBe('off')
+  expect(held.get('spick:routing')).toBe('on')
+  expect(written).not.toContain('spick:routing')
+  // the new key wins from then on
+  await $.session.start(START)
+  expect(await contextOf($)).toEqual([OFF])
 })
 
 test('a prompt that already carries context and attachments keeps them, with one block appended', async ($, on) => {
@@ -419,13 +486,14 @@ test('the session model unreadable: the block is still attached, from the cached
   expect(world.submits).toHaveLength(1)
 })
 
-test('a /model that changed nothing, then /spick on: the next prompt raises no toast and routing stays on', async ($, on) => {
+test('a /model that changed nothing, then /spick force: the next prompt raises no toast and routing stays on', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   const world = session(on)
   await $.session.start(START)
   await $.command.run({ command: 'model', args: '', ...RUN })
-  expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on')
+  // force, so the later change of model below cannot take routing off on its own
+  expect((await $.command.run({ command: 'spick', args: 'force', ...RUN })).text).toBe('spick: routing force')
   world.model = 'claude-opus-5-5' // a later change the pending comparison must not claim
   expect(isChecklist(await contextOf($))).toBe(true)
   expect(world.toasts).toEqual([])
@@ -481,7 +549,7 @@ test('session.start reads the two stored choices and ignores an old spick:lanes'
   expect(block).not.toContain('lane is off')
 })
 
-test('/model by the user turns routing off for the session with one toast; /spick auto restores', async ($, on) => {
+test('/model by the user turns routing off for the session with one toast; /spick on restores', async ($, on) => {
   mock.clock(on)
   mock.store(on)
   const world = session(on)
@@ -489,14 +557,14 @@ test('/model by the user turns routing off for the session with one toast; /spic
   expect(isChecklist(await contextOf($))).toBe(true)
 
   expect((await $.command.run({ command: 'model', args: 'opus', ...RUN })).text).toBe('model set')
-  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on to resume'])
+  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on or /spick force to resume'])
   expect(await contextOf($)).toEqual([OFF])
   // a second pick: still off, no second toast
   await $.command.run({ command: 'model', args: 'fable', ...RUN })
   expect(world.toasts).toHaveLength(1)
 
   await $.command.run({ command: 'model', args: 'haiku', ...RUN })
-  expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing auto · on (Haiku 5.5 session)')
+  expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on · routes (Haiku 5.5 session)')
   expect(isChecklist(await contextOf($))).toBe(true)
 })
 
@@ -522,7 +590,7 @@ test('a bare /model whose picker is answered later is caught at the next prompt'
   expect(world.toasts).toEqual([])
   world.model = 'claude-opus-5-5' // the picker answered after the command returned
   expect(await contextOf($)).toEqual([OFF])
-  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on to resume'])
+  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on or /spick force to resume'])
 })
 
 test('a /model issued by a plugin or the SDK leaves routing alone', async ($, on) => {
@@ -545,7 +613,7 @@ test('a model change through settings by the user turns routing off; the same va
   expect(world.toasts).toEqual([])
   expect(isChecklist(await contextOf($))).toBe(true)
   await set('opus', 'haiku')
-  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on to resume'])
+  expect(world.toasts).toEqual(['spick: routing off (model selected manually) · /spick on or /spick force to resume'])
   expect(await contextOf($)).toEqual([OFF])
 })
 
@@ -585,11 +653,11 @@ test('every /spick answer is one line starting with spick:', async ($, on) => {
   session(on)
   await $.session.start(START)
   const answer = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text ?? ''
-  expect(await answer('details')).toBe('spick: usage /spick [on|off|auto|review on|off|lane <id> [<field> <value>]|hide|show|quota]')
+  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|lane <id> [<field> <value>]|hide|show|quota]')
   expect(await answer('lane glm')).toBe('spick: unknown lane id glm')
   expect(await answer('hide')).toBe('spick: band hidden · /spick show restores it')
   expect(await answer('show')).toBe('spick: band shown')
-  for (const args of ['on', 'off', 'auto', 'review on', 'review off', 'lane grok on', 'lane codex off', 'lane claude off', 'lane grok', 'lane openrouter notes Two words', 'lane grok tags', 'hide', 'show', 'quota', 'what']) {
+  for (const args of ['on', 'force', 'off', 'auto', 'review on', 'review off', 'lane grok on', 'lane codex off', 'lane claude off', 'lane grok', 'lane openrouter notes Two words', 'lane grok tags', 'hide', 'show', 'quota', 'what']) {
     const text = await answer(args)
     expect(text.startsWith('spick: ')).toBe(true)
     expect(text).not.toContain('\n')
@@ -610,7 +678,7 @@ test('/spick with no UI surface prints a one-paragraph status', async ($, on) =>
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
   const text = (await $.command.run({ command: 'spick', args: '', ...RUN })).text ?? ''
-  expect(text).toBe('spick: routing auto, on (Haiku 5.5 session); review auto; lanes: Gemini on, Grok on, Codex off, openrouter on; band shown; quota unknown (no local data for claude or codex).')
+  expect(text).toBe('spick: routing on, routes (Haiku 5.5 session); review auto; lanes: Gemini on, Grok on, Codex off, openrouter on; band shown; quota unknown (no local data for claude or codex).')
   expect(text).not.toContain('\n')
 })
 

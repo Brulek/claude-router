@@ -160,9 +160,11 @@ const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'wording', 'model']
 /**
  * The band for a view at a width. Tiers pick the candidate segments; then the band is
  * fitted by measured width: a right group that is not an attention cause goes first,
- * then left segments in DROP_ORDER, until it fits. A cause is kept even when nothing else fits.
+ * then left segments in DROP_ORDER, until it fits. A cause is kept even when nothing else fits. `reserved` columns are
+ * taken by something drawn beside the segments (the routing switch): the tiers go by the band's width, the fit by what
+ * is left of it.
  */
-export function bandSegments(v: BandView, columns: number): Band {
+export function bandSegments(v: BandView, columns: number, reserved = 0): Band {
   const wordmark: Seg[] = v.routingOff ? [{ text: 'SPICK', style: 'brand' }, { text: ' off', style: 'warning' }] : [{ text: 'SPICK', style: 'brand' }]
   const isMain = v.lane === MAIN_LANE
   const many = !isMain && !v.isIdle && (v.count ?? 1) > 1
@@ -208,7 +210,7 @@ export function bandSegments(v: BandView, columns: number): Band {
   if (columns >= 40 && v.note) right = noteParts(v.note)
   else if (columns >= 90 && !v.isIdle) right = !isMain && v.mainModel ? [{ text: `main: ${v.mainModel}`, style: 'dim' }] : [{ text: HINT, style: 'dim' }]
 
-  const fits = (left: Seg[]) => segsWidth(left) + (right.length > 0 ? GROUP_GAP + segsWidth(right) : 0) <= columns
+  const fits = (left: Seg[]) => segsWidth(left) + (right.length > 0 ? GROUP_GAP + segsWidth(right) : 0) <= columns - reserved
   let left = buildLeft()
   if (!fits(left) && !v.note) right = []
   for (const k of DROP_ORDER) {
