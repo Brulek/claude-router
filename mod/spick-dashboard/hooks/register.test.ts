@@ -571,7 +571,7 @@ test('lanes in the cache switch line 2 to the capability wording and add the Lan
   mock.store(on)
   mock.env(on, { HOME: '/h' })
   session(on)
-  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[{"id":"glm","kind":"api-key","tags":["cheap"],"prefer":[],"data":"text"}]}'
+  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[{"id":"glm","kind":"api-key","tags":["cheap"],"data":"text"}]}'
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const lines = ((await contextOf($))[0] ?? '').split('\n')

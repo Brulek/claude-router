@@ -18,7 +18,7 @@ export const laneOffNote = (lane: LaneKey, registry = false): string =>
   registry ? `${lane} lane is off for this session`
     : `${laneName(lane)} lane is off: use the fallback chain.${lane === 'grok' ? ' X data has no fallback: say so.' : ''}`
 /** checklist line 2 when the user declared lane_registry: same words as scripts/triage-hook.sh */
-export const REGISTRY_LANE_LINE = "2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line, preferring lanes whose prefer: list has that tag; never send anything above a lane's data: level. Pick an effort for every delegate."
+export const REGISTRY_LANE_LINE = "2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line by its tags; never send anything above a lane's data: level. Pick an effort for every delegate."
 export const isLaneOn = (c: Controls, lane: LaneKey): boolean => c.lanes[lane] !== false
 export const NO_LABEL_LINE = 'Reply starts with the deliverable; the status band shows who worked, so print no label line.'
 

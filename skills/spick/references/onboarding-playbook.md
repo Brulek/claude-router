@@ -32,7 +32,7 @@ Never ask for the key in chat. If a key appears in chat, tell the user to revoke
 
 ## Step 4. Register
 
-Run `python3 scripts/add_lane.py --id <id> --name <display> --kind api-key|relay|local --base-url <url> --api openai-chat|anthropic-messages --model <model> [--key-name <name>] [--data public|text|code] [--tags a,b] [--prefer a,b] [--meter-preset <preset>] [--health-url <url>] [--max-tokens 400] [--notes "<text>"]`.
+Run `python3 scripts/add_lane.py --id <id> --name <display> --kind api-key|relay|local --base-url <url> --api openai-chat|anthropic-messages --model <model> [--key-name <name>] [--data public|text|code] [--tags a,b] [--meter-preset <preset>] [--health-url <url>] [--max-tokens 400] [--notes "<text>"]`.
 
 - `--id`: lowercase letters, digits, hyphens. `--key-name` only when it is not `spick-<id>`.
 - `--health-url` is for `--kind local` only.

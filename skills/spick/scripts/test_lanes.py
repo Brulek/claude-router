@@ -10,9 +10,9 @@ sys.path.insert(0, HERE)
 import lanes  # noqa: E402
 
 BUILTIN_LINE = ("Lanes (user-declared; data = most that may be sent): "
-                "gemini search,long-context,multimodal,image prefer:search,long-context data:code · "
-                "grok x-data prefer:x-data data:code · "
-                "codex code,review,image prefer:review,image data:code")
+                "gemini search,long-context,multimodal,image data:code · "
+                "grok x-data data:code · "
+                "codex code,review,image data:code")
 
 
 def ids(cfg):
@@ -34,7 +34,7 @@ class Merge(unittest.TestCase):
         l = {x["id"]: x for x in lanes.load_effective({"lane_registry": {"codex": {"data": "text", "tags": ["code"]}}})}
         self.assertEqual(l["codex"]["data"], "text")
         self.assertEqual(l["codex"]["tags"], ["code"])
-        self.assertEqual(l["codex"]["prefer"], ["review", "image"])
+        self.assertNotIn("prefer", l["codex"])
         self.assertEqual(l["codex"]["kind"], "cli-subscription")
 
     def test_new_ids_are_appended_in_registry_order(self):
@@ -96,11 +96,12 @@ class Line(unittest.TestCase):
     def test_builtin_line_is_exact(self):
         self.assertEqual(lanes.build_line(lanes.load_effective({"lanes": {"gemini": True, "grok": True, "codex": True}})), BUILTIN_LINE)
 
-    def test_prefer_omitted_when_empty_and_data_unset_is_stated(self):
+    def test_data_unset_is_stated_and_a_leftover_prefer_is_ignored(self):
         cfg = {"lane_registry": {"qwen-local": {"kind": "local", "tags": ["cheap"], "data": "code"},
-                                 "mine": {"kind": "local", "tags": ["cheap", "chinese"], "prefer": []}}}
+                                 "mine": {"kind": "local", "tags": ["cheap", "chinese"], "prefer": ["chinese"]}}}
         line = lanes.build_line(lanes.load_effective({**cfg, "lanes": {"gemini": False, "grok": False, "codex": False}}))
         self.assertEqual(line, "Lanes (user-declared; data = most that may be sent): qwen-local cheap data:code · mine cheap,chinese data:unset")
+        self.assertEqual(lanes.validate(cfg), [])
 
     def test_relay_and_api_key_lanes_get_the_third_party_fact_once_each(self):
         cfg = {"lanes": {"gemini": False, "grok": False, "codex": False},

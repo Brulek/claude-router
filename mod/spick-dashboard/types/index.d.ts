@@ -40,7 +40,7 @@ export type Review = 'auto' | 'off'
 /** a lane id: the built-ins 'gemini' | 'grok' | 'codex' or any id the user registered in lane_registry */
 export type LaneKey = string
 /** a declared lane as the quota cache carries it (notes, urls and key_ref are never in the cache) */
-export type LaneInfo = { id: string; kind?: string; tags: string[]; prefer: string[]; data?: string | null }
+export type LaneInfo = { id: string; kind?: string; tags: string[]; data?: string | null }
 export type Controls = {
   routing: Routing
   review: Review

@@ -58,7 +58,6 @@ export function lanesLine(lanes: readonly LaneInfo[]): string {
   const segs = lanes.map(l => {
     const parts = [l.id]
     if (l.tags.length > 0) parts.push(l.tags.join(','))
-    if (l.prefer.length > 0) parts.push(`prefer:${l.prefer.join(',')}`)
     parts.push(l.data ? `data:${l.data}` : 'data:unset')
     return parts.join(' ')
   })
@@ -75,7 +74,7 @@ export function lanesFromCache(text: string): LaneInfo[] | null {
   const out: LaneInfo[] = []
   for (const l of doc.lanes as Record<string, unknown>[]) {
     if (!l || typeof l.id !== 'string') continue
-    out.push({ id: l.id, kind: typeof l.kind === 'string' ? l.kind : undefined, tags: strs(l.tags), prefer: strs(l.prefer), data: typeof l.data === 'string' ? l.data : null })
+    out.push({ id: l.id, kind: typeof l.kind === 'string' ? l.kind : undefined, tags: strs(l.tags), data: typeof l.data === 'string' ? l.data : null })
   }
   return out.length > 0 ? out : null
 }

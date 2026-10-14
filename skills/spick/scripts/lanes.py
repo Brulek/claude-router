@@ -173,10 +173,9 @@ def validate(cfg):
             kr = rec["key_ref"]
             if not (isinstance(kr, str) and KEY_REF_RE.match(kr)):
                 errs.append("lane %s: key_ref must be keychain:<name> or env:<VAR>" % lid)
-        for f in ("tags", "prefer"):
-            v = m.get(f)
-            if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
-                errs.append("lane %s: %s must be a list of strings" % (lid, f))
+        v = m.get("tags")
+        if v is not None and not (isinstance(v, list) and all(isinstance(x, str) for x in v)):
+            errs.append("lane %s: tags must be a list of strings" % lid)
     return errs
 
 
@@ -187,7 +186,7 @@ def is_third_party(lane):
 def cache_view(lanes):
     """The fields the quota cache carries per lane: no notes, urls or key_ref."""
     return [{"id": l["id"], "kind": l.get("kind"), "tags": list(l.get("tags") or []),
-             "prefer": list(l.get("prefer") or []), "data": l.get("data")} for l in lanes]
+             "data": l.get("data")} for l in lanes]
 
 
 def build_line(lanes):
@@ -199,8 +198,6 @@ def build_line(lanes):
         parts = [l["id"]]
         if l.get("tags"):
             parts.append(",".join(l["tags"]))
-        if l.get("prefer"):
-            parts.append("prefer:" + ",".join(l["prefer"]))
         parts.append("data:" + l["data"] if l.get("data") else "data:unset")
         segs.append(" ".join(parts))
     segs += ["%s is a third-party service: sending content to it carries a data-leak risk." % l["id"] for l in lanes if is_third_party(l)]

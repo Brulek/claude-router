@@ -97,7 +97,6 @@ Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`.
 | `kind` | `cli-subscription`, `api-key`, `local`, `relay` or `web-only` |
 | `enabled` | false leaves the lane out entirely |
 | `tags` | what the lane is for, free words (`search`, `x-data`, `image`, `long-context`, `multimodal`, `code`, `review`, `cheap`, `chinese`, ...), printed as declared |
-| `prefer` | the tags the user wants this lane picked for first |
 | `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data:unset` and nothing is blocked |
 | `price` | free-form object; built-ins use `{"model": "subscription"}`; the plan and price from `subscriptions` are folded in |
 | `meter` | `{"type": ...}` with `none`, `builtin` (+ `collector`), `local-file`, `balance-endpoint` or `usage-endpoint`; an optional `health_url` adds one GET-status fact. See Meters below |
@@ -105,13 +104,13 @@ Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`.
 | `invoke` | how to call it; built-ins point here (`see references/providers.md`) |
 | `notes` | free text for the model; never printed in the checklist |
 
-The checklist prints one `Lanes` line (enabled lanes only: id, tags, `prefer:`, `data:`) before the `Quota` line. For `api-key` and `relay` lanes it adds one fact per lane: "<id> is a third-party service: sending content to it carries a data-leak risk." That is a reminder, not a gate. `web-only` lanes cannot be called; give the user a paste-ready prompt. The Quota line shows each lane's meter facts, for example `no meter (declared plan only)`.
+The checklist prints one `Lanes` line (enabled lanes only: id, tags, `data:`) before the `Quota` line. For `api-key` and `relay` lanes it adds one fact per lane: "<id> is a third-party service: sending content to it carries a data-leak risk." That is a reminder, not a gate. `web-only` lanes cannot be called; give the user a paste-ready prompt. The Quota line shows each lane's meter facts, for example `no meter (declared plan only)`.
 
 Example:
 
 ```json
 "lane_registry": {
-  "glm": {"kind": "api-key", "tags": ["cheap", "chinese"], "prefer": ["chinese"], "data": "text",
+  "glm": {"kind": "api-key", "tags": ["cheap", "chinese"], "data": "text",
           "key_ref": "keychain:glm-api", "meter": {"type": "none"},
           "invoke": {"api": "openai-chat", "base_url": "https://example.invalid/v1", "model": "glm-x"}},
   "qwen-local": {"kind": "local", "tags": ["cheap"], "data": "code",

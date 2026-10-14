@@ -40,12 +40,11 @@ Decide first what the task needs, then pick a lane that offers it. Go down the t
 | you cannot tell how hard it is | **`deep`** | - |
 | the user says "extremely important" or the task clearly exceeds Opus | `deep` first, then tell the user to switch the session to Fable in the model menu | - |
 
-Choosing between tagged lanes (the Lanes line lists them; its `data:` is the most a lane may be sent, `prefer:` is the user's own preference):
+Choosing between tagged lanes (the Lanes line lists them; its `data:` is the most a lane may be sent; its tags are the user's own description of what it is for):
 
 1. A lane whose declared `data:` level is below what the task would send (`public` < `text` < `code`) is excluded. A lane with `data:unset` has no declared level: it may receive whatever the user asked for. Third-party lanes (API, relay) carry a data-leak reminder on the Lanes line; it is a fact, not a refusal.
-2. Among the rest, a lane whose `prefer:` list has the task's tag comes first.
-3. Otherwise weigh the Quota facts and the lane notes yourself.
-4. A `web-only` lane is never called; give the user a paste-ready prompt instead.
+2. Among the rest, prefer a lane whose tags match the task, then weigh the Quota facts and the lane notes yourself.
+3. A `web-only` lane is never called; give the user a paste-ready prompt instead.
 
 If a call fails, or the lane is over quota (Step 4), choose again from the lanes that remain.
 

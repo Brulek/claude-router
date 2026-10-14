@@ -4,7 +4,7 @@
 Usage:
   add_lane.py --id ID --name DISPLAY --kind api-key|relay|local --base-url URL
               --api openai-chat|anthropic-messages --model MODEL
-              [--key-name NAME] [--data public|text|code] [--tags a,b] [--prefer a,b]
+              [--key-name NAME] [--data public|text|code] [--tags a,b]
               [--meter-preset PRESET] [--health-url URL] [--max-tokens 400]
               [--notes TEXT] [--dry-run]
 
@@ -49,7 +49,7 @@ def meter_for(preset):
 
 def build_record(a):
     rec = {"kind": a.kind, "name": a.name, "enabled": True,
-           "tags": split_list(a.tags), "prefer": split_list(a.prefer)}
+           "tags": split_list(a.tags)}
     if a.data:
         rec["data"] = a.data
     if a.kind != "local":
@@ -76,7 +76,6 @@ def main(argv):
     p.add_argument("--key-name")
     p.add_argument("--data", choices=lanes.DATA_LEVELS)
     p.add_argument("--tags")
-    p.add_argument("--prefer")
     p.add_argument("--meter-preset")
     p.add_argument("--health-url")
     p.add_argument("--max-tokens", type=int, default=400)

@@ -146,15 +146,15 @@ test('a quota line is appended as the last line, only while routing is on', () =
 
 // ---- declared lanes (lane_registry): the cache carries them ----
 const DECLARED = [
-  { id: 'gemini', kind: 'cli-subscription', tags: ['search'], prefer: ['search'], data: 'code' },
-  { id: 'glm', kind: 'api-key', tags: ['chinese', 'cheap'], prefer: ['chinese'], data: 'text' },
+  { id: 'gemini', kind: 'cli-subscription', tags: ['search'], data: 'code' },
+  { id: 'glm', kind: 'api-key', tags: ['chinese', 'cheap'], data: 'text' },
 ]
 
 test('with declared lanes: capability line 2, the Lanes line before the quota line, no fixed fallback wording', () => {
   const block = checklist(ctl(), HAIKU, true, 'Quota (cache 1m old): x.', DECLARED).split('\n')
   expect(block[2]).toBe(REGISTRY_LANE_LINE)
   expect(block[2]).not.toContain('Gemini (agy)')
-  expect(block.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): gemini search prefer:search data:code · glm chinese,cheap prefer:chinese data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
+  expect(block.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): gemini search data:code · glm chinese,cheap data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
   expect(block.at(-1)).toBe('Quota (cache 1m old): x.')
 })
 

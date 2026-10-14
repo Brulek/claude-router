@@ -142,19 +142,12 @@
     "multimodal",
     "image"
    ],
-   "prefer": [
-    "search",
-    "long-context"
-   ],
    "data": "code"
   },
   {
    "id": "grok",
    "kind": "cli-subscription",
    "tags": [
-    "x-data"
-   ],
-   "prefer": [
     "x-data"
    ],
    "data": "code"
@@ -167,10 +160,6 @@
     "review",
     "image"
    ],
-   "prefer": [
-    "review",
-    "image"
-   ],
    "data": "code"
   },
   {
@@ -180,9 +169,6 @@
     "chinese",
     "cheap"
    ],
-   "prefer": [
-    "chinese"
-   ],
    "data": "text"
   },
   {
@@ -191,7 +177,6 @@
    "tags": [
     "code"
    ],
-   "prefer": [],
    "data": null
   }
  ]
