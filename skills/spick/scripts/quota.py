@@ -846,9 +846,10 @@ def window_phrase(w, now):
 
 def provider_phrase(e, now):
     head = " ".join(x for x in (e["provider"], e.get("plan")) if x)
-    facts = e.get("facts") or []
+    facts = [f for f in (e.get("facts") or []) if isinstance(f, str)]
     parts = [window_phrase(w, now) for w in e.get("windows", [])]
-    if e["status"] == "unknown" and not facts:
+    # nothing to say (no window, no fact) reads as unknown, sampled or not: never a bare "name: "
+    if not facts and (e["status"] == "unknown" or not parts):
         parts.insert(0, "unknown (%s)" % e.get("reason", "no data"))
     parts += facts
     body = ", ".join(parts)

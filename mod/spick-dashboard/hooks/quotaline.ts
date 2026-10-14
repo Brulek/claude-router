@@ -32,7 +32,8 @@ function providerPhrase(e: QProvider, now: number): string {
   const age = sampled === null ? null : Math.max(0, Math.floor(now - sampled))
   const facts = Array.isArray(e.facts) ? e.facts.filter(f => typeof f === 'string') : []
   const parts = (e.windows ?? []).map(w => windowPhrase(w, now))
-  if (age === null && facts.length === 0) parts.unshift(`unknown (${e.reason ?? 'no data'})`)
+  // nothing to say (no window, no fact) reads as unknown, a sampling time or not: never a bare `name: `
+  if (facts.length === 0 && (age === null || parts.length === 0)) parts.unshift(`unknown (${e.reason ?? 'no data'})`)
   parts.push(...facts)
   let body = parts.join(', ')
   if (age !== null && age >= FRESH_S) body += ` [stale, ${fmtAge(age)} old]`

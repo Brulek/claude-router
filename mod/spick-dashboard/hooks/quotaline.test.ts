@@ -36,6 +36,22 @@ test('facts replace the unknown prefix; a provider without facts keeps it', () =
   expect(line).toContain('grok: unknown (login needed)')
 })
 
+test('registry lanes with facts and no windows print their facts: the body is never left bare', () => {
+  // a metered lane carries no windows; its facts are the whole body
+  const lane = (id: string, fact: string) => `{"provider":"${id}","plan":null,"sampled_at":"2026-10-13T15:29:50Z","windows":[],"facts":["${fact}"]}`
+  const doc = `{"written_at":"2026-10-13T15:30:00Z","providers":[${lane('deepseek', 'balance 12.40 CNY')},${lane('kimi', 'balance 3.00 CNY')},${lane('openrouter', 'used 3.20 of 10.00 USD')}]}`
+  const line = quotaLineFromCache(doc, NOW) ?? ''
+  expect(line).toBe('Quota (cache 4m old): deepseek: balance 12.40 CNY · kimi: balance 3.00 CNY · openrouter: used 3.20 of 10.00 USD.')
+  expect(line).not.toMatch(/: (·|\.$)/)
+})
+
+test('a sampled entry with no window and no fact reads unknown, never a bare name', () => {
+  for (const facts of ['"facts":[],', '"facts":[42],', '']) {
+    const doc = `{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"deepseek","plan":null,"sampled_at":"2026-10-13T15:29:50Z","windows":[],${facts}"status":"fresh"}]}`
+    expect(quotaLineFromCache(doc, NOW)).toBe('Quota (cache 4m old): deepseek: unknown (no data).')
+  }
+})
+
 test('facts only: ages, a reset that passed, an unknown with its reason', () => {
   const line = quotaLineFromCache(SAMPLE, NOW) ?? ''
   expect(line).toContain('claude Max 20x: 5h reset passed, 7d 9% (resets in 6d) [stale, 6h old]')

@@ -236,6 +236,25 @@ class Line(unittest.TestCase):
         self.assertIn("glm: no meter (declared plan only)", line)
         self.assertIn("grok: unknown (login needed)", line)
 
+    def test_registry_lanes_with_facts_and_no_windows_print_their_facts(self):
+        """A metered lane carries no windows: its facts are the whole body. Sampled fresh, nothing else to add."""
+        doc = {"written_at": "2026-10-13T15:30:00Z", "providers": [
+            {"provider": "deepseek", "plan": None, "sampled_at": "2026-10-13T15:29:50Z", "windows": [], "facts": ["balance 12.40 CNY"]},
+            {"provider": "kimi", "plan": None, "sampled_at": "2026-10-13T15:29:50Z", "windows": [], "facts": ["balance 3.00 CNY"]},
+            {"provider": "openrouter", "plan": None, "sampled_at": "2026-10-13T15:29:55Z", "windows": [], "facts": ["used 3.20 of 10.00 USD"]}]}
+        line = quota.build_line(doc, quota.parse_iso("2026-10-13T15:34:00Z"))
+        self.assertEqual(line, "Quota (cache 4m old): deepseek: balance 12.40 CNY · kimi: balance 3.00 CNY · openrouter: used 3.20 of 10.00 USD.")
+        self.assertNotRegex(line, r": (·|\.$)")
+
+    def test_a_sampled_entry_with_no_window_and_no_fact_reads_unknown_never_a_bare_name(self):
+        for facts in ([], [42], None):
+            e = {"provider": "deepseek", "plan": None, "sampled_at": "2026-10-13T15:29:50Z", "windows": []}
+            if facts is not None:
+                e["facts"] = facts
+            doc = {"written_at": "2026-10-13T15:30:00Z", "providers": [e]}
+            line = quota.build_line(doc, quota.parse_iso("2026-10-13T15:34:00Z"))
+            self.assertEqual(line, "Quota (cache 4m old): deepseek: unknown (no data).", facts)
+
     def test_collect_all_without_registry_adds_no_new_keys(self):
         doc = quota.collect_all({})
         self.assertEqual(sorted(doc), ["providers", "written_at"])

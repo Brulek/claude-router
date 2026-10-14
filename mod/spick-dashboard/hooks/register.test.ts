@@ -631,6 +631,20 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   expect(without[0]).not.toContain('Quota')
 })
 
+test('registry lanes with facts and no windows reach the checklist with their facts; one with neither reads unknown', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  const lane = (id: string, facts: string) => `{"provider":"${id}","plan":null,"sampled_at":"2026-10-13T15:29:50Z","windows":[],"facts":${facts}}`
+  const cache = `{"written_at":"2026-10-13T15:30:00Z","providers":[${lane('deepseek', '["balance 12.40 CNY"]')},${lane('kimi', '["balance 3.00 CNY"]')},${lane('openrouter', '["used 3.20 of 10.00 USD"]')},${lane('proxy', '[]')}]}`
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
+  await $.session.start(START)
+  const last = ((await contextOf($))[0] ?? '').split('\n').at(-1) ?? ''
+  expect(last).toBe('Quota (cache 4m old): deepseek: balance 12.40 CNY · kimi: balance 3.00 CNY · openrouter: used 3.20 of 10.00 USD · proxy: unknown (no data).')
+  expect(last).not.toMatch(/: (·|\.$)/)
+})
+
 test('lanes in the cache switch line 2 to the capability wording and add the Lanes line; a lane switched off is simply gone from the cache', async ($, on) => {
   mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
   mock.store(on)
