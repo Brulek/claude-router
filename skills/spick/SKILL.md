@@ -24,6 +24,8 @@ Read the config (`cat ~/.claude/spick.json`) at the start of a session. It tells
 
 Decide first what the task needs, then pick a lane that offers it. Go down the table top to bottom; the first matching row wins. Built-in defaults are named as "default …"; they apply when the Lanes line is absent (no `lane_registry`) or names no other lane with that tag.
 
+**You do not design.** A change that needs a decision the user did not make - a layout, an API, an algorithm, a data shape, which file to change - goes to `planner` first, however small the change; `coder` then executes the plan. Deciding it yourself and briefing `coder` with the result is the mis-route this skill exists to prevent: the design would be made by the smallest model and executed by a larger one.
+
 | The task needs | Lane | If no lane offers it |
 |---|---|---|
 | search: live web, fact check, "what is the latest…", prices, versions | tag `search` (default Gemini `agy`) | `deep` with WebSearch |
@@ -33,7 +35,8 @@ Decide first what the task needs, then pick a lane that offers it. Go down the t
 | long-context / multimodal: long video or audio, a document far beyond ~200 pages | tag `long-context` or `multimodal` (default Gemini) | `deep` (documents only) |
 | cheap / chinese: a draft where cost or Chinese output matters | a lane tagged `cheap` or `chinese`, if the user declared one | you, or `coder` / `deep` by difficulty |
 | chores: Q&A, find/read files, summarise, tidy, run an existing script, send an email with an existing tool | **You (Haiku)** | - |
-| code: write, change, debug, refactor or test code (except a one-line or config-only change) | **`coder`** (Sonnet); a lane tagged `code` (default Codex `exec` with workspace-write) is a second implementer | `coder` |
+| decision: a change that needs a layout, API, algorithm, data shape or file choice the user did not make | **`planner`** (Opus) first, then **`coder`** with the plan | `deep`, then `coder` |
+| code: write, change, debug, refactor or test code where what to change and where is already decided (except a one-line or config-only change) | **`coder`** (Sonnet); a lane tagged `code` (default Codex `exec` with workspace-write) is a second implementer | `coder` |
 | review: independent review of a diff | tag `review` (default Codex; see Step 3) | `deep` |
 | plan: plan, design, break a multi-step task down, "how should we do X" | **`planner`** (Opus) | `deep` |
 | reasoning: hard reasoning, important decisions, risky operations, complex debugging, formal long-form writing | **`deep`** (Opus) | - |
@@ -70,7 +73,7 @@ Two session modes change *how* work proceeds, and they are not symmetric for you
 4. Something new is being built (a project or subsystem), not an existing thing changed.
 5. The user says 方案 / 规划 / 怎么做 / 设计, or "how should we".
 
-Do not enter it for one-file fixes, chores, questions or pure writing.
+Do not enter it for one-file fixes, chores, questions or pure writing. Plan mode is the approval gate, not the design step: a one-file fix that still needs a decision goes to `planner` without plan mode (Step 1).
 Headless sessions (`claude -p`) have no `EnterPlanMode` tool. If the tool is absent, write the plan inline, state the assumptions you would have asked about, and stop before editing unless the user already said to proceed.
  Inside plan mode keep the tiering: dispatch `planner` (Opus) for the plan, write it to the plan file yourself, then `ExitPlanMode`. After approval, execute with `coder` step by step.
 
@@ -146,6 +149,8 @@ Done when: <acceptance criteria you will check>
 Report: <what to return: files changed, test output, sources, uncertainties>
 Output: only the deliverable. No preamble, no note about how it was made, no label line.
 ```
+
+Brief hygiene: a brief states the goal and the checks, never a design of your own. After `planner` has run, the `coder` brief holds the goal, the planner's output (pasted under Inputs), the file list copied from the plan and the acceptance checks - nothing the plan did not say. If you find yourself writing "use X then Y" in a brief, you are designing: stop and dispatch `planner`.
 
 A rule that is not in the brief will not be followed, so copy the user's numbers and wording into "Hard constraints" word for word. For `agy` add "use your built-in search only; do not open specific URLs" (headless `read_url` is auto-denied). For `codex exec` always end the command with `< /dev/null` and add `--skip-git-repo-check` outside a repo. Full spells, flags and model names are in `references/providers.md`; read it before the first external call of a session.
 
