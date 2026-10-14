@@ -224,6 +224,7 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 - `references/onboarding-playbook.md` - the steps for adding an outside AI (ask, look up, key, register, test, report).
 - `references/providers-catalog.md` - checked `base_url`, key name and meter preset per API service. Read it before writing a registry entry.
 - `scripts/add_lane.py` - registers one lane in `spick.json` (backup, validation, `--dry-run`).
+- `scripts/set_lane.py` - changes one field of one lane (`--list` shows tags, data, enabled, notes; `--field enabled --value yes|no` is the one on/off switch; backup, validation, `--dry-run`). The user may change any field; never hand-edit `spick.json`.
 - `scripts/invoke.py` - calls a registered lane (`--list-models`).
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection and install.

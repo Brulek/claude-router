@@ -89,13 +89,13 @@ Pitfalls (all hit in practice):
 
 ## Lane registry
 
-Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`. The user may override any field of them, and add lanes of their own, under `lane_registry` in `~/.claude/spick.json`, keyed by lane id (lowercase letters, digits, hyphens). The `lanes` booleans still switch built-ins on and off. If `lane_registry` is absent, nothing below applies and all output stays as before. `python3 scripts/lanes.py --validate` checks the file; secret-looking values are reported by field name, never echoed.
+Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`. The user may override any field of them, and add lanes of their own, under `lane_registry` in `~/.claude/spick.json`, keyed by lane id (lowercase letters, digits, hyphens). The one on/off switch is `lane_registry.<id>.enabled`; the older `lanes` booleans are still read for built-ins, and `enabled` wins when both exist. `scripts/set_lane.py` edits any field of any lane (and creates `lane_registry` on the first edit). If `lane_registry` is absent, nothing below applies and all output stays as before. `python3 scripts/lanes.py --validate` checks the file; secret-looking values are reported by field name, never echoed.
 
 | Field | Meaning |
 |---|---|
 | `name` | display name |
 | `kind` | `cli-subscription`, `api-key`, `local`, `relay` or `web-only` |
-| `enabled` | false leaves the lane out entirely |
+| `enabled` | the one on/off switch; false leaves the lane out entirely (the bash hook and the mod both read it through the effective lanes) |
 | `tags` | what the lane is for, free words (`search`, `x-data`, `image`, `long-context`, `multimodal`, `code`, `review`, `cheap`, `chinese`, ...), printed as declared |
 | `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data:unset` and nothing is blocked |
 | `price` | free-form object; built-ins use `{"model": "subscription"}`; the plan and price from `subscriptions` are folded in |
