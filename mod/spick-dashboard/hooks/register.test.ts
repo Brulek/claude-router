@@ -653,11 +653,11 @@ test('every /spick answer is one line starting with spick:', async ($, on) => {
   session(on)
   await $.session.start(START)
   const answer = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text ?? ''
-  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|lane <id> [<field> <value>]|hide|show|quota]')
+  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota]')
   expect(await answer('lane glm')).toBe('spick: unknown lane id glm')
   expect(await answer('hide')).toBe('spick: band hidden · /spick show restores it')
   expect(await answer('show')).toBe('spick: band shown')
-  for (const args of ['on', 'force', 'off', 'auto', 'review on', 'review off', 'lane grok on', 'lane codex off', 'lane claude off', 'lane grok', 'lane openrouter notes Two words', 'lane grok tags', 'hide', 'show', 'quota', 'what']) {
+  for (const args of ['on', 'force', 'off', 'auto', 'review on', 'review off', 'gate off', 'gate on', 'guard off', 'guard on', 'lane grok on', 'lane codex off', 'lane claude off', 'lane grok', 'lane openrouter notes Two words', 'lane grok tags', 'hide', 'show', 'quota', 'what']) {
     const text = await answer(args)
     expect(text.startsWith('spick: ')).toBe(true)
     expect(text).not.toContain('\n')
@@ -678,7 +678,7 @@ test('/spick with no UI surface prints a one-paragraph status', async ($, on) =>
   await $.session.start({ cwd: '/repo', surface: null, isInteractive: false })
   await $.command.run({ command: 'spick', args: 'lane codex off', ...RUN })
   const text = (await $.command.run({ command: 'spick', args: '', ...RUN })).text ?? ''
-  expect(text).toBe('spick: routing on, routes (Haiku 5.5 session); review auto; gate on; lanes: Gemini on, Grok on, Codex off, openrouter on; band shown; quota unknown (no local data for claude or codex).')
+  expect(text).toBe('spick: routing on, routes (Haiku 5.5 session); review auto; gate on; guard on; lanes: Gemini on, Grok on, Codex off, openrouter on; band shown; quota unknown (no local data for claude or codex).')
   expect(text).not.toContain('\n')
 })
 
@@ -923,5 +923,198 @@ test('gate off persists to the store and comes back at the next session.start', 
   await $.turn.start({ text: VERDICT, turnId: 't1' })
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'diff a b' })
   expect((await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })).block).toBeUndefined()
+  await $.turn.complete({ turnId: 't1', ...DONE })
+})
+
+// --- the guard: an edit cap per turn for the main session, a check before the turn ends -----------------------------
+const edit = (id: string, file_path: string, agentId?: string) =>
+  ({ tool: 'Edit' as const, tool_use_id: id, file_path, old_string: 'a', new_string: 'b', ...(agentId ? { agentId } : {}) })
+const write = (id: string, file_path: string) => ({ tool: 'Write' as const, tool_use_id: id, file_path, content: 'x' })
+const notebook = (id: string, notebook_path: string) => ({ tool: 'NotebookEdit' as const, tool_use_id: id, notebook_path, new_source: 'x' })
+const bash = (id: string, command: string, agentId?: string) => ({ tool: 'Bash' as const, tool_use_id: id, command, ...(agentId ? { agentId } : {}) })
+const CHECKED = 'Done; the tests pass.'
+
+/** a session for the guard's tests: the model given, every tool call answered, the edits that reached the tool recorded */
+async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claude-haiku-5-5') {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const world = session(on, model)
+  const ran: string[] = []
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async ($, e) => {
+    const p = (e as { file_path?: string; notebook_path?: string }).file_path ?? (e as { notebook_path?: string }).notebook_path
+    if (p) ran.push(p)
+    return { result: {} as never }
+  })
+  await $.session.start(START)
+  const turn = async (id: string, text = 'tidy the module') => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
+  const stop = async (msg = CHECKED) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
+  const run = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text
+  return { world, ran, turn, stop, run }
+}
+
+test('the guard refuses the main session\'s fourth distinct source file in a turn, naming the three, with a toast and an edit cap note', { plugins: [probePlugin] }, async ($, on) => {
+  const { world, ran, turn } = await guardWorld($, on)
+  await turn('t1')
+  for (const [i, f] of ['/repo/a.py', '/repo/b.ts', '/repo/c.go'].entries()) expect((await $.tool.call(edit(`e${i}`, f))).deny).toBeUndefined()
+  const r = await $.tool.call(edit('e4', '/repo/d.rs'))
+  expect(r.deny).toContain('spick guard')
+  for (const f of ['/repo/a.py', '/repo/b.ts', '/repo/c.go']) expect(r.deny).toContain(f)
+  expect(r.deny).toContain('Agent(coder)')
+  // the refused edit never reached the tool; a Write and a NotebookEdit to a new file are refused alike
+  expect(ran).toEqual(['/repo/a.py', '/repo/b.ts', '/repo/c.go'])
+  expect((await $.tool.call(write('w5', '/repo/e.swift'))).deny).toContain('spick guard')
+  expect((await $.tool.call(notebook('n6', '/repo/f.ipynb'))).deny).toContain('spick guard')
+  expect(world.toasts.filter(t => t.startsWith('spick: guard — edit cap')).length).toBe(3)
+  expect((await probe($)).current?.note).toEqual({ kind: 'error', text: 'edit cap' })
+  // the cap is per turn: the next turn starts again
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  await turn('t2')
+  expect((await $.tool.call(edit('e7', '/repo/d.rs'))).deny).toBeUndefined()
+})
+
+test('the guard lets through a file already edited, a subagent\'s edits, and paths that are not source', async ($, on) => {
+  const { ran, turn } = await guardWorld($, on)
+  await turn('t1')
+  for (const [i, f] of ['/repo/a.py', '/repo/b.py', '/repo/c.py'].entries()) await $.tool.call(edit(`e${i}`, f))
+  // the same file a fourth, fifth time: still one of the three
+  expect((await $.tool.call(edit('e4', '/repo/a.py'))).deny).toBeUndefined()
+  expect((await $.tool.call(write('w5', '/repo/b.py'))).deny).toBeUndefined()
+  // a subagent's edits never count against the main session's cap
+  for (const f of ['/repo/d.py', '/repo/e.py', '/repo/f.py', '/repo/g.py']) expect((await $.tool.call(edit(`s-${f}`, f, 'a1'))).deny).toBeUndefined()
+  // notes, data and .claude/ are not source
+  for (const f of ['/repo/README.md', '/repo/data.json', '/repo/notes.txt', '/repo/.claude/settings.local.py']) expect((await $.tool.call(edit(`n-${f}`, f))).deny).toBeUndefined()
+  expect(ran).toHaveLength(13)
+})
+
+test('the guard lets every edit through when it is off, when routing is off, and in a session that is not Haiku', async ($, on) => {
+  const { world, turn, run } = await guardWorld($, on)
+  const four = async (t: string) => {
+    await turn(t)
+    const out: (string | undefined)[] = []
+    for (const f of ['a.py', 'b.py', 'c.py', 'd.py']) out.push((await $.tool.call(edit(`${t}-${f}`, `/repo/${f}`))).deny)
+    await $.turn.complete({ turnId: t, ...DONE })
+    return out.filter(Boolean).length
+  }
+  expect(await run('guard off')).toBe('spick: guard off')
+  expect(await four('t1')).toBe(0)
+  expect(await run('guard on')).toBe('spick: guard on')
+  expect(await four('t2')).toBe(1)
+  expect(await run('off')).toBe('spick: routing off')
+  expect(await four('t3')).toBe(0)
+  await run('on')
+  // routing on in an Opus session routes nothing, so the guard stays out of the way
+  world.model = 'claude-opus-5-5'
+  expect(await four('t4')).toBe(0)
+  // forced routing on Opus: the guard applies
+  await run('force')
+  expect(await four('t5')).toBe(1)
+})
+
+test('a turn that edited source and ran no check is sent back once at stop, with a toast; the next stop passes', async ($, on) => {
+  const { world, turn, stop } = await guardWorld($, on)
+  await turn('t1')
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  const block = await stop()
+  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py) and no check ran')
+  expect(block).toContain('`Unchecked:`')
+  expect(block).toContain('`/goal <check command>; stop after 10 attempts`')
+  expect(world.toasts).toContain('spick: guard — source edited and no check ran; sent back once')
+  expect((await $.classic.Stop({ stop_hook_active: true, last_assistant_message: CHECKED })).block).toBeUndefined()
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  expect(world.toasts.filter(t => t.startsWith('spick: guard — source')).length).toBe(1)
+})
+
+test('the check before the turn ends passes after a check command, on an Unchecked: line, with no source edited, and when the guard or routing is off', async ($, on) => {
+  const { turn, stop, run } = await guardWorld($, on)
+  // a check ran in the main loop
+  await turn('t1')
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  await $.tool.call(bash('b1', 'cd skills/spick/scripts && python3 -m unittest -q'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // a check a subagent ran counts too
+  await turn('t2')
+  await $.tool.call(edit('e2', '/repo/a.py'))
+  await $.tool.call(bash('b2', 'npm test', 'a1'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  // an Unchecked: line says why there is none (the Chinese form too)
+  await turn('t3')
+  await $.tool.call(edit('e3', '/repo/a.py'))
+  expect(await stop('Done.\nUnchecked: this repo has no tests.')).toBeUndefined()
+  expect(await stop('改好了。\n未验证：本项目没有测试。')).toBeUndefined()
+  await $.turn.complete({ turnId: 't3', ...DONE })
+  // only notes edited, and a command that is not a check: nothing to check
+  await turn('t4')
+  await $.tool.call(edit('e4', '/repo/README.md'))
+  await $.tool.call(bash('b4', 'ls -la'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't4', ...DONE })
+  // guard off, routing off: silent
+  await run('guard off')
+  await turn('t5')
+  await $.tool.call(edit('e5', '/repo/a.py'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't5', ...DONE })
+  await run('guard on')
+  await run('off')
+  await turn('t6')
+  await $.tool.call(edit('e6', '/repo/a.py'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't6', ...DONE })
+  // and a check from an earlier turn does not carry over
+  await run('on')
+  await turn('t7')
+  await $.tool.call(edit('e7', '/repo/a.py'))
+  expect(await stop()).toContain('spick guard')
+})
+
+test('a coder that edited source and ran no check still sends the turn back, though something was delegated', async ($, on) => {
+  const { world, turn, stop } = await guardWorld($, on)
+  await turn('t1', 'rename the helper in a.py')
+  await $.tool.call({ ...agentCall('ag1', 'coder'), model: 'sonnet', effort: 'high' })
+  await $.tool.call(edit('e1', '/repo/a.py', 'a1'))
+  await $.tool.call(edit('e2', '/repo/b.py', 'a1'))
+  const block = await stop()
+  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py, /repo/b.py)')
+  // the hint gate stayed out of it (something was delegated); the guard's check did not
+  expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(0)
+  expect(world.toasts.filter(t => t.startsWith('spick: guard')).length).toBe(1)
+})
+
+test('the gate and the guard\'s check send a turn back once between them', async ($, on) => {
+  const { world, turn, stop } = await guardWorld($, on)
+  await turn('t1', VERDICT)
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  expect(await stop(LONG_REPLY)).toContain('spick gate')
+  // the second stop of the turn: neither sends it back again
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  expect(world.toasts.filter(t => t.startsWith('spick: guard')).length).toBe(0)
+})
+
+test('guard off persists to the store and comes back at the next session.start', async ($, on) => {
+  mock.clock(on)
+  const held = new Map<string, unknown>()
+  on('store.get', async (_$, e) => ({ value: held.get(e.key) }))
+  on('store.set', async (_$, e) => { held.set(e.key, e.value); return { value: undefined } })
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async () => ({ result: {} as never }))
+  await $.session.start(START)
+  expect((await $.command.run({ command: 'spick', args: 'guard off', ...RUN })).text).toBe('spick: guard off')
+  expect(held.get('spick:guard')).toBe('off')
+  await $.session.start(START)
+  await $.prompt.submit(PROMPT)
+  await $.turn.start({ text: PROMPT.text, turnId: 't1' })
+  for (const f of ['a.py', 'b.py', 'c.py', 'd.py']) expect((await $.tool.call(edit(f, `/repo/${f}`))).deny).toBeUndefined()
+  expect((await $.classic.Stop({ ...GATE_STOP, last_assistant_message: CHECKED })).block).toBeUndefined()
   await $.turn.complete({ turnId: 't1', ...DONE })
 })

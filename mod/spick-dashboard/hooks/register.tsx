@@ -1,9 +1,10 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
-import type { Controls, Gate, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
-import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
+import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
 import { HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
+import { EDIT_CAP, UNCHECKED_RE, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 import { findHints, gateReason, lineOf } from './hint'
 import type { Hint } from './hint'
 import { readQuota } from './quota'
@@ -63,24 +64,26 @@ async function lanesNow($: EngineInterface): Promise<LaneInfo[] | null> {
   } catch { return null }
 }
 
-/** The three remembered choices: routing, review and the gate. The lanes' on/off is not remembered here: it lives in spick.json. */
+/** The four remembered choices: routing, review, the gate and the guard. The lanes' on/off is not remembered here: it lives in spick.json. */
 async function loadControls($: EngineInterface): Promise<void> {
   // routing under its new names (on, force, off) in spick:routing2; a value stored before the rename is migrated
   const stored = await $.store.get(ROUTING_KEY)
   const routing = stored === undefined || stored === null ? migrateRouting(await $.store.get('spick:routing')) : parseRouting(stored)
   const review = parseReview(await $.store.get('spick:review'))
   const gate = parseGate(await $.store.get('spick:gate'))
+  const guard = parseGuard(await $.store.get('spick:guard'))
   // a manual model pick lasts one session only
-  await update($, controls, () => ({ routing, review, gate, manualModel: false }))
+  await update($, controls, () => ({ routing, review, gate, guard, manualModel: false }))
 }
 
-/** Change the switches and write the three remembered ones back to $.store. */
+/** Change the switches and write the four remembered ones back to $.store. */
 async function setControls($: EngineInterface, change: (c: Controls) => Controls): Promise<Controls> {
   const next = await update($, controls, change)
   try {
     await $.store.set(ROUTING_KEY, next.routing)
     await $.store.set('spick:review', next.review)
     await $.store.set('spick:gate', next.gate)
+    await $.store.set('spick:guard', next.guard)
   } catch {}
   return next
 }
@@ -257,7 +260,7 @@ async function statusParagraph($: EngineInterface): Promise<string> {
   const rows = await read($, laneRows)
   const lanes = (rows ?? LANE_KEYS.map(id => ({ id, enabled: true }))).map(l => `${laneName(l.id)} ${l.enabled ? 'on' : 'off'}`).join(', ')
   const quotaText = await quotaLine($, false).catch(() => 'spick: quota not read')
-  return `spick: routing ${c.routing}, ${eff.why}; review ${c.review}; gate ${c.gate}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
+  return `spick: routing ${c.routing}, ${eff.why}; review ${c.review}; gate ${c.gate}; guard ${c.guard}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
 }
 
 async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promise<void> {
@@ -348,6 +351,31 @@ async function noteEdit($: EngineInterface, mainModel: string, agentId: string |
   } catch {}
 }
 
+/** the guard's state for the main turn: the source files the main session edited itself, those any loop edited, whether a check ran */
+type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; checkRan: boolean }
+
+/**
+ * The guard's edit cap, in front of an Edit, Write or NotebookEdit: the main session's own edit of a source file past
+ * EDIT_CAP distinct ones this turn is refused (a toast, `edit cap` on the band) while the guard is on and routing is in
+ * force. Returns the refusal, or null to let the edit through. A file already edited, a subagent's edit, and a path that
+ * is not source (notes, data, .claude/) never count against the cap; every source edit that goes through, a subagent's
+ * too, counts for the check before the turn ends.
+ */
+async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string): Promise<string | null> {
+  if (!isSourcePath(path)) return null
+  if (!agentId && !g.mainEdits.has(path) && g.mainEdits.size >= EDIT_CAP) {
+    const c = await read($, controls)
+    if (c.guard === 'on' && effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) {
+      $.ui.toast(`spick: guard — edit cap: ${EDIT_CAP} source files this turn; the next one goes to a coder`)
+      await setCurrent($, { note: { kind: 'error', text: 'edit cap' } })
+      return editCapReason([...g.mainEdits])
+    }
+  }
+  if (!agentId) g.mainEdits.add(path)
+  g.sourceEdits.add(path)
+  return null
+}
+
 // The .catch on the gating hooks: should one throw past its own try/catch or
 // overrun its budget, its call passes through. In a .catch, next is
 // replay-safe: when the hook had already called it, nothing beneath runs again.
@@ -358,6 +386,7 @@ function passThrough<E, R>($: unknown, e: E, next: (e: E) => R): R {
 const routingOptions: readonly Routing[] = ['on', 'force', 'off']
 const reviewOptions: readonly Review[] = ['auto', 'off']
 const gateOptions: readonly Gate[] = ['on', 'off']
+const guardOptions: readonly Guard[] = ['on', 'off']
 /** a reply whose one line starting with Kept: states why a hinted task stayed with the main session */
 const KEPT_RE = /(^|\n)\s*(Kept|自留)[:：]/
 /** an answer at least this long, with no tool call, counts as a verdict delivered rather than a question back */
@@ -376,7 +405,7 @@ const LANE_HOTKEYS: Record<string, string> = { gemini: 'g', grok: 'k', codex: 'c
 /** the lanes page's field help, two lines at 80 columns (the fields set_lane.py takes) */
 const LANE_HELP = ['name tags data enabled notes kind base_url api model max_tokens', 'key_ref meter_type meter_preset health_url · enabled yes|no']
 
-// Every hook here only observes: its own work sits in try/catch so a failure
+// Every hook here only observes, except the gate and the guard: its own work sits in try/catch so a failure
 // still ends in next(e), and next's own result is never swallowed.
 export const register: Register = on => {
   /** agentId -> lane name, for attributing subagent turn.complete usage */
@@ -402,8 +431,10 @@ export const register: Register = on => {
   /** the main session's own tool calls this turn (its delegates' calls are not counted) */
   let mainToolCalls = 0
   let mainTurnId = ''
-  /** the turn the gate already sent back once */
+  /** the turn the gate or the guard's check already sent back once (one send-back per turn, for both) */
   let gateAskedTurn = ''
+  /** the guard's per-turn state, cleared at turn.start */
+  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), checkRan: false }
   let mainModel = ''
   let mainEffort: string | undefined
   /** the last elapsed-time stamp written to `current` */
@@ -435,7 +466,7 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     try {
-      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, gate, lanes, band, quota', argumentHint: ARGUMENT_HINT, immediate: true })
+      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, gate, guard, lanes, band, quota', argumentHint: ARGUMENT_HINT, immediate: true })
       void refreshQuota($).catch(() => undefined)
     } catch {}
     try { await loadControls($) } catch {}
@@ -534,6 +565,9 @@ export const register: Register = on => {
       mainToolCalls = 0
       hintsOfTurn = pendingHints
       pendingHints = []
+      guardTurn.mainEdits.clear()
+      guardTurn.sourceEdits.clear()
+      guardTurn.checkRan = false
       lastTickMs = startedAt
       await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0 }))
       await sweep($, tracker)
@@ -615,6 +649,8 @@ export const register: Register = on => {
   }).catch(passThrough)
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
+    // a check run by any loop, a subagent's included, counts for the guard's check before the turn ends
+    try { if (isCheckCommand(e.command)) guardTurn.checkRan = true } catch {}
     if (e.agentId) return next(e)
     const id = e.tool_use_id
     let isCli = false
@@ -645,34 +681,56 @@ export const register: Register = on => {
     }
   }).catch(passThrough)
 
+  // The guard's edit cap sits in front of each edit tool; a failure in it lets the edit through.
   on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
+    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
+    if (deny) return { deny }
     await noteEdit($, mainModel, e.agentId, e.file_path)
     return next(e)
   }).catch(passThrough)
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
+    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
+    if (deny) return { deny }
     await noteEdit($, mainModel, e.agentId, e.file_path)
     return next(e)
   }).catch(passThrough)
+  on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {
+    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.notebook_path).catch(() => null)
+    if (deny) return { deny }
+    return next(e)
+  }).catch(passThrough)
 
-  // The gate, the one place this module intervenes: a prompt the Hint line called a verdict (or a design) that the
-  // main session answered on its own, delegating nothing, is sent back once at stop time, to dispatch deep (or
-  // planner) or to say in one line (`Kept:`) why the deliverable was a lookup after all. It fires at most once per
-  // turn, never on a short reply without tool calls (a question back), never while routing is off, and /spick gate
-  // off switches it off. The reason it returns is what Claude Code hands the model as the reason to continue.
+  // Stop time, where the gate and the guard's check intervene (with the guard's edit cap, the only places this module
+  // does). Both fire at most once per turn between them, never while routing is off, and the reason returned is what
+  // Claude Code hands the model as the reason to continue.
+  // The gate: a prompt the Hint line called a verdict (or a design) that the main session answered on its own,
+  // delegating nothing, is sent back to dispatch deep (or planner) or to say in one line (`Kept:`) why the deliverable
+  // was a lookup after all. Never on a short reply without tool calls (a question back); /spick gate off switches it off.
+  // The guard's check: a turn in which any loop (a subagent too) edited source and no loop ran a check is sent back to
+  // run one, hand the user a /goal line, or say in one line (`Unchecked:`) why there is none. A delegate does not
+  // excuse it. /spick guard off switches it off, with the edit cap.
   on('classic.Stop', async ($, e, next) => {
     const r = await next(e)
     try {
-      if (r.block || e.stop_hook_active || gateAskedTurn === mainTurnId || delegate !== null) return r
+      if (r.block || e.stop_hook_active || gateAskedTurn === mainTurnId) return r
       const c = await read($, controls)
-      if (c.gate === 'off' || !effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) return r
+      if (!effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) return r
       const answer = e.last_assistant_message ?? ''
-      if (KEPT_RE.test(answer) || (mainToolCalls === 0 && answer.length < LONG_ANSWER)) return r
-      const g = gateReason(hintsOfTurn)
-      if (!g) return r
-      gateAskedTurn = mainTurnId
-      $.ui.toast(`spick: gate — ${g.kind} kept by the triage session; sent back once`)
-      await setCurrent($, { note: { kind: 'warning', text: `gate: ${g.kind} kept` } })
-      return { ...r, block: g.text }
+      const isGated = c.gate === 'on' && delegate === null && !KEPT_RE.test(answer) && !(mainToolCalls === 0 && answer.length < LONG_ANSWER)
+      const g = isGated ? gateReason(hintsOfTurn) : null
+      if (g) {
+        gateAskedTurn = mainTurnId
+        $.ui.toast(`spick: gate — ${g.kind} kept by the triage session; sent back once`)
+        await setCurrent($, { note: { kind: 'warning', text: `gate: ${g.kind} kept` } })
+        return { ...r, block: g.text }
+      }
+      if (c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !guardTurn.checkRan && !UNCHECKED_RE.test(answer)) {
+        gateAskedTurn = mainTurnId
+        $.ui.toast('spick: guard — source edited and no check ran; sent back once')
+        await setCurrent($, { note: { kind: 'warning', text: 'guard: unchecked' } })
+        return { ...r, block: uncheckedReason([...guardTurn.sourceEdits]) }
+      }
+      return r
     } catch {
       return r
     }
@@ -756,6 +814,9 @@ export const register: Register = on => {
       case 'gate':
         await setControls($, c => ({ ...c, gate: cmd.value }))
         return { text: `spick: gate ${cmd.value}` }
+      case 'guard':
+        await setControls($, c => ({ ...c, guard: cmd.value }))
+        return { text: `spick: guard ${cmd.value}` }
       case 'lane-show':
         return { text: await laneRecordLine($, cmd.lane) }
       case 'lane-set':
@@ -1001,6 +1062,10 @@ export const register: Register = on => {
       part('Gate', [
         // a click sets that value; e presses the other one
         radio('gate', gateOptions, ctl.gate, 'e', v => { void setControls($, c => ({ ...c, gate: v as Gate })).catch(() => undefined) }),
+      ]),
+      part('Guard', [
+        // a click sets that value; d presses the other one
+        radio('guard', guardOptions, ctl.guard, 'd', v => { void setControls($, c => ({ ...c, guard: v as Guard })).catch(() => undefined) }),
       ]))
 
     // a built-in lane's switch (spick.json's lane_registry.<id>.enabled, read from set_lane.py --list; on until that has been

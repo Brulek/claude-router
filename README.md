@@ -82,7 +82,9 @@ The band is an optional status line above the prompt that shows which participan
 
 `/spick` opens the pane, which contains hotkey switches and recent turns. Haiku reads a short quota line with each prompt; the pane shows local meters for Claude and Codex.
 
-The gate is the one place the mod intervenes: when a prompt's Hint line named a verdict (or a design) and the main session answered it without delegating anything, the stop is sent back once, telling it to dispatch `deep` (or `planner`) or to state in one line starting with `Kept:` why the deliverable was a plain lookup. It never fires twice in a turn, never on a short reply without tool calls (a question back), and `/spick gate off` switches it off.
+The gate and the guard are the mod's only two interventions; everything else it shows is read only. The gate: when a prompt's Hint line named a verdict (or a design) and the main session answered it without delegating anything, the stop is sent back once, telling it to dispatch `deep` (or `planner`) or to state in one line starting with `Kept:` why the deliverable was a plain lookup. It never fires twice in a turn, never on a short reply without tool calls (a question back), and `/spick gate off` switches it off.
+
+The guard does two things while routing is in force. It caps the main session's own source edits at 3 distinct files per turn: a fourth file is refused with a message that names the three and asks for `Agent(coder)` (edits to the same files, a subagent's edits, and notes, data or `.claude/` files do not count). And when any loop, a subagent included, edited source in a turn and no loop ran a check (a test runner, a build check, a linter or a type checker), the stop is sent back once, asking it to run the project's check, hand the user a `/goal` line, or state in one line starting with `Unchecked:` why there is none. The gate and the guard together send a turn back at most once. `/spick guard off` switches the guard off, and the choice is remembered.
 
 ## Installation
 
@@ -119,13 +121,14 @@ While the band is displayed, replies omit the label line.
 | `/spick on\|force\|off` | Routing switch: `on` routes in a Haiku session only, `force` on any model |
 | `/spick review on\|off` | Codex review step |
 | `/spick gate on\|off` | The gate: a hinted verdict the main session kept is sent back once at stop time |
+| `/spick guard on\|off` | The guard: at most 3 source files edited by the main session per turn, and a turn that edited source without running a check is sent back once at stop time |
 | `/spick lane <id>` | Shows one lane's record |
 | `/spick lane <id> on\|off` | Switches a lane on or off (field `enabled`, saved in `spick.json`) |
 | `/spick lane <id> <field> <value>` | Changes any field of a lane through `set_lane.py` (tags take a comma list) |
 | `/spick hide` / `show` | Hides or shows the band for the current session |
 | `/spick quota` | Refreshes the quota line |
 
-Pane hotkeys: `r` routing, `v` review, `e` gate, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
+Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
 
 ## Requirements
 

@@ -84,7 +84,9 @@ flowchart TD
 
 `/spick` 打开面板。面板包含快捷键开关与最近几轮记录。Haiku 随每条请求读取一行简短的额度信息；面板显示 Claude 与 Codex 的本机额度条。
 
-拦截（gate）是模组唯一会出手的地方：某条请求的 `Hint` 行判为结论类（或设计类），而主会话什么都没委派就自己答了，收工时会被退回一次，要求它派 `deep`（或 `planner`），或者用一行以 `Kept:` 开头的话说明交付物其实只是查阅。一轮最多退回一次；没调工具的短回复（反问）不退；`/spick gate off` 可关闭。
+拦截（gate）与守卫（guard）是模组仅有的两处干预，其余内容只做展示。拦截：某条请求的 `Hint` 行判为结论类（或设计类），而主会话什么都没委派就自己答了，收工时会被退回一次，要求它派 `deep`（或 `planner`），或者用一行以 `Kept:` 开头的话说明交付物其实只是查阅。一轮最多退回一次；没调工具的短回复（反问）不退；`/spick gate off` 可关闭。
+
+守卫在分流生效时做两件事。一是编辑上限：主会话每轮亲自改的源码文件最多 3 个，第 4 个文件会被拒绝，拒绝信息列出已改的 3 个文件并要求派 `Agent(coder)`（同一文件反复改、子代理的编辑、笔记/数据文件与 `.claude/` 下的文件都不计数）。二是收工测试门：本轮任何循环（含子代理）改过源码、却没有任何循环跑过检查命令（测试、构建检查、lint 或类型检查），收工时退回一次，要求它跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。拦截与守卫合计一轮最多退回一次。`/spick guard off` 可关闭守卫，选择会被记住。
 
 ## 安装
 
@@ -121,13 +123,14 @@ bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex
 | `/spick on\|force\|off` | 分流开关：`on` 只在 Haiku 会话里分流，`force` 任何模型都分流 |
 | `/spick review on\|off` | Codex 审核步骤开关 |
 | `/spick gate on\|off` | 拦截开关：主会话自己答了带 Hint 的结论类任务，收工时退回一次 |
+| `/spick guard on\|off` | 守卫开关：主会话每轮最多亲自改 3 个源码文件；改了源码却没跑检查的一轮，收工时退回一次 |
 | `/spick lane <id>` | 显示单个 lane 的记录 |
 | `/spick lane <id> on\|off` | 开关某个 lane（字段 `enabled`，写入 `spick.json`） |
 | `/spick lane <id> <field> <value>` | 经 `set_lane.py` 修改 lane 的任意字段（tags 用逗号分隔） |
 | `/spick hide` / `show` | 隐藏或显示状态带，仅限本会话 |
 | `/spick quota` | 刷新额度信息 |
 
-面板快捷键：`r` 分流，`v` 审核，`e` 拦截，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
+面板快捷键：`r` 分流，`v` 审核，`e` 拦截，`d` 守卫，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
 
 ## 环境要求
 

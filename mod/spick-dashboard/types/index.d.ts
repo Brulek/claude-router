@@ -63,10 +63,16 @@ export type LaneRow = { id: string; name: string; enabled: boolean; tags: string
 export type LaneNote = { change: string; error: string }
 /** gate: `on` sends a verdict the main session kept (no delegate, a hinted prompt) back once at stop time, `off` never */
 export type Gate = 'on' | 'off'
+/**
+ * guard: `on` caps the main session's own source edits at a few distinct files per turn (the next one is refused,
+ * to go to a coder) and sends a turn that edited source without running a check back once at stop time; `off` never
+ */
+export type Guard = 'on' | 'off'
 export type Controls = {
   routing: Routing
   review: Review
   gate: Gate
+  guard: Guard
   /** the user picked a model by hand this session: routing is off until /spick on or /spick force */
   manualModel: boolean
 }
@@ -85,7 +91,7 @@ declare module 'claude-code' {
       totals: Record<string, LaneTotals>
       quota: Quota | null
       hidden: boolean
-      /** the switches; routing and review are also kept in $.store (the lanes' on/off lives in spick.json) */
+      /** the switches; routing, review, the gate and the guard are also kept in $.store (the lanes' on/off lives in spick.json) */
       controls: Controls
       /** the session model id from $.session.model(), '' until read */
       sessionModel: string

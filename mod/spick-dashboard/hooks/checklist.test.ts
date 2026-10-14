@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
-import { DEFAULT_CONTROLS, LANE_BULLET_DEEP, LANE_BULLET_YOU, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
+import { DEFAULT_CONTROLS, LANE_BULLET_DEEP, LANE_BULLET_YOU, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
 const FABLE = 'claude-fable-5-1'
@@ -235,4 +235,17 @@ test('the gate switch parses and defaults to on', () => {
   expect(parseSpick(' Gate ON ')).toEqual({ kind: 'gate', value: 'on' })
   for (const bad of ['gate', 'gate maybe', 'gate on now']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
   expect(ARGUMENT_HINT).toContain('gate on|off')
+})
+
+test('the guard switch parses and defaults to on', () => {
+  expect(DEFAULT_CONTROLS.guard).toBe('on')
+  expect(parseGuard('off')).toBe('off')
+  expect(parseGuard('on')).toBe('on')
+  expect(parseGuard(undefined)).toBe('on')
+  expect(parseGuard('bogus')).toBe('on')
+  expect(parseSpick('guard off')).toEqual({ kind: 'guard', value: 'off' })
+  expect(parseSpick(' Guard ON ')).toEqual({ kind: 'guard', value: 'on' })
+  for (const bad of ['guard', 'guard maybe', 'guard on now']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
+  expect(ARGUMENT_HINT).toContain('guard on|off')
+  expect(USAGE).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota]')
 })

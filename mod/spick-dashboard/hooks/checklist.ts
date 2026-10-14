@@ -1,8 +1,8 @@
-import type { Controls, Gate, LaneInfo, Review, Routing } from '../types'
+import type { Controls, Gate, Guard, LaneInfo, Review, Routing } from '../types'
 import { modelName } from './format'
 import { lanesLine } from './quotaline'
 
-export const DEFAULT_CONTROLS: Controls = { routing: 'on', review: 'auto', gate: 'on', manualModel: false }
+export const DEFAULT_CONTROLS: Controls = { routing: 'on', review: 'auto', gate: 'on', guard: 'on', manualModel: false }
 /** the three built-in lanes the Controls row has a button for; the rest are edited on the lanes page or with /spick lane */
 export const LANE_KEYS: readonly string[] = ['gemini', 'grok', 'codex']
 export const LANE_NAMES: Record<string, string> = { gemini: 'Gemini', grok: 'Grok', codex: 'Codex' }
@@ -113,6 +113,9 @@ export function parseReview(v: unknown): Review {
 export function parseGate(v: unknown): Gate {
   return v === 'off' || v === 'on' ? v : DEFAULT_CONTROLS.gate
 }
+export function parseGuard(v: unknown): Guard {
+  return v === 'off' || v === 'on' ? v : DEFAULT_CONTROLS.guard
+}
 /** what `/spick lane <rest>` asks for; the value keeps its case and its inner spaces */
 export type LaneCommand =
   | { kind: 'lane-show'; lane: string }
@@ -124,12 +127,13 @@ export type SpickCommand =
   | { kind: 'routing'; value: Routing }
   | { kind: 'review'; value: Review }
   | { kind: 'gate'; value: Gate }
+  | { kind: 'guard'; value: Guard }
   | LaneCommand
   | { kind: 'band'; hidden: boolean }
   | { kind: 'quota' }
   | { kind: 'usage' }
 
-export const ARGUMENT_HINT = '[on|force|off|review on|off|gate on|off|lane <id> [<field> <value>]|hide|show|quota]'
+export const ARGUMENT_HINT = '[on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota]'
 export const USAGE = `spick: usage /spick ${ARGUMENT_HINT}`
 
 /**
@@ -162,6 +166,7 @@ export function parseSpick(args: string): SpickCommand {
   if (w.length === 1 && a === 'quota') return { kind: 'quota' }
   if (w.length === 2 && a === 'review' && (b === 'on' || b === 'off')) return { kind: 'review', value: b === 'on' ? 'auto' : 'off' }
   if (w.length === 2 && a === 'gate' && (b === 'on' || b === 'off')) return { kind: 'gate', value: b }
+  if (w.length === 2 && a === 'guard' && (b === 'on' || b === 'off')) return { kind: 'guard', value: b }
   if (a === 'lane') return parseLaneText(args.trim().replace(/^lane\s*/i, '')) ?? { kind: 'usage' }
   return { kind: 'usage' }
 }
