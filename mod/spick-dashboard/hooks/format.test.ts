@@ -2,6 +2,7 @@ import { test, expect } from 'claude-code/testing'
 import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
   fmtDuration, fmtAge, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE, runningLines,
+  tagLine, wrapWords, usageLines, quotaCells, recentLines, clockOf, LABEL_W, HOTKEY_W, NARROW_BELOW,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -341,4 +342,73 @@ test('runningLines caps at five rows and counts the rest; a timed-out row says w
   expect(runningLines(rows.slice(0, 5), 200000).more).toBe(0)
   const t = runningLines([{ ...rows[0]!, timedOutAt: 5 }], 200000)
   expect(t.lines[0]).toBe('coder  Sonnet 5.5  timed out, no completion signal')
+})
+
+test('the pane layout constants: a ten-column label, `r: ` is three, narrow starts below 64', () => {
+  expect([LABEL_W, HOTKEY_W, NARROW_BELOW]).toEqual([10, 3, 64])
+})
+
+test('tagLine joins with ", " and ends with " +N" when the tags do not fit', () => {
+  const tags = ['search', 'long-context', 'multimodal', 'image']
+  expect(tagLine(tags, 52)).toBe('search, long-context, multimodal, image')
+  expect(tagLine(tags, 39)).toBe('search, long-context, multimodal, image')
+  // one short of fitting: as many tags as fit, then the count of the rest
+  expect(tagLine(tags, 38)).toBe('search, long-context, multimodal +1')
+  expect(tagLine(tags, 25)).toBe('search, long-context +2')
+  expect(tagLine(tags, 25)).toMatch(/ \+2$/)
+  expect(tagLine(tags, 10)).toBe('search +3')
+  // not even the first tag and its count fit: cut, never longer than the width
+  expect(tagLine(tags, 6).length).toBeLessThanOrEqual(6)
+  expect(tagLine([], 20)).toBe('')
+  expect(tagLine(['x-data'], 20)).toBe('x-data')
+  for (let w = 1; w < 45; w++) expect(tagLine(tags, w).length).toBeLessThanOrEqual(Math.max(w, 0))
+})
+
+test('wrapWords breaks at spaces and cuts a word that is longer than the line', () => {
+  expect(wrapWords('aa bb cc dd', 5)).toEqual(['aa bb', 'cc dd'])
+  expect(wrapWords('aa bb cc dd', 2)).toEqual(['aa', 'bb', 'cc', 'dd'])
+  expect(wrapWords('abcdefgh ij', 5)).toEqual(['abcd…', 'ij'])
+  expect(wrapWords('', 5)).toEqual([])
+})
+
+test('usageLines: column heads first with a blank first column, a total row from two lanes up, none for one', () => {
+  const t = (turns: number, costUsd: number | null) => ({ turns, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd })
+  expect(usageLines([['main session', t(52, 0.45)]])).toEqual([
+    '              turns  at API rates',
+    'main session     52         $0.45',
+  ])
+  const two = usageLines([['main session', t(52, 0.45)], ['Gemini', t(3, null)]])
+  expect(two.at(-1)).toBe('total            55         $0.45')
+  expect(two).toHaveLength(4)
+  // nothing priced: the total reads as an em dash
+  expect(usageLines([['a', t(1, null)], ['b', t(1, null)]]).at(-1)).toMatch(/—$/)
+  // every line is as long as the table, none ends in a space
+  for (const l of two) expect(l).toBe(l.trimEnd())
+})
+
+test('quotaCells: five-hour first, one space after the label, percent right-aligned, none without data', () => {
+  expect(quotaCells({ fiveHour: 19, sevenDay: 9 }, 10)).toEqual(['5h ▰▰▱▱▱▱▱▱▱▱  19%', '7d ▰▱▱▱▱▱▱▱▱▱   9%'])
+  expect(quotaCells({ sevenDay: 80 }, 10)).toEqual(['7d ▰▰▰▰▰▰▰▰▱▱  80%'])
+  expect(quotaCells({ sevenDay: 80 }, 5)).toEqual(['7d ▰▰▰▰▱  80%'])
+  expect(quotaCells(null, 10)).toEqual([])
+  expect(quotaCells({}, 10)).toEqual([])
+})
+
+test('recentLines aligns time, lane, model, effort and duration; narrow drops the effort column', () => {
+  const at = new Date(2026, 9, 14, 14, 52).getTime()
+  const rows = [
+    { turnId: 'a', startedAt: at, endedAt: at + 221_000, lane: 'coder', model: 'Sonnet 5.5', effort: 'high', agents: 0 },
+    { turnId: 'b', startedAt: at - 300_000, endedAt: at - 294_000, lane: 'main session', model: 'Haiku 5.5', effort: 'low', agents: 0 },
+  ]
+  expect(clockOf(at)).toBe('14:52')
+  expect(recentLines(rows, false)).toEqual([
+    '14:52  coder         Sonnet 5.5  high  3m 41s',
+    '14:47  main session  Haiku 5.5   low       6s',
+  ])
+  expect(recentLines(rows, true)).toEqual([
+    '14:52  coder         Sonnet 5.5  3m 41s',
+    '14:47  main session  Haiku 5.5       6s',
+  ])
+  // a turn without an effort leaves the column empty, not "undefined"
+  expect(recentLines([{ ...rows[0]!, effort: undefined }], false)[0]).not.toContain('undefined')
 })

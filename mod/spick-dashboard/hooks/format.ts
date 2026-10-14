@@ -1,4 +1,4 @@
-import type { Note, Quota, RunningAgent } from '../types'
+import type { LaneTotals, Note, Quota, QuotaWindows, RunningAgent, TurnRecord } from '../types'
 
 const CLAUDE_NAMES: Record<string, string> = {
   'claude-haiku-5-5': 'Haiku 5.5',
@@ -242,6 +242,83 @@ export function padLeft(s: string, w: number): string { return ' '.repeat(Math.m
 export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
   const widths = (rows[0] ?? []).map((_, i) => Math.max(...rows.map(r => (r[i] ?? '').length)))
   return rows.map(r => widths.map((w, i) => (align[i] === 'r' ? padLeft(r[i] ?? '', w) : padRight(r[i] ?? '', w))).join('  '))
+}
+
+// --- the /spick pane's plain-text layout ---------------------------------------------------------------------------------
+
+/** the pane's label column: a section's name (Routing, Usage ...) takes this many columns, the value column starts after it */
+export const LABEL_W = 10
+/** what the engine draws in front of a plain Button's label: its hotkey and a colon, as `r: ` */
+export const HOTKEY_W = 3
+/** below this many columns the label sits on its own line, the content is indented two, and the lists shorten */
+export const NARROW_BELOW = 64
+/** the most Recent rows on a narrow pane (the state keeps 50) */
+export const NARROW_RECENT_ROWS = 5
+
+/** local HH:MM */
+export function clockOf(ms: number): string {
+  const d = new Date(ms)
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+}
+
+/** Tags joined by ", " in `width` characters; when they do not fit, as many as do and ` +N` for the rest. */
+export function tagLine(tags: readonly string[], width: number): string {
+  const all = tags.join(', ')
+  if (all.length <= width) return all
+  for (let k = tags.length - 1; k >= 1; k--) {
+    const text = `${tags.slice(0, k).join(', ')} +${tags.length - k}`
+    if (text.length <= width) return text
+  }
+  return clip(`${tags[0] ?? ''} +${Math.max(0, tags.length - 1)}`, Math.max(0, width))
+}
+
+/** `text` broken at spaces into lines of at most `width` characters (a longer word is cut) */
+export function wrapWords(text: string, width: number): string[] {
+  const out: string[] = []
+  let line = ''
+  for (const word of text.split(' ').filter(Boolean)) {
+    const w = clip(word, width)
+    if (line === '') line = w
+    else if (line.length + 1 + w.length <= width) line += ' ' + w
+    else { out.push(line); line = w }
+  }
+  if (line !== '') out.push(line)
+  return out
+}
+
+/**
+ * The Usage section's lines: the column heads first (the first column blank, so they sit right of the
+ * lane names), then one row per lane and a total row from two lanes up. Lane names are cut to 20.
+ */
+export function usageLines(entries: readonly (readonly [string, LaneTotals])[]): string[] {
+  const totalCost = entries.reduce<number | null>((acc, [, v]) => (v.costUsd === null ? acc : (acc ?? 0) + v.costUsd), null)
+  return table([
+    ['', 'turns', 'at API rates'],
+    ...entries.map(([lane, v]) => [clip(lane, 20), String(v.turns), fmtCost(v.costUsd)]),
+    ...(entries.length > 1 ? [['total', String(entries.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)]] : []),
+  ], ['l', 'r', 'r']).map(l => l.trimEnd())
+}
+
+/** One quota row's cells, `5h ▰▰▱▱▱▱▱▱▱▱  19%`, five-hour first; none for a provider with no window data. */
+export function quotaCells(w: QuotaWindows | null | undefined, barCells: number): string[] {
+  const cells: string[] = []
+  for (const [label, pct] of [['5h', w?.fiveHour], ['7d', w?.sevenDay]] as const) {
+    if (pct === undefined) continue
+    cells.push(`${label} ${quotaBar(pct, barCells)} ${String(Math.round(pct)).padStart(3)}%`)
+  }
+  return cells
+}
+
+/** The Recent rows (time, lane, model, effort, duration), aligned; a narrow pane drops the effort column. */
+export function recentLines(turns: readonly TurnRecord[], narrow: boolean): string[] {
+  return table(
+    turns.map(r => {
+      const cells = [clockOf(r.startedAt), clip(r.lane, narrow ? 12 : 20), clip(r.model, narrow ? 12 : 16)]
+      if (!narrow) cells.push(r.effort ?? '')
+      cells.push(fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt))
+      return cells
+    }),
+    narrow ? ['l', 'l', 'l', 'r'] : ['l', 'l', 'l', 'l', 'r'])
 }
 
 /** `cells` cells of used (▰) and free (▱): ten in the pane and the wide band, five on a narrower band. */
