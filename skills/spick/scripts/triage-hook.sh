@@ -16,9 +16,24 @@ fi
 cat <<'TXT'
 [spick triage - answer all three before the first tool call]
 1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).
+TXT
+# Line 2 depends on whether the user declared a lane_registry; the other lines are the same either way.
+cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/spick.json"
+registry=0
+[ -f "$cfg" ] && grep -q '"lane_registry"' "$cfg" 2>/dev/null && registry=1
+if [ "$registry" = 1 ]; then
+cat <<'TXT'
+2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); a task an outside lane is tagged for -> pick from the Lanes line, preferring lanes whose prefer: list has that tag; never send anything above a lane's data: level. Pick an effort for every delegate.
+TXT
+else
+cat <<'TXT'
 2. Lane? chores -> you; code change beyond a one-liner -> Agent(coder), never edit source yourself; plan/design -> Agent(planner); hard/decision/formal writing -> Agent(deep); web lookup -> Gemini (agy); X data -> Grok. Pick an effort for every delegate.
+TXT
+fi
+cat <<'TXT'
 3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.
 Reply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex gpt-6-astra (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.
 TXT
+[ "$registry" = 1 ] && [ -n "$py" ] && "$py" "$here/lanes.py" --line 2>/dev/null
 [ -n "$py" ] && "$py" "$here/quota.py" --line 2>/dev/null
 exit 0

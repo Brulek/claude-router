@@ -36,6 +36,10 @@ import signal
 import subprocess
 import sys
 import time
+import urllib.error
+import urllib.request
+
+import lanes as lanes_mod
 
 FRESH_S = 30 * 60          # status word boundary: "fresh" below this age (a label, not a routing rule)
 CACHE_TTL_S = 10 * 60      # refresh in the background when the cache is older than this
@@ -43,6 +47,7 @@ LOCK_STALE_S = 5 * 60      # a lock dir older than this was left by a dead proce
 CODEX_TIMEOUT = 20
 AGY_TIMEOUT = 90
 GROK_TIMEOUT = 20
+HEALTH_TIMEOUT = 3
 PROVIDERS = ("claude", "codex", "gemini", "grok")
 
 
@@ -403,22 +408,73 @@ def read_subscriptions():
     return out
 
 
-def collect_all(subs, now=None):
+def health_fact(url):
+    """One GET, no headers, no body: the status code is the fact."""
+    if not (isinstance(url, str) and url.startswith(("http://", "https://"))):
+        return "health: url not http(s)"
+    try:
+        with urllib.request.urlopen(url, timeout=HEALTH_TIMEOUT) as r:
+            return "health: ok (HTTP %d)" % r.status
+    except urllib.error.HTTPError as ex:
+        return "health: HTTP %d" % ex.code
+    except Exception as ex:
+        return "health: unreachable (%s)" % type(ex).__name__
+
+
+def meter_entry(lane, now):
+    """Facts for a lane whose meter is not a built-in collector. Declared fields only; nothing is judged."""
+    m = lane.get("meter") if isinstance(lane.get("meter"), dict) else {}
+    t = m.get("type", "none")
+    if t == "none":
+        facts = ["no meter (declared plan only)"]
+    elif t == "builtin":
+        facts = ["no built-in collector for %s" % lane["id"]]
+    else:
+        facts = ["meter %s: no collector in this version" % t]
+    probed = isinstance(m.get("health_url"), str)
+    if probed:
+        facts.append(health_fact(m["health_url"]))
+    e = entry(lane["id"], "lane_registry", now if probed else None)
+    e["facts"] = facts
+    return e
+
+
+def collect_all(subs, now=None, registry_lanes=None):
+    """registry_lanes None: the cache as before. A list (user declared lane_registry): entries also carry
+    `facts`, custom lanes get entries, and the doc carries a `lanes` list."""
     now = time.time() if now is None else now
+    by_id = {l["id"]: l for l in registry_lanes or []}
+
+    def task(p):
+        lane = by_id.get(p)
+        if registry_lanes is not None and lane is not None and (lane.get("meter") or {}).get("type") != "builtin":
+            return meter_entry(lane, now)
+        return COLLECTORS[p](now)
+
     names = [p for p in PROVIDERS if p in subs]
+    extra = [l["id"] for l in registry_lanes or [] if l["id"] not in PROVIDERS]
     out = []
-    if names:
-        with concurrent.futures.ThreadPoolExecutor(max_workers=len(names)) as ex:
-            futs = {p: ex.submit(COLLECTORS[p], now) for p in names}
-            for p in names:
+    if names or extra:
+        with concurrent.futures.ThreadPoolExecutor(max_workers=len(names) + len(extra)) as ex:
+            futs = {p: ex.submit(task, p) for p in names + extra}
+            for p in names + extra:
                 try:
                     e = futs[p].result()
                 except Exception as exn:
                     e = entry(p, reason="collector failed (%s)" % type(exn).__name__)
-                e["plan"] = subs[p].get("plan")
-                e["price"] = subs[p].get("price")
+                if p in subs:
+                    e["plan"] = subs[p].get("plan")
+                    e["price"] = subs[p].get("price")
+                else:
+                    e["plan"] = by_id[p].get("plan")
+                    e["price"] = (by_id[p].get("price") or {}).get("amount")
+                if registry_lanes is not None:
+                    e.setdefault("facts", [])
                 out.append(finalize(e, now))
-    return {"written_at": iso(now), "providers": out}
+    doc = {"written_at": iso(now), "providers": out}
+    if registry_lanes is not None:
+        doc["lanes"] = lanes_mod.cache_view(registry_lanes)
+    return doc
 
 
 def write_cache(doc, path=None):
@@ -489,7 +545,9 @@ def refresh(wait_for_lock=False):
             return read_cache()
         return None
     try:
-        doc = collect_all(read_subscriptions())
+        cfg = lanes_mod.read_config(os.path.join(config_dir(), "spick.json"))
+        reg = lanes_mod.load_effective(cfg) if lanes_mod.has_registry(cfg) else None
+        doc = collect_all(read_subscriptions(), registry_lanes=reg)
         write_cache(doc)
         return doc
     finally:
@@ -551,9 +609,11 @@ def window_phrase(w, now):
 
 def provider_phrase(e, now):
     head = " ".join(x for x in (e["provider"], e.get("plan")) if x)
+    facts = e.get("facts") or []
     parts = [window_phrase(w, now) for w in e.get("windows", [])]
-    if e["status"] == "unknown":
+    if e["status"] == "unknown" and not facts:
         parts.insert(0, "unknown (%s)" % e.get("reason", "no data"))
+    parts += facts
     body = ", ".join(parts)
     if e["status"] == "stale":
         body += " [stale, %s old]" % fmt_age(e["age_s"])
@@ -580,8 +640,10 @@ def text_output(doc, now):
         for w in e["windows"]:
             val = "reset" if w.get("reset") else ("?" if w.get("used_pct") is None else pct(w["used_pct"]))
             cells.append("%s=%s" % (w["name"], val))
-        if e["status"] == "unknown":
+        facts = e.get("facts") or []
+        if e["status"] == "unknown" and not facts:
             cells.append("unknown (%s)" % e.get("reason", "no data"))
+        cells += facts
         age = "" if e["age_s"] is None else "   age=%s" % fmt_age(e["age_s"])
         rows.append("%-7s %s%s   %s" % (e["provider"], "  ".join(cells), age, e["status"]))
     return "\n".join(rows)
