@@ -226,11 +226,21 @@ export const TIMED_OUT_TEXT = 'timed out, no completion signal'
 /** a delegate with no completion signal this long after it started is dropped from the running state */
 export const STALE_MS = 30 * 60_000
 
-/** The Running section as aligned lines (lane, model, elapsed), at most RUNNING_ROWS, and how many were left out. */
-export function runningLines(rows: readonly RunningAgent[], now: number): { lines: string[]; more: number } {
+/** a column's alignment: text to the left, numbers to the right */
+export type Align = 'l' | 'r'
+/** a table as cells: one string array per row, and each column's alignment; the pane lays it out in fixed-width Boxes */
+export type Cells = { rows: string[][]; align: Align[] }
+
+/** The Running section as cells (lane, model, elapsed), at most RUNNING_ROWS, and how many were left out. */
+export function runningRows(rows: readonly RunningAgent[], now: number): Cells & { more: number } {
   const shown = rows.slice(0, RUNNING_ROWS)
-  const lines = table(shown.map(r => [r.lane, r.model, r.timedOutAt !== undefined ? TIMED_OUT_TEXT : fmtDuration(Math.max(0, now - r.startedAt))]), ['l', 'l', 'l'])
-  return { lines, more: rows.length - shown.length }
+  return { rows: shown.map(r => [r.lane, r.model, r.timedOutAt !== undefined ? TIMED_OUT_TEXT : fmtDuration(Math.max(0, now - r.startedAt))]), align: ['l', 'l', 'l'], more: rows.length - shown.length }
+}
+
+/** The Running section as aligned lines; `runningRows` joined as `table` joins them. */
+export function runningLines(rows: readonly RunningAgent[], now: number): { lines: string[]; more: number } {
+  const r = runningRows(rows, now)
+  return { lines: table(r.rows, r.align), more: r.more }
 }
 
 export function padRight(s: string, w: number): string { return s + ' '.repeat(Math.max(0, w - s.length)) }
@@ -238,9 +248,14 @@ export function padRight(s: string, w: number): string { return s + ' '.repeat(M
 export function clip(s: string, n: number): string { return s.length > n ? s.slice(0, Math.max(0, n - 1)) + '…' : s }
 export function padLeft(s: string, w: number): string { return ' '.repeat(Math.max(0, w - s.length)) + s }
 
+/** Each column's width: the longest cell in it, over every row (a head row included). */
+export function colWidths(rows: readonly (readonly string[])[]): number[] {
+  return (rows[0] ?? []).map((_, i) => Math.max(...rows.map(r => (r[i] ?? '').length)))
+}
+
 /** Fixed-width columns, two spaces between, aligned per column. Every row comes back the same length. */
 export function table(rows: string[][], align: ('l' | 'r')[]): string[] {
-  const widths = (rows[0] ?? []).map((_, i) => Math.max(...rows.map(r => (r[i] ?? '').length)))
+  const widths = colWidths(rows)
   return rows.map(r => widths.map((w, i) => (align[i] === 'r' ? padLeft(r[i] ?? '', w) : padRight(r[i] ?? '', w))).join('  '))
 }
 
@@ -287,38 +302,62 @@ export function wrapWords(text: string, width: number): string[] {
 }
 
 /**
- * The Usage section's lines: the column heads first (the first column blank, so they sit right of the
+ * The Usage section as cells: the column heads first (the first column blank, so they sit right of the
  * lane names), then one row per lane and a total row from two lanes up. Lane names are cut to 20.
  */
-export function usageLines(entries: readonly (readonly [string, LaneTotals])[]): string[] {
+export function usageRows(entries: readonly (readonly [string, LaneTotals])[]): Cells {
   const totalCost = entries.reduce<number | null>((acc, [, v]) => (v.costUsd === null ? acc : (acc ?? 0) + v.costUsd), null)
-  return table([
-    ['', 'turns', 'at API rates'],
-    ...entries.map(([lane, v]) => [clip(lane, 20), String(v.turns), fmtCost(v.costUsd)]),
-    ...(entries.length > 1 ? [['total', String(entries.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)]] : []),
-  ], ['l', 'r', 'r']).map(l => l.trimEnd())
+  return {
+    rows: [
+      ['', 'turns', 'at API rates'],
+      ...entries.map(([lane, v]) => [clip(lane, 20), String(v.turns), fmtCost(v.costUsd)]),
+      ...(entries.length > 1 ? [['total', String(entries.reduce((n, [, v]) => n + v.turns, 0)), fmtCost(totalCost)]] : []),
+    ],
+    align: ['l', 'r', 'r'],
+  }
 }
 
-/** One quota row's cells, `5h ▰▰▱▱▱▱▱▱▱▱  19%`, five-hour first; none for a provider with no window data. */
-export function quotaCells(w: QuotaWindows | null | undefined, barCells: number): string[] {
-  const cells: string[] = []
+/** The Usage section as aligned lines: `usageRows` joined as `table` joins them, trailing spaces cut. */
+export function usageLines(entries: readonly (readonly [string, LaneTotals])[]): string[] {
+  const u = usageRows(entries)
+  return table(u.rows, u.align).map(l => l.trimEnd())
+}
+
+/** one quota window as the pane draws it: the label (`5h`), the bar, the percent (`19%`) */
+export type QuotaWindowCells = { label: string; bar: string; pct: string }
+
+/** A provider's windows for the pane, five-hour first; none for a provider with no window data. */
+export function quotaWindows(w: QuotaWindows | null | undefined, barCells: number): QuotaWindowCells[] {
+  const out: QuotaWindowCells[] = []
   for (const [label, pct] of [['5h', w?.fiveHour], ['7d', w?.sevenDay]] as const) {
     if (pct === undefined) continue
-    cells.push(`${label} ${quotaBar(pct, barCells)} ${String(Math.round(pct)).padStart(3)}%`)
+    out.push({ label, bar: quotaBar(pct, barCells), pct: `${Math.round(pct)}%` })
   }
-  return cells
+  return out
 }
 
-/** The Recent rows (time, lane, model, effort, duration), aligned; a narrow pane drops the effort column. */
-export function recentLines(turns: readonly TurnRecord[], narrow: boolean): string[] {
-  return table(
-    turns.map(r => {
+/** One quota row's cells as text, `5h ▰▰▱▱▱▱▱▱▱▱  19%`: `quotaWindows` with the percent right-aligned to four. */
+export function quotaCells(w: QuotaWindows | null | undefined, barCells: number): string[] {
+  return quotaWindows(w, barCells).map(c => `${c.label} ${c.bar} ${padLeft(c.pct, 4)}`)
+}
+
+/** The Recent rows as cells (time, lane, model, effort, duration); a narrow pane drops the effort column. */
+export function recentRows(turns: readonly TurnRecord[], narrow: boolean): Cells {
+  return {
+    rows: turns.map(r => {
       const cells = [clockOf(r.startedAt), clip(r.lane, narrow ? 12 : 20), clip(r.model, narrow ? 12 : 16)]
       if (!narrow) cells.push(r.effort ?? '')
       cells.push(fmtDuration((r.endedAt ?? r.startedAt) - r.startedAt))
       return cells
     }),
-    narrow ? ['l', 'l', 'l', 'r'] : ['l', 'l', 'l', 'l', 'r'])
+    align: narrow ? ['l', 'l', 'l', 'r'] : ['l', 'l', 'l', 'l', 'r'],
+  }
+}
+
+/** The Recent rows as aligned lines: `recentRows` joined as `table` joins them. */
+export function recentLines(turns: readonly TurnRecord[], narrow: boolean): string[] {
+  const r = recentRows(turns, narrow)
+  return table(r.rows, r.align)
 }
 
 /** `cells` cells of used (▰) and free (▱): ten in the pane and the wide band, five on a narrower band. */

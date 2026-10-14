@@ -3,6 +3,7 @@ import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
   fmtDuration, fmtAge, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE, runningLines,
   tagLine, wrapWords, usageLines, quotaCells, recentLines, clockOf, LABEL_W, HOTKEY_W, NARROW_BELOW,
+  colWidths, usageRows, recentRows, runningRows, quotaWindows,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -384,6 +385,43 @@ test('usageLines: column heads first with a blank first column, a total row from
   expect(usageLines([['a', t(1, null)], ['b', t(1, null)]]).at(-1)).toMatch(/—$/)
   // every line is as long as the table, none ends in a space
   for (const l of two) expect(l).toBe(l.trimEnd())
+})
+
+test('colWidths measures every column over every row, the head row included', () => {
+  expect(colWidths([['', 'turns', 'at API rates'], ['main session', '52', '$0.45']])).toEqual([12, 5, 12])
+  expect(colWidths([])).toEqual([])
+  expect(colWidths([['a'], ['bbb', 'cc']])).toEqual([3])
+})
+
+test('usageRows gives the cells behind usageLines: heads, one row per lane, a total from two lanes, aligned l r r', () => {
+  const t = (turns: number, costUsd: number | null) => ({ turns, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd })
+  const one = usageRows([['main session', t(52, 0.45)]])
+  expect(one).toEqual({ rows: [['', 'turns', 'at API rates'], ['main session', '52', '$0.45']], align: ['l', 'r', 'r'] })
+  const two = usageRows([['main session', t(52, 0.45)], ['Gemini', t(3, null)]])
+  expect(two.rows).toHaveLength(4)
+  expect(two.rows.at(-1)).toEqual(['total', '55', '$0.45'])
+  expect(two.rows[2]).toEqual(['Gemini', '3', '—'])
+  // the lines are these cells joined by two spaces, as table joins them
+  expect(usageLines([['main session', t(52, 0.45)]])[1]).toBe('main session     52         $0.45')
+})
+
+test('recentRows and runningRows give the cells behind their lines', () => {
+  const at = new Date(2026, 9, 14, 14, 52).getTime()
+  const turn = { turnId: 'a', startedAt: at, endedAt: at + 221_000, lane: 'coder', model: 'Sonnet 5.5', effort: 'high', agents: 0 }
+  expect(recentRows([turn], false)).toEqual({ rows: [['14:52', 'coder', 'Sonnet 5.5', 'high', '3m 41s']], align: ['l', 'l', 'l', 'l', 'r'] })
+  expect(recentRows([turn], true)).toEqual({ rows: [['14:52', 'coder', 'Sonnet 5.5', '3m 41s']], align: ['l', 'l', 'l', 'r'] })
+  const running = Array.from({ length: 7 }, (_, i) => ({ id: `c${i}`, lane: 'coder', model: 'Sonnet 5.5', startedAt: 1000 + i * 1000 }))
+  const r = runningRows(running, 200000)
+  expect(r.rows).toHaveLength(5)
+  expect(r.more).toBe(2)
+  expect(r.rows[0]).toEqual(['coder', 'Sonnet 5.5', '3m 19s'])
+  expect(r.align).toEqual(['l', 'l', 'l'])
+})
+
+test('quotaWindows splits a window into label, bar and percent; quotaCells joins them', () => {
+  expect(quotaWindows({ fiveHour: 19, sevenDay: 9 }, 10)).toEqual([{ label: '5h', bar: '▰▰▱▱▱▱▱▱▱▱', pct: '19%' }, { label: '7d', bar: '▰▱▱▱▱▱▱▱▱▱', pct: '9%' }])
+  expect(quotaWindows({ sevenDay: 100 }, 5)).toEqual([{ label: '7d', bar: '▰▰▰▰▰', pct: '100%' }])
+  expect(quotaWindows(null, 10)).toEqual([])
 })
 
 test('quotaCells: five-hour first, one space after the label, percent right-aligned, none without data', () => {
