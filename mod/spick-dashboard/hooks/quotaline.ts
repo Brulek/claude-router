@@ -59,7 +59,7 @@ export function lanesLine(lanes: readonly LaneInfo[]): string {
     const parts = [l.id]
     if (l.tags.length > 0) parts.push(l.tags.join(','))
     if (l.prefer.length > 0) parts.push(`prefer:${l.prefer.join(',')}`)
-    parts.push(l.data ? `data:${l.data}` : 'data: unset')
+    parts.push(l.data ? `data:${l.data}` : 'data:unset')
     return parts.join(' ')
   })
   for (const l of lanes) if (l.kind && THIRD_PARTY_KINDS.includes(l.kind)) segs.push(`${l.id} is a third-party service: sending content to it carries a data-leak risk.`)

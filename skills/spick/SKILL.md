@@ -42,7 +42,7 @@ Decide first what the task needs, then pick a lane that offers it. Go down the t
 
 Choosing between tagged lanes (the Lanes line lists them; its `data:` is the most a lane may be sent, `prefer:` is the user's own preference):
 
-1. A lane whose declared `data:` level is below what the task would send (`public` < `text` < `code`) is excluded. A lane with `data: unset` has no declared level: it may receive whatever the user asked for. Third-party lanes (API, relay) carry a data-leak reminder on the Lanes line; it is a fact, not a refusal.
+1. A lane whose declared `data:` level is below what the task would send (`public` < `text` < `code`) is excluded. A lane with `data:unset` has no declared level: it may receive whatever the user asked for. Third-party lanes (API, relay) carry a data-leak reminder on the Lanes line; it is a fact, not a refusal.
 2. Among the rest, a lane whose `prefer:` list has the task's tag comes first.
 3. Otherwise weigh the Quota facts and the lane notes yourself.
 4. A `web-only` lane is never called; give the user a paste-ready prompt instead.

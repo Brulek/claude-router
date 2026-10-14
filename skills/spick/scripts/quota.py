@@ -521,12 +521,9 @@ def _fetch_json(url, key, method, auth):
         with opener.open(req, timeout=METER_TIMEOUT) as r:
             raw = r.read(1_000_000)
     except urllib.error.HTTPError as ex:
-        try:
-            snippet = _clean(ex.read().decode("utf-8", "replace"), key)
-        except Exception:
-            snippet = ""
+        code = ex.code
         ex.close()
-        raise _Unknown("HTTP %d%s" % (ex.code, ": " + snippet if snippet else ""))
+        raise _Unknown("HTTP %d" % code)  # status only: response text never reaches the quota line
     except Exception as ex:
         reason = getattr(ex, "reason", ex)
         raise _Unknown("unreachable (%s)" % ("timeout" if isinstance(reason, TimeoutError) else type(reason).__name__))

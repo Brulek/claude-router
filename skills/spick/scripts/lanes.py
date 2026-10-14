@@ -201,7 +201,7 @@ def build_line(lanes):
             parts.append(",".join(l["tags"]))
         if l.get("prefer"):
             parts.append("prefer:" + ",".join(l["prefer"]))
-        parts.append("data:" + l["data"] if l.get("data") else "data: unset")
+        parts.append("data:" + l["data"] if l.get("data") else "data:unset")
         segs.append(" ".join(parts))
     segs += ["%s is a third-party service: sending content to it carries a data-leak risk." % l["id"] for l in lanes if is_third_party(l)]
     return "Lanes (user-declared; data = most that may be sent): " + " · ".join(segs)

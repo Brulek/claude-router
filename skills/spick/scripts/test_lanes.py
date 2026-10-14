@@ -100,7 +100,7 @@ class Line(unittest.TestCase):
         cfg = {"lane_registry": {"qwen-local": {"kind": "local", "tags": ["cheap"], "data": "code"},
                                  "mine": {"kind": "local", "tags": ["cheap", "chinese"], "prefer": []}}}
         line = lanes.build_line(lanes.load_effective({**cfg, "lanes": {"gemini": False, "grok": False, "codex": False}}))
-        self.assertEqual(line, "Lanes (user-declared; data = most that may be sent): qwen-local cheap data:code · mine cheap,chinese data: unset")
+        self.assertEqual(line, "Lanes (user-declared; data = most that may be sent): qwen-local cheap data:code · mine cheap,chinese data:unset")
 
     def test_relay_and_api_key_lanes_get_the_third_party_fact_once_each(self):
         cfg = {"lanes": {"gemini": False, "grok": False, "codex": False},
@@ -112,7 +112,7 @@ class Line(unittest.TestCase):
         self.assertEqual(line.count(fact % "glm"), 1)
         self.assertEqual(line.count(fact % "rl"), 1)
         self.assertNotIn("q is a third-party", line)
-        self.assertIn("rl code data: unset", line)
+        self.assertIn("rl code data:unset", line)
 
     def test_notes_urls_and_key_ref_are_never_printed(self):
         cfg = {"lane_registry": {"glm": {"kind": "api-key", "tags": ["cheap"], "data": "text", "notes": "SECRETNOTE",

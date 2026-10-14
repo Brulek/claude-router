@@ -91,13 +91,8 @@ class MeterTest(unittest.TestCase):
     def test_401(self):
         self.assertEqual(quota.meter_http(self.lane("/e401")), "unknown (HTTP 401)")
 
-    def test_error_body_is_scrubbed_and_cut(self):
-        f = quota.meter_http(self.lane("/e401body"))
-        self.assertTrue(f.startswith("unknown (HTTP 401: bad "), f)
-        self.assertNotIn(KEY, f)
-        self.assertNotIn("TESTKEY", f)
-        self.assertIn("***", f)
-        self.assertLessEqual(len(f), len("unknown (HTTP 401: )") + 80)
+    def test_error_body_never_reaches_line(self):
+        self.assertEqual(quota.meter_http(self.lane("/e401body")), "unknown (HTTP 401)")
 
     def test_missing_value_path(self):
         self.assertEqual(quota.meter_http(self.lane("/empty")), "unknown (unexpected response)")

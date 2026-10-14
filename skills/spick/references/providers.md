@@ -98,7 +98,7 @@ Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`.
 | `enabled` | false leaves the lane out entirely |
 | `tags` | what the lane is for, free words (`search`, `x-data`, `image`, `long-context`, `multimodal`, `code`, `review`, `cheap`, `chinese`, ...), printed as declared |
 | `prefer` | the tags the user wants this lane picked for first |
-| `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data: unset` and nothing is blocked |
+| `data` | the most that may be sent: `public`, `text` or `code`. Optional; when absent the Lanes line says `data:unset` and nothing is blocked |
 | `price` | free-form object; built-ins use `{"model": "subscription"}`; the plan and price from `subscriptions` are folded in |
 | `meter` | `{"type": ...}` with `none`, `builtin` (+ `collector`), `local-file`, `balance-endpoint` or `usage-endpoint`; an optional `health_url` adds one GET-status fact. See Meters below |
 | `key_ref` | where the key lives: `keychain:<name>` or `env:<VAR>`; never the key itself, never printed |
