@@ -192,13 +192,11 @@ If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haik
 
 ## Adding an outside AI
 
-When the user says "add my DeepSeek", "spick setup" for an API service, or lists the AI services they have, you write the registry entries yourself; the user never edits JSON.
+When the user says "add my DeepSeek", "spick setup" for an API service, or lists the AI services they have, follow `references/onboarding-playbook.md` step by step. Three rules hold throughout:
 
-1. Ask once, in one message, for each service: its name, which site (for Kimi: China or international), plan or pay-per-use, and what they want it for. Free text is fine.
-2. For each service tell the user to store its key in the macOS keychain themselves, with exactly this command (they type the key at the prompt, it never goes into the chat): `security add-generic-password -s spick-<name> -a spick -w`. Never ask for the key in chat. If a key is pasted into the chat anyway, say it must be revoked and regenerated, and do not repeat it.
-3. Look up `base_url`, api protocol and meter preset in `references/providers-catalog.md`; do not invent a `base_url` or a model id. If the service is not in the catalogue, ask the user for the provider's docs URL and read it (WebFetch) before writing anything. Then back up `~/.claude/spick.json` to `spick.json.bak` and add the entry under `lane_registry`, keeping every other key: `kind`, `data`, `key_ref` (`"keychain:spick-<name>"`, at the top level of the record), `invoke` (`api`, `base_url`, `model`, `max_tokens`), `meter` (`type` and `preset`, only if the catalogue has a preset), `tags`, `prefer`, `notes`.
-4. Run `python3 scripts/lanes.py --validate`, then one call: write `Reply with the single word OK.` to a scratchpad file and run `python3 scripts/invoke.py --lane <id> --prompt-file <path> --max-tokens 400`. Report works, or fails with the exit code and the one-line reason. Never include a key value in the report.
-5. Tell the user what was registered and that the next prompt's Lanes line shows it.
+1. Ask first (one message: name, site, plan, purpose) and look the service up in `references/providers-catalog.md`; if it is not there, read the provider's docs with WebFetch before writing anything.
+2. The key goes into the keychain through the user's own command; never into chat, a file or a command line.
+3. Never hand-write JSON: register with `scripts/add_lane.py`.
 
 ## Failures
 
@@ -224,7 +222,10 @@ When the user says "add my DeepSeek", "spick setup" for an API service, or lists
 
 - `references/providers.md` - per-provider spells, flags, model ids, quota sources, known pitfalls. Read before the first external call.
 - `references/onboarding.md` - first-run flow.
+- `references/onboarding-playbook.md` - the steps for adding an outside AI (ask, look up, key, register, test, report).
 - `references/providers-catalog.md` - checked `base_url`, key name and meter preset per API service. Read it before writing a registry entry.
+- `scripts/add_lane.py` - registers one lane in `spick.json` (backup, validation, `--dry-run`).
+- `scripts/invoke.py` - calls a registered lane (`--list-models`).
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/quota.sh` / `scripts/quota.py` - quota collector and cache (`~/.claude/spick-quota.json`). `scripts/setup.sh` - detection and install.
 - `assets/agents/*.md` - the three subagent definitions. `assets/claude-md-snippet.md` - the always-on cheat sheet installed into `~/.claude/CLAUDE.md`.
