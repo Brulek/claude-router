@@ -1,6 +1,6 @@
 ---
 name: spick
-description: Triage every task to the cheapest model that can do it well. Picks the Claude tier (Haiku main session, Sonnet coder, Opus planner/deep), the effort level, and when to hand off to subscription CLIs you already pay for (Gemini for web search and long media, Grok for X/Twitter data, Codex for coding review and image generation), with a quota gate so you never drain one subscription while others sit idle. Use this skill on ANY non-trivial request, not only when the user says "delegate", "route", "outsource" or "save quota" - also when they ask to write or fix code, plan something, search the web, check facts, pull X/Twitter posts, generate or edit an image, analyse a long video or PDF, or ask for a review of changes. Also use it when the user says "spick setup", "spick doctor" or "spick quota".
+description: Triage every task to the cheapest model that can do it well. Picks the Claude tier (Haiku main session, Sonnet coder, Opus planner/deep), the effort level, and when to hand off to subscription CLIs you already pay for (Gemini for web search and long media, Grok for X/Twitter data, Codex for coding review and image generation), with a quota check so you never drain one subscription while others sit idle. Use this skill on ANY non-trivial request, not only when the user says "delegate", "route", "outsource" or "save quota" - also when they ask to write or fix code, plan something, search the web, check facts, pull X/Twitter posts, generate or edit an image, analyse a long video or PDF, or ask for a review of changes. Also use it when the user says "spick setup", "spick doctor" or "spick quota".
 ---
 
 # spick: one triage for Claude tiers and outside AIs
@@ -195,7 +195,7 @@ When the Spick dashboard mod is loaded it adds a system section saying the band 
 [alexei-led/claude-router](https://github.com/alexei-led/claude-router) is a Claude Code Mod that re-prices the **main conversation** itself: a local classifier (Ollama works) picks the model and effort for every turn, so the session is not stuck on Haiku and context is never lost to a handoff. This skill does not do that and does not try to; the two compose:
 
 - Router mod: which Claude model and effort the main session runs on, turn by turn; subagents that pin a model (ours do) pass through untouched.
-- This skill: the outside lanes (Gemini, Grok, Codex), the review triggers, the quota gate, and the onboarding.
+- This skill: the outside lanes (Gemini, Grok, Codex), the review triggers, the quota check, and the onboarding.
 
 If `~/.claude/router.json` exists, assume the mod is active: skip the "I am Haiku, delegate everything heavy" reflex for pure reasoning and writing tasks (the mod will have raised the tier already), keep delegating coding to `coder` only when you want an isolated worker, and keep the label line honest about which model actually answered (the mod's band above the prompt shows it).
 

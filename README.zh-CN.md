@@ -4,13 +4,16 @@
 
 <p align="center">Spick 是 Claude Code 的分诊层，为每项任务选定模型与推理强度，并将部分任务委派给用户已订阅的 CLI。</p>
 
+Spick 让主会话保持低成本，只在真正需要的任务上动用 Opus，也让你已订阅的 Gemini、Grok、Codex CLI 不再闲置。外部 CLI 是可选的：不安装也能在 Claude 的 Sonnet 与 Opus 子代理之间分派任务。
+
 <p align="center">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-D77757" alt="License: MIT"></a>
 <a href="#环境要求"><img src="https://img.shields.io/badge/Claude%20Code-2.1%2B-191919" alt="Claude Code 2.1+"></a>
+<a href="https://github.com/Brulek/spick/actions/workflows/ci.yml"><img src="https://github.com/Brulek/spick/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 <p align="center">
-<a href="#快速开始">快速开始</a> · <a href="#仪表盘可选">仪表盘</a> · <a href="#命令">命令</a> · <a href="#常见问题">常见问题</a> · <a href="#请作者喝杯咖啡">请作者喝杯咖啡</a> · <a href="README.md">English</a>
+<a href="#快速开始">快速开始</a> · <a href="#仪表盘可选">仪表盘</a> · <a href="#命令">命令</a> · <a href="#常见问题">常见问题</a> · <a href="README.md">English</a>
 </p>
 
 ## 它做什么

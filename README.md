@@ -4,13 +4,16 @@
 
 <p align="center">Spick is a triage layer for Claude Code. It selects the model and effort for each task and delegates some tasks to existing subscription CLIs.</p>
 
+Spick keeps the main session cheap and spends Opus only on tasks that need it, so the Gemini, Grok and Codex CLIs you already pay for do not sit idle. The external CLIs are optional: without them Spick still routes work between Claude's Sonnet and Opus subagents.
+
 <p align="center">
 <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-D77757" alt="License: MIT"></a>
 <a href="#requirements"><img src="https://img.shields.io/badge/Claude%20Code-2.1%2B-191919" alt="Claude Code 2.1+"></a>
+<a href="https://github.com/Brulek/spick/actions/workflows/ci.yml"><img src="https://github.com/Brulek/spick/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
 </p>
 
 <p align="center">
-<a href="#quick-start">Quick start</a> · <a href="#dashboard-optional">Dashboard</a> · <a href="#commands">Commands</a> · <a href="#faq">FAQ</a> · <a href="#buy-me-a-coffee">Buy me a coffee</a> · <a href="README.zh-CN.md">中文</a>
+<a href="#quick-start">Quick start</a> · <a href="#dashboard-optional">Dashboard</a> · <a href="#commands">Commands</a> · <a href="#faq">FAQ</a> · <a href="README.zh-CN.md">中文</a>
 </p>
 
 ## What it does
