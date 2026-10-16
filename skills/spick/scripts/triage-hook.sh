@@ -7,12 +7,15 @@
 # When the spick-dashboard mod is loaded it injects the checklist itself (built from its switches) and
 # writes ~/.claude/.spick-mod-active at session start; a marker younger than 24 hours silences this copy.
 # A stale marker (mod uninstalled) expires on its own. `find -mmin` works on both macOS and Linux.
-# The quota cache (~/.claude/spick-quota.json) is refreshed from here in the background, never awaited;
+# The quota cache ($CLAUDE_CONFIG_DIR/spick-quota.json, default ~/.claude) is refreshed from here in the background, never awaited;
 # the last line printed below is a one-line summary of that cache (plain facts, no rules).
 # The mod builds the same text from checklist.ts; test_triage_hint.py runs this hook and fails when the two drift.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 py=$(command -v python3 || command -v python || true)
-marker="${HOME}/.claude/.spick-mod-active"
+claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
+# the mod can only see HOME, so it writes its marker to ~/.claude even when CLAUDE_CONFIG_DIR points elsewhere: look in both
+marker="$claude_dir/.spick-mod-active"
+[ -f "$marker" ] || marker="$HOME/.claude/.spick-mod-active"
 # the prompt arrives as JSON on stdin; a run from a terminal has none
 input=""
 [ -t 0 ] || input=$(cat 2>/dev/null || true)
@@ -29,7 +32,7 @@ cat <<'TXT'
    - changed code beyond a one-liner with nothing left to decide -> Agent(coder). You never edit source yourself.
 TXT
 # The lane bullet depends on whether the user declared a lane_registry; the other lines are the same either way.
-cfg="${CLAUDE_CONFIG_DIR:-$HOME/.claude}/spick.json"
+cfg="$claude_dir/spick.json"
 registry=0
 [ -f "$cfg" ] && grep -q '"lane_registry"' "$cfg" 2>/dev/null && registry=1
 if [ "$registry" = 1 ]; then

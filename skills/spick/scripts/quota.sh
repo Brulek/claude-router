@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
-# spick quota. Collects raw facts about the subscriptions listed in ~/.claude/spick.json and shows them;
+# spick quota. Collects raw facts about the subscriptions listed in $CLAUDE_CONFIG_DIR/spick.json (default ~/.claude) and shows them;
 # it judges nothing. All work is in quota.py (stdlib python).
 # Usage: quota.sh [--json] [--refresh]
-#   (none)     show ~/.claude/spick-quota.json; first run (no cache) refreshes once; a cache older than
+#   (none)     show $CLAUDE_CONFIG_DIR/spick-quota.json; first run (no cache) refreshes once; a cache older than
 #              10 minutes is refreshed in the background and still shown at once
 #   --refresh  collect now (synchronous; codex/grok ~20 s, agy up to 90 s), write the cache, show it
 #   --json     the same facts as JSON

@@ -55,6 +55,7 @@ export function spendFileText(f: SpendFile): string {
 
 /** the session id as a file name: anything but letters, digits, dot, dash and underscore becomes _, so it cannot leave the directory */
 export function spendPath(home: string, sessionId: string): string {
+  // the mod can only see HOME: a CLAUDE_CONFIG_DIR user's spend dir lives under ~/.claude too (spend.py reads it there)
   const name = sessionId.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '_')
   return `${home}/${SPEND_DIR}/${name}.json`
 }

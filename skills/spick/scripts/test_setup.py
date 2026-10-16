@@ -137,6 +137,15 @@ class TestBackup(Base):
         d = json.loads(self.read("settings.json"))
         self.assertIn(other, d["hooks"]["UserPromptSubmit"])
 
+    def test_hook_command_is_the_absolute_path_next_to_setup(self):
+        # not $HOME/.claude/...: the skill may live elsewhere, and CLAUDE_CONFIG_DIR may point elsewhere
+        self.run_setup()
+        (h,) = self.spick_hooks()
+        self.assertEqual(h["command"], 'bash "%s"' % os.path.join(HERE, "triage-hook.sh"))
+        self.assertTrue(os.path.isabs(os.path.join(HERE, "triage-hook.sh")))
+        self.run_uninstall()
+        self.assertEqual(self.spick_hooks(), [])
+
     def test_spick_json_keeps_keys_setup_does_not_own(self):
         old = {"version": 1, "subscriptions": {"codex": "plus"}, "lane_registry": {"x": {"kind": "api-key"}},
                "main_session": {"model": "opus"}, "quota": {"warn": 80}}

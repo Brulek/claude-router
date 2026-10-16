@@ -198,11 +198,12 @@ PY
 
   echo "== triage hook (UserPromptSubmit) =="
   if [ -n "$PY" ]; then
-    py "$CLAUDE_DIR/settings.json" "$MANIFEST" <<'PY2'
+    # the hook next to this script, by absolute path: a skill installed outside ~/.claude (or a CLAUDE_CONFIG_DIR) still runs
+    py "$CLAUDE_DIR/settings.json" "$MANIFEST" "$HERE/triage-hook.sh" <<'PY2'
 import sys
-p, man = sys.argv[1:3]
+p, man, hook = sys.argv[1:4]
 d = json.load(open(p)) if os.path.exists(p) else {}
-cmd = 'bash "$HOME/.claude/skills/spick/scripts/triage-hook.sh"'
+cmd = 'bash "%s"' % hook
 hooks = d.setdefault("hooks", {}); lst = hooks.setdefault("UserPromptSubmit", [])
 present = any("spick/scripts/triage-hook.sh" in h.get("command", "") for e in lst for h in e.get("hooks", []))
 if not present:

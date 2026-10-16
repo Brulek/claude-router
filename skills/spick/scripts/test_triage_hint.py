@@ -151,6 +151,17 @@ class Hook(unittest.TestCase):
         got = [l for l in self.run_hook(prompt="x") if l and not l.startswith("Quota")]
         self.assertEqual(got, want)
 
+    def test_a_fresh_mod_marker_silences_the_checklist_in_either_dir(self):
+        # the mod writes ~/.claude/.spick-mod-active (it sees only HOME); setup.sh and this hook use CLAUDE_CONFIG_DIR
+        for where in ("config", "home"):
+            with tempfile.TemporaryDirectory() as home, tempfile.TemporaryDirectory() as cfg:
+                d = cfg if where == "config" else os.path.join(home, ".claude")
+                os.makedirs(d, exist_ok=True)
+                open(os.path.join(d, ".spick-mod-active"), "w").close()
+                env = dict(os.environ, HOME=home, CLAUDE_CONFIG_DIR=cfg)
+                r = subprocess.run(["bash", HOOK], input='{"prompt":"x"}', capture_output=True, text=True, env=env, timeout=60)
+            self.assertEqual((where, r.returncode, r.stdout), (where, 0, ""))
+
 
 if __name__ == "__main__":
     unittest.main()

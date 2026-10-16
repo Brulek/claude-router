@@ -266,6 +266,7 @@ async function readSessionModel($: EngineInterface): Promise<string> {
  * while this marker is younger than 24 hours.
  */
 async function writeMarker($: EngineInterface): Promise<void> {
+  // the mod can only see HOME: a CLAUDE_CONFIG_DIR user's marker lives under ~/.claude too (the hook looks in both)
   const home = await $.env.get('HOME')
   if (!home) return
   await $.fs.write(`${home}/.claude/.spick-mod-active`, new Date(await $.clock.now()).toISOString())

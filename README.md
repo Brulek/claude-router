@@ -193,6 +193,7 @@ Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini /
 - Claude Code 2.1 or later, bash and python3.
 - Optional: `codex`, `grok` and `agy`, each logged in.
 - A lane key stored as `keychain:<name>` works on macOS only; on Linux and Windows use `env:<VAR>`.
+- `CLAUDE_CONFIG_DIR` is honoured by setup, the hook and the scripts. The dashboard mod sees only `HOME`, so with `CLAUDE_CONFIG_DIR` set its marker (`.spick-mod-active`) and its spend records (`spick-spend/`) still live under `~/.claude`.
 
 ## FAQ
 

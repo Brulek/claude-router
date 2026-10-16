@@ -193,6 +193,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 - Claude Code 2.1 或更高版本，bash 与 python3。
 - 可选：已登录的 `codex`、`grok`、`agy`。
 - 线路密钥用 `keychain:<名称>` 仅限 macOS；Linux 与 Windows 请用 `env:<变量名>`。
+- 安装脚本、钩子与各脚本都认 `CLAUDE_CONFIG_DIR`。仪表盘 Mod 只能读到 `HOME`，所以设了 `CLAUDE_CONFIG_DIR` 时，它的标记文件（`.spick-mod-active`）和花费记录（`spick-spend/`）仍在 `~/.claude` 下。
 
 ## 常见问题
 
