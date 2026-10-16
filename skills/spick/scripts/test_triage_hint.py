@@ -29,7 +29,9 @@ def ts_constants(path):
     plus the template of each `export const name = (...): string =>` arrow, unescaped."""
     with open(path, encoding="utf-8") as f:
         src = f.read()
-    unesc = lambda t: re.sub(r"\\(.)", r"\1", t)
+
+    def unesc(t):
+        return re.sub(r"\\(.)", r"\1", t)
     out = {}
     for m in re.finditer(r"^export const (\w+) = (?:'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"|`((?:[^`\\$]|\\.)*)`)$", src, re.M):
         out[m.group(1)] = unesc(next(g for g in m.groups()[1:] if g is not None))
@@ -138,8 +140,8 @@ class Hook(unittest.TestCase):
     def test_a_silent_prompt_and_no_stdin_print_no_hint(self):
         for lines in (self.run_hook(prompt="现在几点了?"), self.run_hook(stdin=False)):
             self.assertIn(LANE_HEAD, lines)
-            self.assertFalse(any(l.startswith("   Hint") for l in lines))
-            self.assertTrue(any(l.startswith("3. Goal-shaped?") for l in lines))
+            self.assertFalse(any(line.startswith("   Hint") for line in lines))
+            self.assertTrue(any(line.startswith("3. Goal-shaped?") for line in lines))
 
     def test_the_hook_prints_the_mods_default_checklist(self):
         # the mod cannot spawn bash, so the two texts are compared here: the default checklist rebuilt from
@@ -148,7 +150,7 @@ class Hook(unittest.TestCase):
         label = k["labelLineText"].replace("${main}", "Haiku 5.5").replace("${review}", k["REVIEW_CODEX"]).replace("${who}", k["WHO_WITH_REVIEWER"])
         want = [k["TITLE_LINE"], k["PLAN_LINE"], k["LANE_HEAD"], k["LANE_BULLET_DEEP"], k["LANE_BULLET_PLANNER"],
                 k["LANE_BULLET_CODER"], k["LANE_BULLET_BUILTIN"], k["LANE_BULLET_YOU"], k["LANE_TAIL"], k["GOAL_LINE"], label]
-        got = [l for l in self.run_hook(prompt="x") if l and not l.startswith("Quota")]
+        got = [line for line in self.run_hook(prompt="x") if line and not line.startswith("Quota")]
         self.assertEqual(got, want)
 
     def test_a_fresh_mod_marker_silences_the_checklist_in_either_dir(self):

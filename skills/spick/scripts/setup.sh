@@ -107,7 +107,11 @@ check() {
   done
   echo
   echo "plugins:"
-  ls "$CLAUDE_DIR/plugins/cache" 2>/dev/null | grep -E "codex-image|grok" | sed 's/^/  /' || echo "  (none relevant)"
+  local found=0 p
+  for p in "$CLAUDE_DIR"/plugins/cache/*codex-image* "$CLAUDE_DIR"/plugins/cache/*grok*; do
+    if [ -e "$p" ]; then echo "  $(basename "$p")"; found=1; fi
+  done
+  [ "$found" = 1 ] || echo "  (none relevant)"
   echo
   [ -f "$CONFIG" ] && echo "config: $CONFIG (present)" || echo "config: $CONFIG (missing - run --install)"
 }

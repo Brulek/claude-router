@@ -16,7 +16,7 @@ BUILTIN_LINE = ("Lanes (user-declared; data = most that may be sent): "
 
 
 def ids(cfg):
-    return [l["id"] for l in lanes.load_effective(cfg)]
+    return [ln["id"] for ln in lanes.load_effective(cfg)]
 
 
 class Merge(unittest.TestCase):
@@ -31,11 +31,11 @@ class Merge(unittest.TestCase):
         self.assertEqual(ids({"lane_registry": {"codex": {"enabled": False}}}), ["gemini", "grok"])
 
     def test_override_one_field_keeps_the_rest(self):
-        l = {x["id"]: x for x in lanes.load_effective({"lane_registry": {"codex": {"data": "text", "tags": ["code"]}}})}
-        self.assertEqual(l["codex"]["data"], "text")
-        self.assertEqual(l["codex"]["tags"], ["code"])
-        self.assertNotIn("prefer", l["codex"])
-        self.assertEqual(l["codex"]["kind"], "cli-subscription")
+        ln = {x["id"]: x for x in lanes.load_effective({"lane_registry": {"codex": {"data": "text", "tags": ["code"]}}})}
+        self.assertEqual(ln["codex"]["data"], "text")
+        self.assertEqual(ln["codex"]["tags"], ["code"])
+        self.assertNotIn("prefer", ln["codex"])
+        self.assertEqual(ln["codex"]["kind"], "cli-subscription")
 
     def test_new_ids_are_appended_in_registry_order(self):
         cfg = {"lane_registry": {"zed": {"kind": "local"}, "glm": {"kind": "api-key"}}}
@@ -44,10 +44,10 @@ class Merge(unittest.TestCase):
     def test_subscription_plan_and_price_are_folded_in(self):
         cfg = {"subscriptions": {"codex": {"plan": "Pro", "price": "$100/mo"}, "glm": {"plan": "Lite"}},
                "lane_registry": {"glm": {"kind": "api-key"}}}
-        l = {x["id"]: x for x in lanes.load_effective(cfg)}
-        self.assertEqual(l["codex"]["plan"], "Pro")
-        self.assertEqual(l["codex"]["price"], {"model": "subscription", "amount": "$100/mo"})
-        self.assertEqual(l["glm"]["plan"], "Lite")
+        ln = {x["id"]: x for x in lanes.load_effective(cfg)}
+        self.assertEqual(ln["codex"]["plan"], "Pro")
+        self.assertEqual(ln["codex"]["price"], {"model": "subscription", "amount": "$100/mo"})
+        self.assertEqual(ln["glm"]["plan"], "Lite")
 
 
 class Validate(unittest.TestCase):
@@ -188,7 +188,7 @@ class Cli(unittest.TestCase):
 
     def test_json(self):
         out = json.loads(self.run_cli({"lanes": {"gemini": True, "grok": False, "codex": False}}, "--json").stdout)
-        self.assertEqual([l["id"] for l in out], ["gemini"])
+        self.assertEqual([ln["id"] for ln in out], ["gemini"])
 
 
 if __name__ == "__main__":

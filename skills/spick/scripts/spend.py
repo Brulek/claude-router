@@ -123,7 +123,9 @@ def table(groups, total, by, days, sessions):
             name = f"{name[:8]}  {g.get('cwd') or ''}".rstrip()
         body.append([name, f"{g['rows']:,}"] + [f"{g[k]:,}" for k in FIELDS] + [_money(g["costUsd"])])
     widths = [max(len(r[i]) for r in [head] + body) for i in range(len(head))]
-    fmt = lambda r: "  ".join(c.ljust(widths[i]) if i == 0 else c.rjust(widths[i]) for i, c in enumerate(r)).rstrip()
+
+    def fmt(r):
+        return "  ".join(c.ljust(widths[i]) if i == 0 else c.rjust(widths[i]) for i, c in enumerate(r)).rstrip()
     lines = [f"spick spend: last {days} day{'s' if days != 1 else ''}, by {by} ({sessions} session{'s' if sessions != 1 else ''}, {total['rows']:,} row{'s' if total['rows'] != 1 else ''})",
              fmt(head)] + [fmt(r) for r in body]
     if total["unpriced"]:

@@ -599,7 +599,7 @@ def collect_all(subs, now=None, registry_lanes=None):
     """registry_lanes None: the cache as before. A list (user declared lane_registry): entries also carry
     `facts`, custom lanes get entries, and the doc carries a `lanes` list."""
     now = time.time() if now is None else now
-    by_id = {l["id"]: l for l in registry_lanes or []}
+    by_id = {ln["id"]: ln for ln in registry_lanes or []}
 
     def task(p):
         lane = by_id.get(p)
@@ -608,7 +608,7 @@ def collect_all(subs, now=None, registry_lanes=None):
         return COLLECTORS[p](now)
 
     names = [p for p in PROVIDERS if p in subs]
-    extra = [l["id"] for l in registry_lanes or [] if l["id"] not in PROVIDERS]
+    extra = [ln["id"] for ln in registry_lanes or [] if ln["id"] not in PROVIDERS]
     out = []
     if names or extra:
         with concurrent.futures.ThreadPoolExecutor(max_workers=len(names) + len(extra)) as ex:
@@ -697,7 +697,7 @@ def _effective_lanes():
 
 
 def _lane_ids(lanes):
-    return None if lanes is None else [l["id"] for l in lanes]
+    return None if lanes is None else [ln["id"] for ln in lanes]
 
 
 def _config_unreadable():
@@ -718,7 +718,7 @@ def carry_forward(doc, prior):
     facts or windows takes the prior cache's entry back, sampling time included, so its age stays true."""
     if not isinstance(prior, dict) or not isinstance(doc.get("lanes"), list):
         return doc
-    declared = [l.get("id") for l in doc["lanes"] if isinstance(l, dict)]
+    declared = [ln.get("id") for ln in doc["lanes"] if isinstance(ln, dict)]
     old = {e.get("provider"): e for e in prior.get("providers") or [] if isinstance(e, dict) and e.get("facts")}
     now = parse_iso(doc.get("written_at")) or time.time()
     by_id = {e["provider"]: i for i, e in enumerate(doc["providers"])}

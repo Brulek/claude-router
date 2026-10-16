@@ -76,8 +76,8 @@ class Tags(Base):
     def test_builtin_tags_cleared_by_an_explicit_empty_list(self):
         self.base()
         self.assertEqual(self.set("gemini", "tags", "-")[0], 0)
-        l = {x["id"]: x for x in lanes.load_effective(self.read())}
-        self.assertEqual(l["gemini"]["tags"], [])
+        ln = {x["id"]: x for x in lanes.load_effective(self.read())}
+        self.assertEqual(ln["gemini"]["tags"], [])
 
     def test_more_than_eight_refused(self):
         self.base()
@@ -117,8 +117,8 @@ class Values(Base):
         self.base()
         self.assertEqual(self.set("codex", "data", "unset")[0], 0)
         self.assertEqual(self.read()["lane_registry"]["codex"], {"data": None})
-        l = {x["id"]: x for x in lanes.load_effective(self.read())}
-        self.assertIn("codex code,review,image data:unset", lanes.build_line(list(l.values())))
+        ln = {x["id"]: x for x in lanes.load_effective(self.read())}
+        self.assertIn("codex code,review,image data:unset", lanes.build_line(list(ln.values())))
 
     def test_enabled_values(self):
         self.base()
@@ -267,9 +267,9 @@ class Writing(Base):
         self.base()
         self.assertEqual(self.set("gemini", "data", "text")[0], 0)
         self.assertEqual(self.read()["lane_registry"]["gemini"], {"data": "text"})
-        l = {x["id"]: x for x in lanes.load_effective(self.read())}
-        self.assertEqual(l["gemini"]["data"], "text")
-        self.assertEqual(l["gemini"]["tags"], ["search", "long-context", "multimodal", "image"])
+        ln = {x["id"]: x for x in lanes.load_effective(self.read())}
+        self.assertEqual(ln["gemini"]["data"], "text")
+        self.assertEqual(ln["gemini"]["tags"], ["search", "long-context", "multimodal", "image"])
 
     def test_nested_field_on_a_builtin_keeps_the_rest_of_its_meter(self):
         self.base()
@@ -279,7 +279,7 @@ class Writing(Base):
 
     def test_enabled_toggling_persists_and_is_read_back(self):
         self.base()
-        ids = lambda: [l["id"] for l in lanes.load_effective(self.read())]  # noqa: E731
+        ids = lambda: [ln["id"] for ln in lanes.load_effective(self.read())]  # noqa: E731
         self.assertIn("codex", ids())
         self.assertEqual(self.set("codex", "enabled", "no")[0], 0)
         self.assertEqual(self.read()["lane_registry"]["codex"], {"enabled": False})
@@ -292,10 +292,10 @@ class Writing(Base):
 
     def test_registry_enabled_beats_the_old_lanes_boolean(self):
         cfg = {"lanes": {"grok": False}, "lane_registry": {"grok": {"enabled": True}}}
-        self.assertIn("grok", [l["id"] for l in lanes.load_effective(cfg)])
+        self.assertIn("grok", [ln["id"] for ln in lanes.load_effective(cfg)])
         cfg = {"lanes": {"grok": True}, "lane_registry": {"grok": {"enabled": False}}}
-        self.assertNotIn("grok", [l["id"] for l in lanes.load_effective(cfg)])
-        self.assertNotIn("grok", [l["id"] for l in lanes.load_effective({"lanes": {"grok": False}})])
+        self.assertNotIn("grok", [ln["id"] for ln in lanes.load_effective(cfg)])
+        self.assertNotIn("grok", [ln["id"] for ln in lanes.load_effective({"lanes": {"grok": False}})])
 
     def test_missing_lane_registry_first_edit_to_a_builtin_creates_it(self):
         self.write({"version": 1, "lanes": {"codex": True}})
@@ -355,7 +355,7 @@ class Relane(Base):
         doc = self.read_cache()
         self.assertEqual(doc["written_at"], old["written_at"])
         self.assertEqual(doc["providers"], old["providers"])
-        self.assertEqual([l["id"] for l in doc["lanes"]], ["gemini", "grok", "codex", "deepseek", "kimi"])
+        self.assertEqual([ln["id"] for ln in doc["lanes"]], ["gemini", "grok", "codex", "deepseek", "kimi"])
         self.assertNotIn("prefer", doc["lanes"][0])
 
     def test_relane_without_a_cache_does_nothing(self):
@@ -375,7 +375,7 @@ class Relane(Base):
         with mock.patch.object(quota, "background_refresh_if_stale") as bg:
             self.assertEqual(self.set("deepseek", "enabled", "no")[0], 0)
         bg.assert_called_once_with(force=True)
-        self.assertNotIn("deepseek", [l["id"] for l in self.read_cache()["lanes"]])
+        self.assertNotIn("deepseek", [ln["id"] for ln in self.read_cache()["lanes"]])
 
     def test_dry_run_and_refusal_do_not_touch_the_cache(self):
         self.base()
@@ -384,7 +384,7 @@ class Relane(Base):
             self.set("deepseek", "enabled", "no", "--dry-run")
             self.set("deepseek", "enabled", "bad")
         bg.assert_not_called()
-        self.assertEqual([l["id"] for l in self.read_cache()["lanes"]], ["old"])
+        self.assertEqual([ln["id"] for ln in self.read_cache()["lanes"]], ["old"])
 
 
 if __name__ == "__main__":

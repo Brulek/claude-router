@@ -222,8 +222,8 @@ def is_third_party(lane):
 
 def cache_view(lanes):
     """The fields the quota cache carries per lane: no notes, urls or key_ref."""
-    return [{"id": l["id"], "kind": l.get("kind"), "tags": list(l.get("tags") or []),
-             "data": l.get("data")} for l in lanes]
+    return [{"id": ln["id"], "kind": ln.get("kind"), "tags": list(ln.get("tags") or []),
+             "data": ln.get("data")} for ln in lanes]
 
 
 def build_line(lanes):
@@ -231,13 +231,13 @@ def build_line(lanes):
     if not lanes:
         return ""
     segs = []
-    for l in lanes:
-        parts = [l["id"]]
-        if l.get("tags"):
-            parts.append(",".join(l["tags"]))
-        parts.append("data:" + l["data"] if l.get("data") else "data:unset")
+    for ln in lanes:
+        parts = [ln["id"]]
+        if ln.get("tags"):
+            parts.append(",".join(ln["tags"]))
+        parts.append("data:" + ln["data"] if ln.get("data") else "data:unset")
         segs.append(" ".join(parts))
-    segs += ["%s is a third-party service: sending content to it carries a data-leak risk." % l["id"] for l in lanes if is_third_party(l)]
+    segs += ["%s is a third-party service: sending content to it carries a data-leak risk." % ln["id"] for ln in lanes if is_third_party(ln)]
     return "Lanes (user-declared; data = most that may be sent): " + " · ".join(segs)
 
 

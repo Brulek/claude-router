@@ -1,8 +1,10 @@
 # Spick Dashboard Mod Implementation Plan
 
+Status: implemented 2026-10-14; kept as the record of how the mod was built.
+
 > **Status (2026-10-13):** Code and docs are done and on `main` (mod up to 0.3.1, controls merged). `claude plugin validate` passes on the mod and the marketplace; `claude plugin test mod/spick-dashboard` passes 101/101. The plugin is installed at user scope from the local marketplace. Still open: the visual acceptance in a live session (Step 4 of Task 6), and pushing the metadata commit. The checkboxes below were not ticked as the work landed; treat the commits as the record.
 
-> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [x]`) syntax for tracking.
 
 **Goal:** A Claude Code Mod that shows, above the prompt, who is working right now (lane, model, effort) and, in a `/spick` pane, this session's lane totals, local quota and recent turns. It observes; it never changes a model, effort or tool call.
 
@@ -49,7 +51,7 @@ Inputs the spec implies but no acceptance step exercises, each pinned by a test 
 **Interfaces:**
 - Produces the state types every later task imports from `'../types'`: `TurnRecord`, `LaneTotals`, `Quota`, `Note`.
 
-- [ ] **Step 1: Write plugin.json**
+- [x] **Step 1: Write plugin.json**
 
 ```json
 {
@@ -60,13 +62,13 @@ Inputs the spec implies but no acceptance step exercises, each pinned by a test 
 }
 ```
 
-- [ ] **Step 2: Write hooks.json**
+- [x] **Step 2: Write hooks.json**
 
 ```json
 { "modules": ["./register.tsx"] }
 ```
 
-- [ ] **Step 3: Write types/index.d.ts**
+- [x] **Step 3: Write types/index.d.ts**
 
 ```ts
 export type NoteKind = 'warning' | 'error'
@@ -114,7 +116,7 @@ declare module 'claude-code' {
 }
 ```
 
-- [ ] **Step 4: Write a minimal register.tsx that loads**
+- [x] **Step 4: Write a minimal register.tsx that loads**
 
 ```tsx
 import type { Register } from 'claude-code'
@@ -124,12 +126,12 @@ export const register: Register = on => {
 }
 ```
 
-- [ ] **Step 5: Validate**
+- [x] **Step 5: Validate**
 
 Run: `claude plugin validate /Users/brulek/.claude/dev-mods/926545ab-e2ec-433f-b398-62b6275f24db/spick-dashboard`
 Expected: no refusals listed.
 
-- [ ] **Step 6: Commit (in the spick repo, after copying the folder to `mod/spick-dashboard/`)**
+- [x] **Step 6: Commit (in the spick repo, after copying the folder to `mod/spick-dashboard/`)**
 
 ```bash
 mkdir -p ~/dev/spick/mod && rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/
@@ -155,7 +157,7 @@ cd ~/dev/spick && git add mod && git commit -m "mod: scaffold spick-dashboard wi
   - `quotaBar(pct: number): string`, `fmtDuration(ms: number): string`, `fmtCost(usd: number | null): string`, `fmtAge(ms: number): string`
   - `estimateCost(modelId: string, usage: { input_tokens: number; output_tokens: number; cache_read_input_tokens: number }): number | null`
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // format.test.ts
@@ -255,12 +257,12 @@ test('formatters', () => {
 })
 ```
 
-- [ ] **Step 2: Run the tests to see them fail**
+- [x] **Step 2: Run the tests to see them fail**
 
 Run: `claude plugin test "$MOD"`
 Expected: FAIL, module `./format` not found.
 
-- [ ] **Step 3: Implement format.ts**
+- [x] **Step 3: Implement format.ts**
 
 ```ts
 import type { Note } from '../types'
@@ -365,12 +367,12 @@ export function estimateCost(modelId: string, u: { input_tokens: number; output_
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `claude plugin test "$MOD"`
 Expected: all format tests PASS. If the `table` expectation strings differ by a space, fix the expectation to the actual padded output, keeping the equal-length assertion.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && git add mod && git commit -m "mod: pure display layer with tests"
@@ -391,7 +393,7 @@ rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && 
   - `readQuota($: EngineInterface, nowMs: number): Promise<Quota>` (never rejects; a failed source is `null`)
 - Consumes: `QuotaWindows`, `Quota` from `'../types'`.
 
-- [ ] **Step 1: Write the failing tests**
+- [x] **Step 1: Write the failing tests**
 
 ```ts
 // quota.test.ts
@@ -426,12 +428,12 @@ test('parseCodexRateLimits labels a five-hour window', () => {
 })
 ```
 
-- [ ] **Step 2: Run to see them fail**
+- [x] **Step 2: Run to see them fail**
 
 Run: `claude plugin test "$MOD"`
 Expected: FAIL, `./quota` not found.
 
-- [ ] **Step 3: Implement quota.ts**
+- [x] **Step 3: Implement quota.ts**
 
 ```ts
 import type { EngineInterface } from 'claude-code'
@@ -521,12 +523,12 @@ export async function readQuota($: EngineInterface, nowMs: number): Promise<Quot
 }
 ```
 
-- [ ] **Step 4: Run the tests**
+- [x] **Step 4: Run the tests**
 
 Run: `claude plugin test "$MOD"`
 Expected: all quota tests PASS.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && git add mod && git commit -m "mod: quota parsers and reader with tests"
@@ -543,7 +545,7 @@ rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && 
 - Consumes: everything from Tasks 2 and 3.
 - Produces: the atoms `current`, `last`, `turns`, `totals`, `quota`, `hidden` that Task 5 draws from; the helper `laneOfAgent` map kept in module scope.
 
-- [ ] **Step 1: Write the state and event hooks**
+- [x] **Step 1: Write the state and event hooks**
 
 ```tsx
 import { atom, read, update } from 'claude-code'
@@ -698,12 +700,12 @@ export const register: Register = on => {
 }
 ```
 
-- [ ] **Step 2: Validate and type-check**
+- [x] **Step 2: Validate and type-check**
 
 Run: `claude plugin validate "$MOD" && tsc -p "$MOD"`
 Expected: validate lists no refusals; `tsc` passes. If `tsc` complains that `e.subagent_type` or `e.file_path` is not on the event, the matcher did not narrow: check `claude-code-tools/index.d.ts` in `<mod>/.claude-plugin/types/` for the exact field names and adjust.
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && git add mod && git commit -m "mod: event hooks that build the dashboard state"
@@ -719,7 +721,7 @@ rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && 
 **Interfaces:**
 - Consumes: `bandSegments`, `table`, `quotaBar`, `fmtDuration`, `fmtCost`, `fmtAge`, `HINT` from `./format`; the atoms from Task 4.
 
-- [ ] **Step 1: Add the band**
+- [x] **Step 1: Add the band**
 
 ```tsx
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
@@ -756,7 +758,7 @@ rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && 
 
 Note for the implementer: the `left` line above is scaffolding to delete; the two expressions actually used are `isRight ? segs.slice(0, -1) : segs` for the left group and `right` for the right group. Keep the code minimal.
 
-- [ ] **Step 2: Add the pane**
+- [x] **Step 2: Add the pane**
 
 ```tsx
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -833,12 +835,12 @@ const clock = (ms: number) => { const d = new Date(ms); return `${String(d.getHo
 
 and `padRight` imported from `./format` used in place of the local `padRightText` if the implementer prefers; either is fine, but only one may remain.
 
-- [ ] **Step 3: Validate, type-check, run the tests**
+- [x] **Step 3: Validate, type-check, run the tests**
 
 Run: `claude plugin validate "$MOD" && tsc -p "$MOD" && claude plugin test "$MOD"`
 Expected: all green. A `ui.render` tree the engine refuses shows in the transcript as `spick-dashboard: ui.render (AbovePrompt) refused: <reason>`; fix the props it names.
 
-- [ ] **Step 4: Visual acceptance in this session (hot reload on)**
+- [x] **Step 4: Visual acceptance in this session (hot reload on)**
 
 After the turn ends the mod loads. Check, in order, and fix anything off before moving on:
 1. Idle band reads `spick · last: … · … · …` in dim text, wordmark in brand color.
@@ -846,7 +848,7 @@ After the turn ends the mod loads. Check, in order, and fix anything off before 
 3. Dispatch `coder`: band shows `coder · Sonnet 5.5 · <effort>` while the agent runs.
 4. `/spick` opens the pane: header row aligned, three sections separated by one blank line, numbers right-aligned, quota bars present, `Hide band` toggles the band.
 
-- [ ] **Step 5: Commit**
+- [x] **Step 5: Commit**
 
 ```bash
 rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && git add mod && git commit -m "mod: status band and /spick pane"
@@ -861,7 +863,7 @@ rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && 
 - Modify: `~/dev/spick/README.md`, `~/dev/spick/README.zh-CN.md` (install section)
 - Modify: `~/dev/spick/skills/spick/SKILL.md` (label-line rule: skipped when the mod is loaded, the mod tells the model so)
 
-- [ ] **Step 1: Marketplace file**
+- [x] **Step 1: Marketplace file**
 
 ```json
 {
@@ -871,12 +873,12 @@ rsync -a --delete "$MOD/" ~/dev/spick/mod/spick-dashboard/ && cd ~/dev/spick && 
 }
 ```
 
-- [ ] **Step 2: Validate the whole repo as a marketplace**
+- [x] **Step 2: Validate the whole repo as a marketplace**
 
 Run: `claude plugin validate ~/dev/spick/mod/spick-dashboard && claude plugin validate ~/dev/spick`
 Expected: both pass.
 
-- [ ] **Step 3: README install lines (both languages)**
+- [x] **Step 3: README install lines (both languages)**
 
 English, under Install:
 
@@ -892,15 +894,15 @@ Answer `y` to add the marketplace, pick the user scope. The band above the promp
 
 Chinese equivalent under 安装, same command.
 
-- [ ] **Step 4: SKILL.md label-line note**
+- [x] **Step 4: SKILL.md label-line note**
 
 In "Step 7 - the label line", append: "When the Spick dashboard mod is loaded it adds a system section saying the band is showing; then omit the label line entirely. The band is the record."
 
-- [ ] **Step 5: Install from the marketplace on this machine and check the user-scope load**
+- [x] **Step 5: Install from the marketplace on this machine and check the user-scope load**
 
 Run in a terminal `claude` session: `/plugin install spick-dashboard --marketplace Brulek/spick` (after pushing). Then `claude plugin list` shows `spick-dashboard`.
 
-- [ ] **Step 6: Commit and push**
+- [x] **Step 6: Commit and push**
 
 ```bash
 cd ~/dev/spick && git add -A && git commit -m "Ship the dashboard mod via the repo marketplace; docs" && git push

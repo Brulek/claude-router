@@ -181,7 +181,7 @@ def read_text(path, what):
 
 def find_lane(a):
     cfg = lanes.read_config()
-    lane = next((l for l in lanes.load_effective(cfg) if l["id"] == a.lane), None)
+    lane = next((ln for ln in lanes.load_effective(cfg) if ln["id"] == a.lane), None)
     if lane is None:
         raise Fail(2, "unknown or disabled lane: %s" % a.lane)
     if lane.get("kind") == "web-only":

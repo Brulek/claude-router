@@ -264,13 +264,13 @@ class Line(unittest.TestCase):
         doc = quota.collect_all({}, registry_lanes=reg)
         self.assertEqual([e["provider"] for e in doc["providers"]], ["glm"])
         self.assertEqual(doc["providers"][0]["facts"], ["no meter (declared plan only)"])
-        self.assertEqual([l["id"] for l in doc["lanes"]], ["gemini", "grok", "codex", "glm"])
+        self.assertEqual([ln["id"] for ln in doc["lanes"]], ["gemini", "grok", "codex", "glm"])
         self.assertNotIn("meter", doc["lanes"][0])
 
     def test_collect_all_lanes_carry_no_prefer(self):
         reg = lanes.load_effective({"lane_registry": {"glm": {"kind": "api-key", "prefer": ["x"]}}})
-        for l in quota.collect_all({}, registry_lanes=reg)["lanes"]:
-            self.assertNotIn("prefer", l)
+        for ln in quota.collect_all({}, registry_lanes=reg)["lanes"]:
+            self.assertNotIn("prefer", ln)
 
     def test_refresh_rereads_the_config_before_writing_the_cache(self):
         with tempfile.TemporaryDirectory() as d:
@@ -298,7 +298,7 @@ class Line(unittest.TestCase):
                     del os.environ["CLAUDE_CONFIG_DIR"]
                 else:
                     os.environ["CLAUDE_CONFIG_DIR"] = old
-            self.assertEqual([l["id"] for l in doc["lanes"]], ["gemini", "grok", "codex", "a", "b"])
+            self.assertEqual([ln["id"] for ln in doc["lanes"]], ["gemini", "grok", "codex", "a", "b"])
             self.assertEqual([e["provider"] for e in doc["providers"]], ["a", "b"])
             self.assertEqual(quota.read_cache(os.path.join(d, "spick-quota.json"))["lanes"], doc["lanes"])
 
@@ -388,7 +388,7 @@ class RegistryFactsSurvive(unittest.TestCase):
         self.assertTrue(quota.relane())
         doc = quota.read_cache()
         self.assertEqual(self.facts(doc), {k: [v] for k, v in self.FACTS.items()})
-        self.assertIn("glm", [l["id"] for l in doc["lanes"]])
+        self.assertIn("glm", [ln["id"] for ln in doc["lanes"]])
 
     def test_relane_and_refresh_do_nothing_while_spick_json_is_unreadable(self):
         self.seed()

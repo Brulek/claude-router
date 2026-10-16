@@ -1,0 +1,28 @@
+name: Weekly (latest Claude Code)
+
+# The mod job of ci.yml against the newest Claude Code, so an engine change that breaks the mod shows up before users
+# upgrade. ci.yml pins a known version; this one does not, and a failure here does not fail anything else.
+on:
+  schedule:
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+
+jobs:
+  mod-latest:
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Install Claude Code (latest)
+        run: npm install -g @anthropic-ai/claude-code@latest
+      - name: Isolated Claude config dir
+        run: echo "CLAUDE_CONFIG_DIR=${{ runner.temp }}/claude" >> "$GITHUB_ENV"
+      - name: Validate plugin
+        run: claude plugin validate .
+      - name: Validate mod
+        run: claude plugin validate mod/spick-dashboard
+      - name: Mod tests
+        run: claude plugin test mod/spick-dashboard

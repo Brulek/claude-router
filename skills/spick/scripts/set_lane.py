@@ -178,10 +178,10 @@ def apply(rec, built, field, value):
 
 def list_lanes(cfg):
     out = []
-    for l in lanes.load_effective(cfg, include_disabled=True):
-        out.append({"id": l["id"], "name": l.get("name") or l["id"], "enabled": bool(l.get("enabled", True)),
-                    "tags": list(l.get("tags") or []), "data": l.get("data"), "notes": l.get("notes") or None,
-                    "kind": l.get("kind")})
+    for ln in lanes.load_effective(cfg, include_disabled=True):
+        out.append({"id": ln["id"], "name": ln.get("name") or ln["id"], "enabled": bool(ln.get("enabled", True)),
+                    "tags": list(ln.get("tags") or []), "data": ln.get("data"), "notes": ln.get("notes") or None,
+                    "kind": ln.get("kind")})
     return out
 
 

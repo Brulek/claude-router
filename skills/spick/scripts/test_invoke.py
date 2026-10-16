@@ -327,7 +327,7 @@ class Contains(InvokeCase):
         self.assertEqual(r.returncode, 0, r.stderr)
         self.assertEqual(r.stdout, "openai says hi\n")
         self.assertIn("warning", r.stderr)
-        self.assertEqual(len([l for l in r.stderr.splitlines() if "warning" in l]), 1)
+        self.assertEqual(len([line for line in r.stderr.splitlines() if "warning" in line]), 1)
 
     def test_no_warning_when_level_is_enough_or_unset(self):
         r = self.run_invoke(self.api_lane(data="code"), "--lane", "t", "--contains", "text")

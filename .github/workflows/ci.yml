@@ -15,6 +15,15 @@ jobs:
           python-version: "3.12"
       - name: Shell syntax
         run: for f in skills/spick/scripts/*.sh; do bash -n "$f"; done
+      - name: Shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning skills/spick/scripts/*.sh
+      # ruff's rule set is pinned in skills/spick/scripts/ruff.toml, so a new ruff release adds no new rules here
+      - name: Ruff
+        run: |
+          pip install -q ruff
+          ruff check skills/spick/scripts
       - name: Unit tests
         run: cd skills/spick/scripts && python3 -m unittest -q
 
