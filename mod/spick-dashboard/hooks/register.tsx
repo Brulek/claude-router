@@ -4,7 +4,7 @@ import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, Quota
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
-import { EDIT_CAP, UNCHECKED_RE, editCapReason, isCheckCommand, uncheckedReason } from './guard'
+import { EDIT_CAP, UNCHECKED_RE, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 import { KEPT_RE, appendGateLog, gateLogPath, gateOutcome } from './gatelog'
 import type { GateLogEntry } from './gatelog'
 import { findHints, gateReason, lineOf } from './hint'
@@ -512,6 +512,8 @@ export const register: Register = on => {
   let gateFired: { turnId: string; entry: GateLogEntry } | null = null
   /** this session's spend record (~/.claude/spick-spend/<sessionId>.json) */
   const spend: SpendState = { sessionId: '', cwd: '', startedAt: '', rows: [], chain: Promise.resolve() }
+  /** the project's own check commands (spick.json guard.check_commands), read once at session.start */
+  let declared: RegExp[] = []
   /** the guard's per-turn state, cleared at turn.start */
   const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), checkRan: false }
   let mainModel = ''
@@ -551,6 +553,14 @@ export const register: Register = on => {
     try { await loadControls($) } catch {}
     try { await readSessionModel($) } catch {}
     try { await startSpend($, spend, e.cwd) } catch {}
+    // the project's own check commands, once per session; a pattern that does not compile is ignored, with one toast.
+    // The mod sees only HOME, so this is ~/.claude/spick.json whatever CLAUDE_CONFIG_DIR says
+    try {
+      const home = await $.env.get('HOME')
+      const d = declaredChecks(home ? await $.fs.read(`${home}/.claude/spick.json`).catch(() => '') : '')
+      declared = d.patterns
+      if (d.bad.length) $.ui.toast(`spick: guard.check_commands — ignored ${d.bad.length} pattern(s) that do not compile: ${d.bad.join(', ')}`)
+    } catch {}
     // unawaited: a slow write must not hold the session's start
     try {
       markerAt = await $.clock.now()
@@ -730,7 +740,7 @@ export const register: Register = on => {
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
     // a check run by any loop, a subagent's included, counts for the guard's check before the turn ends
-    try { if (isCheckCommand(e.command)) guardTurn.checkRan = true } catch {}
+    try { if (isCheckCommand(e.command, declared)) guardTurn.checkRan = true } catch {}
     if (e.agentId) return next(e)
     const id = e.tool_use_id
     let isCli = false

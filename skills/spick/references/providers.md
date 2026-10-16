@@ -178,3 +178,13 @@ Called end to end with a user key on 2026-10-14:
 ```
 
 `plan` and `price` are free text, both optional. `scripts/quota.py` collects the raw facts into `~/.claude/spick-quota.json` (written atomically, refreshed in the background when older than 10 minutes, never awaited by the hook) and the checklist prints them as one `Quota` line. Nothing in the program judges them. `status` is only the age of the sample: `fresh` under 30 minutes, `stale` older, `unknown` no data. A window past its `resets_at` is reported with `used_pct` null and `reset` true.
+
+## The guard's check commands
+
+The dashboard mod's guard sends back a turn that edited source and ran no check. It knows the common checks (test runners, builds such as `cargo build`, `go build`, `npm run build`, `xcodebuild`, `mvn package`, `gradle build`, `dotnet build`, linters, type checkers, `node --test`, a `*_test.py` script, a `./run-tests.sh`). A project whose check is something else declares it in `~/.claude/spick.json`:
+
+```json
+"guard": {"check_commands": ["^just check\\b", "bin/verify"]}
+```
+
+Each entry is a JavaScript regex string tested against the whole Bash command. The mod reads the list once per session start; an entry that does not compile is ignored, with one toast naming it. The mod sees only `HOME`, so this is `~/.claude/spick.json` even when `CLAUDE_CONFIG_DIR` points elsewhere. Setup keeps the key when it rewrites the file.

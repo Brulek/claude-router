@@ -983,11 +983,12 @@ const bash = (id: string, command: string, agentId?: string) => ({ tool: 'Bash' 
 const CHECKED = 'Done; the tests pass.'
 
 /** a session for the guard's tests: the model given, every tool call answered, the edits that reached the tool recorded */
-async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claude-haiku-5-5') {
+async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claude-haiku-5-5', spickJson: string | null = null) {
   mock.clock(on, { now: 1000 })
   mock.store(on)
   mock.env(on, { HOME: '/h' })
   const world = session(on, model)
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' && spickJson !== null ? { value: spickJson } : { deny: 'missing' }))
   const ran: string[] = []
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
@@ -1133,6 +1134,23 @@ test('a coder that edited source and ran no check still sends the turn back, tho
   // the hint gate stayed out of it (something was delegated); the guard's check did not
   expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(0)
   expect(world.toasts.filter(t => t.startsWith('spick: guard')).length).toBe(1)
+})
+
+test('a check command the project declares in spick.json counts; a pattern that does not compile is ignored with one toast', async ($, on) => {
+  const cfg = JSON.stringify({ version: 1, guard: { check_commands: ['^just check\\b', '(broken'] } })
+  const { world, turn, stop } = await guardWorld($, on, 'claude-haiku-5-5', cfg)
+  expect(world.toasts.filter(t => t.startsWith('spick: guard.check_commands')))
+    .toEqual(['spick: guard.check_commands — ignored 1 pattern(s) that do not compile: (broken'])
+  await turn('t1')
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'just check --all' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // a command neither built in nor declared leaves the turn unchecked
+  await turn('t2')
+  await $.tool.call(edit('e2', '/repo/b.py'))
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'just fmt' })
+  expect(await stop(LONG_REPLY)).toContain('spick guard')
 })
 
 test('the gate and the guard\'s check send a turn back once between them', async ($, on) => {

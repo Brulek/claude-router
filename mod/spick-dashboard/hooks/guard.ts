@@ -5,8 +5,9 @@
 export const EDIT_CAP = 3
 
 /**
- * The command names that count as a check: a test runner, a build check, a linter or a type checker. Each on word
- * boundaries, anywhere in the command (after `cd x &&`, in a pipeline, on a later line).
+ * The command names that count as a check: a test runner, a build, a linter or a type checker. Each on word
+ * boundaries, anywhere in the command (after `cd x &&`, in a pipeline, on a later line). A project can add its own
+ * in spick.json (`guard.check_commands`, see declaredChecks).
  */
 const CHECKS: readonly RegExp[] = [
   /\bpytest\b/,
@@ -14,14 +15,24 @@ const CHECKS: readonly RegExp[] = [
   /\bvitest\b/,
   /\bjest\b/,
   /\bmocha\b/,
-  /\bcargo\s+(test|check|clippy)\b/,
-  /\bgo\s+(test|vet)\b/,
-  /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|check|lint|typecheck)\b/,
+  /\bnode\b.*\s--test\b/,
+  // a python script whose name ends in test or tests, or a module whose name holds test
+  /\bpython3?\s+(?:\S+\s+)*?\S*tests?\.py\b/,
+  /\bpython3?\s+-m\s+\S*test/,
+  // a script whose name holds test, run as ./x where a command starts, or as bash x or sh x
+  /(?:^|[;&|(\n])\s*\.\/\S*test/,
+  /\b(?:bash|sh)\s+\S*test/,
+  /\bcargo\s+(test|check|clippy|build)\b/,
+  /\bgo\s+(test|vet|build)\b/,
+  /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|check|lint|typecheck|build)\b/,
+  /\bdotnet\s+(test|build)\b/,
+  /\bgradlew?\s+(test|build)\b/,
+  /\bmvn\s+(?:-\S+\s+)*(test|verify|package)\b/,
   /\bclaude\s+plugin\s+(test|validate)\b/,
   /\btsc\b/,
   /\bmake\s+(test|check)\b/,
-  /\bswift\s+test\b/,
-  /\bxcodebuild\b.*\btest\b/,
+  /\bswift\s+(test|build)\b/,
+  /\bxcodebuild\b/,
   /\bruff\b/,
   /\beslint\b/,
   /\bflake8\b/,
@@ -30,10 +41,32 @@ const CHECKS: readonly RegExp[] = [
   /\bbash\s+-n\b/,
 ]
 
-/** whether a Bash command runs a check (tests, a build check, a linter, a type checker) */
-export function isCheckCommand(command: string): boolean {
+/** whether a Bash command runs a check (tests, a build, a linter, a type checker), the project's declared ones included */
+export function isCheckCommand(command: string, declared: readonly RegExp[] = []): boolean {
   const c = command ?? ''
-  return CHECKS.some(re => re.test(c))
+  return CHECKS.some(re => re.test(c)) || declared.some(re => re.test(c))
+}
+
+/** the longest declared pattern taken; a longer one is reported as bad */
+const MAX_DECLARED = 300
+
+/**
+ * A project's own check commands: `guard.check_commands` in spick.json, an array of regex strings, each compiled on
+ * its own. One that is not a string, is too long or does not compile goes to `bad` and is ignored; text that is not
+ * JSON, or has no such array, declares nothing.
+ */
+export function declaredChecks(spickJson: string | null | undefined): { patterns: RegExp[]; bad: string[] } {
+  const out = { patterns: [] as RegExp[], bad: [] as string[] }
+  let cfg: unknown
+  try { cfg = JSON.parse(spickJson ?? '') } catch { return out }
+  const guard = cfg && typeof cfg === 'object' ? (cfg as Record<string, unknown>).guard : undefined
+  const list = guard && typeof guard === 'object' ? (guard as Record<string, unknown>).check_commands : undefined
+  if (!Array.isArray(list)) return out
+  for (const s of list) {
+    if (typeof s !== 'string' || !s || s.length > MAX_DECLARED) { out.bad.push(String(s).slice(0, 40)); continue }
+    try { out.patterns.push(new RegExp(s)) } catch { out.bad.push(s.slice(0, 40)) }
+  }
+  return out
 }
 
 /** a reply whose one line starting with Unchecked: says why no check ran this turn */

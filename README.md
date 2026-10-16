@@ -118,7 +118,7 @@ The gate and the guard are the mod's only two interventions. Everything else it 
 **The guard** does two things while routing is in force.
 
 - Edit cap: the main session's own source edits are capped at 3 distinct files per turn. A fourth file is refused with a message that names the three and asks for `Agent(coder)`. Edits to the same files, a subagent's edits, and notes, data or `.claude/` files do not count.
-- Check at stop: when any loop, a subagent included, edited source in a turn and no loop ran a check (a test runner, a build check, a linter or a type checker), the stop is sent back once. The main session is asked to run the project's check, hand the user a `/goal` line, or state why there is none in one line starting with `Unchecked:` (or `未验证:`).
+- Check at stop: when any loop, a subagent included, edited source in a turn and no loop ran a check (a test runner, a build, a linter or a type checker), the stop is sent back once. A project with its own check command declares it as a regex in `~/.claude/spick.json` under `guard.check_commands` (see `skills/spick/references/providers.md`). The main session is asked to run the project's check, hand the user a `/goal` line, or state why there is none in one line starting with `Unchecked:` (or `未验证:`).
 - `/spick guard off` switches the guard off, and the choice is remembered.
 
 The gate and the guard together send a turn back at most once.
