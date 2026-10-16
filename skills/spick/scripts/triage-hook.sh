@@ -45,7 +45,7 @@ TXT
 [ -n "$py" ] && [ -n "$input" ] && printf '%s' "$input" | "$py" "$here/triage_hint.py" --stdin-json 2>/dev/null
 cat <<'TXT'
 3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.
-Reply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex gpt-6-astra (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.
+Reply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex <model> (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.
 TXT
 [ "$registry" = 1 ] && [ -n "$py" ] && "$py" "$here/lanes.py" --line 2>/dev/null
 [ -n "$py" ] && "$py" "$here/quota.py" --line 2>/dev/null

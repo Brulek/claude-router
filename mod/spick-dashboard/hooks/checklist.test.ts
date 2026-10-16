@@ -30,7 +30,7 @@ test('routing on: the three questions, the bash hook\'s substance, no notes', ()
   expect(REGISTRY_LANE_LINE).toBe(laneBullets(true).join('\n'))
   expect(REGISTRY_LANE_LINE).toContain('-> Agent(planner); the change then goes to Agent(coder) with the plan.')
   expect(REGISTRY_LANE_LINE).toContain('A brief carries no design of your own')
-  expect(block).toContain('Review: Codex gpt-6-astra (medium)')
+  expect(block).toContain('Review: Codex <model> (medium)')
   expect(block).toContain('every participant, reviewer included, carries its own model and effort')
   expect(block).not.toContain('lane is off')
   expect(block).not.toContain(reviewOffNote(true))
@@ -54,20 +54,20 @@ test('a lane switched off is simply absent from the cache: no note, the Lanes li
   ]
   const all = checklist(ctl(), HAIKU, true, undefined, on).split('\n')
   expect(all.at(-1)).toBe('Lanes (user-declared; data = most that may be sent): gemini search data:public · grok x-data data:public · codex code data:code')
-  expect(all.join('\n')).toContain('Review: Codex gpt-6-astra (medium)')
+  expect(all.join('\n')).toContain('Review: Codex <model> (medium)')
   const noGemini = checklist(ctl(), HAIKU, true, undefined, on.slice(1)).split('\n')
   expect(noGemini.at(-1)).toBe('Lanes (user-declared; data = most that may be sent): grok x-data data:public · codex code data:code')
   expect(noGemini.join('\n')).not.toContain('lane is off')
   // codex absent from the enabled lanes: no Codex reviewer in the label example
   const noCodex = checklist(ctl(), HAIKU, true, undefined, on.slice(0, 2))
-  expect(noCodex).not.toContain('Codex gpt-6-astra')
+  expect(noCodex).not.toContain('Codex <model>')
   expect(noCodex).toContain('Review: skipped]')
 })
 
 test('review off adds its note and the label example reads Review: off', () => {
   const block = checklist(ctl({ review: 'off' }), HAIKU, true)
   expect(block).toContain('| Review: off]')
-  expect(block).not.toContain('Codex gpt-6-astra')
+  expect(block).not.toContain('Codex <model>')
   expect(block.split('\n').at(-1)).toBe(reviewOffNote(true))
 })
 
@@ -115,7 +115,7 @@ test('/spick arguments parse; anything else is usage', () => {
 
 test('with every switch at its default the block is the bash hook\'s text, word for word', () => {
   // a copy of scripts/triage-hook.sh's heredoc; test_triage_hint.py runs the hook itself and compares it with this file's constants
-  expect(checklist(DEFAULT_CONTROLS, HAIKU, true)).toBe("[spick triage - answer all three before the first tool call]\n1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).\n2. Lane? Route by the shape of the deliverable, top to bottom, first match wins; you are the last line, not the first:\n   - a verdict: compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing, or you cannot tell how hard it is -> Agent(deep). You never write a verdict yourself; read files only to brief it.\n   - a plan or a design, or a change that needs a decision the user did not make (layout, API, algorithm, data shape, which file) -> Agent(planner); the change then goes to Agent(coder) with the plan.\n   - changed code beyond a one-liner with nothing left to decide -> Agent(coder). You never edit source yourself.\n   - web lookup -> Gemini (agy); X data -> Grok.\n   - a plain lookup, nothing else: the answer is already in a file here, a command's output or your own knowledge (Q&A, find/read, summarise, tidy, run a script) -> you.\n   A prompt that mixes kinds is split by kind: you fetch, a lane searches, deep judges, coder edits. Pick an effort for every delegate. The Agent tool's own \"when in doubt, don't spawn\" is written for a model doing its own work; you are the triage layer, so when in doubt, spawn deep. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.\n3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.\nReply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex gpt-6-astra (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.")
+  expect(checklist(DEFAULT_CONTROLS, HAIKU, true)).toBe("[spick triage - answer all three before the first tool call]\n1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).\n2. Lane? Route by the shape of the deliverable, top to bottom, first match wins; you are the last line, not the first:\n   - a verdict: compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing, or you cannot tell how hard it is -> Agent(deep). You never write a verdict yourself; read files only to brief it.\n   - a plan or a design, or a change that needs a decision the user did not make (layout, API, algorithm, data shape, which file) -> Agent(planner); the change then goes to Agent(coder) with the plan.\n   - changed code beyond a one-liner with nothing left to decide -> Agent(coder). You never edit source yourself.\n   - web lookup -> Gemini (agy); X data -> Grok.\n   - a plain lookup, nothing else: the answer is already in a file here, a command's output or your own knowledge (Q&A, find/read, summarise, tidy, run a script) -> you.\n   A prompt that mixes kinds is split by kind: you fetch, a lane searches, deep judges, coder edits. Pick an effort for every delegate. The Agent tool's own \"when in doubt, don't spawn\" is written for a model doing its own work; you are the triage layer, so when in doubt, spawn deep. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.\n3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.\nReply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex <model> (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.")
 })
 
 test('while the band shows (labelLine false) no sentence asks for the label line', () => {

@@ -34,7 +34,8 @@ export const REGISTRY_LANE_LINE = laneBullets(true).join('\n')
 export const TITLE_LINE = '[spick triage - answer all three before the first tool call]'
 export const PLAN_LINE = '1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).'
 export const GOAL_LINE = '3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.'
-export const REVIEW_CODEX = 'Review: Codex gpt-6-astra (medium)'
+// `<model>` stands for the `model` in ~/.codex/config.toml; the label names the real one (SKILL.md Step 7)
+export const REVIEW_CODEX = 'Review: Codex <model> (medium)'
 export const WHO_WITH_REVIEWER = 'every participant, reviewer included, carries its own model and effort'
 export const WHO_PLAIN = 'every participant carries its own model and effort'
 export const labelLineText = (main: string, review: string, who: string): string =>

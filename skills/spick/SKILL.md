@@ -181,7 +181,7 @@ End **every** reply with one line stating what ran. The user uses it to catch mi
 [Model: Haiku 5.5 | Effort: medium]
 [Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]
 [Model: Haiku 5.5 (medium) → Gemini gemini-3.8-flash (low)]
-[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (medium) | Review: Codex gpt-6-astra (medium)]
+[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (medium) | Review: Codex <model> (medium)]
 ```
 
 Every participant carries its own effort in parentheses, the reviewer included: name the reviewer's actual model (Codex: the `model` in `~/.codex/config.toml` unless you passed `-m`) and the effort you passed. `Review: skipped` appears only when code changed and no trigger fired.
