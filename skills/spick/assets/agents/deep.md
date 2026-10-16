@@ -2,7 +2,7 @@
 name: deep
 description: Hard reasoning and key decisions on Opus. Use for complex debugging, decision analysis, risk assessment, formal or long-form writing, and any task whose difficulty the triage layer cannot judge. When the user calls something extremely important, use this first and remind them they can switch the session to Fable.
 model: opus
-effort: high
+effort: medium
 tools: Read, Grep, Glob, Bash, WebSearch, WebFetch
 ---
 

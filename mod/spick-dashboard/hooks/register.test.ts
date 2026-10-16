@@ -800,7 +800,7 @@ test('the Hint line comes from the prompt itself: a comparison gets it after ite
   await $.session.start(START)
   const judged = ((await $.prompt.submit({ ...PROMPT, text: '把 spick 和对方的分流机制对比一下，看看有没有差距' })).context ?? [])[0] ?? ''
   const lines = judged.split('\n')
-  const at = lines.findIndex(l => l.startsWith('   Hint (keywords in this prompt, not a verdict): judgement words (对比, 差距) -> start from Agent(deep, high)'))
+  const at = lines.findIndex(l => l.startsWith('   Hint (keywords in this prompt, not a verdict): judgement words (对比, 差距) -> start from Agent(deep); pick the effort by the table'))
   expect(at).toBeGreaterThan(2)
   expect((lines[at - 1] ?? '').startsWith('   A prompt that mixes kinds')).toBe(true)
   expect((lines[at + 1] ?? '').startsWith('3. Goal-shaped?')).toBe(true)
@@ -835,7 +835,7 @@ test('a hinted verdict answered by the main session alone is blocked once at sto
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'wc -l a b' })
   const r = await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })
   expect(r.block).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and nothing was delegated this turn')
-  expect(r.block).toContain('dispatch Agent(deep, high)')
+  expect(r.block).toContain('dispatch Agent(deep)')
   expect(r.block).toContain('`Kept:`')
   expect(world.toasts).toContain('spick: gate — verdict kept by the triage session; sent back once')
   // once per turn: the stop after a block (Claude Code marks it stop_hook_active) passes, and so would one without the mark

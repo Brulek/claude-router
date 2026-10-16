@@ -92,7 +92,7 @@ flowchart TD
 | X / Twitter data | Grok (`grok`) |
 | Independent code review, image generation | Codex (`codex`) |
 
-Default effort: `coder` medium, `planner` high, `deep` high.
+Default effort: `coder` medium, `planner` high, `deep` medium (raised per task: high for hard or multi-file problems, xhigh for key decisions).
 
 ## Dashboard (optional)
 

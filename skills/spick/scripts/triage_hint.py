@@ -28,7 +28,7 @@ WEB_ADDRESS = "a web address"
 
 # what each kind's keywords imply; {t} is the matched words
 PHRASES = {
-    "judgement": "judgement words ({t}) -> start from Agent(deep, high)",
+    "judgement": "judgement words ({t}) -> start from Agent(deep); pick the effort by the table",
     "review": "review words ({t}) -> the review lane for a diff, else Agent(deep)",
     "design": "design words ({t}) -> Agent(planner) before any coder",
     "code": "edit words ({t}) -> Agent(coder) once nothing is left to decide",

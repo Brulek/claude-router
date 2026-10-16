@@ -22,7 +22,7 @@ export const KEYWORDS: Record<HintKind, readonly string[]> = {
 
 /** what each kind's keywords imply, around the matched words */
 const PHRASES: Record<HintKind, (t: string) => string> = {
-  judgement: t => `judgement words (${t}) -> start from Agent(deep, high)`,
+  judgement: t => `judgement words (${t}) -> start from Agent(deep); pick the effort by the table`,
   review: t => `review words (${t}) -> the review lane for a diff, else Agent(deep)`,
   design: t => `design words (${t}) -> Agent(planner) before any coder`,
   code: t => `edit words (${t}) -> Agent(coder) once nothing is left to decide`,
@@ -84,7 +84,7 @@ export function gateReason(hints: readonly Hint[]): GateReason | null {
   if (!hit.length) return null
   const verdict = hit.some(h => h.kind !== 'design')
   const kind = verdict ? 'verdict' : 'design'
-  const who = verdict ? 'Agent(deep, high)' : 'Agent(planner, high)'
+  const who = verdict ? 'Agent(deep)' : 'Agent(planner, high)'
   const words = hit.flatMap(h => h.words.slice(0, MAX_SHOWN)).join(', ')
   const text = `spick gate: this prompt was hinted as a ${kind} (${words}) and nothing was delegated this turn, so the ${kind} came from the triage session itself. Do one of two things now: dispatch ${who} with the facts you gathered and relay its answer in place of yours; or, if the deliverable really was a plain lookup, reply with one line starting with \`Kept:\` that says why, and stop. This gate fires once per turn.`
   return { kind, text }

@@ -198,7 +198,7 @@ test('/spick lane forms: show, on|off maps to enabled, any field with a free-tex
 })
 
 test('the Hint line sits right after item 2 and before item 3; absent when there is none', () => {
-  const hint = '   Hint (keywords in this prompt, not a verdict): judgement words (对比) -> start from Agent(deep, high). Keeping a hinted task yourself needs a one-line reason in the reply, on a line starting with `Kept:`.'
+  const hint = '   Hint (keywords in this prompt, not a verdict): judgement words (对比) -> start from Agent(deep); pick the effort by the table. Keeping a hinted task yourself needs a one-line reason in the reply, on a line starting with `Kept:`.'
   const lines = checklist(ctl(), HAIKU, true, undefined, undefined, hint).split('\n')
   const at = lines.indexOf(hint)
   expect(at).toBe(2 + laneBullets(false).length)

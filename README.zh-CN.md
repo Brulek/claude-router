@@ -92,7 +92,7 @@ flowchart TD
 | X / Twitter 数据 | Grok（`grok`） |
 | 独立代码审核、图像生成 | Codex（`codex`） |
 
-默认推理强度：`coder` medium，`planner` high，`deep` high。
+默认推理强度：`coder` medium，`planner` high，`deep` medium（按任务上调：难题或跨文件问题用 high，关键决策用 xhigh）。
 
 ## 仪表盘（可选）
 
