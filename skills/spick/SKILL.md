@@ -32,7 +32,7 @@ Decide first what the task needs, then pick a lane that offers it. Go down the t
 
 | The task needs | Lane | If no lane offers it |
 |---|---|---|
-| search: live web, fact check, "what is the latest…", prices, versions | tag `search` (default Gemini `agy`) | `deep` with WebSearch |
+| search: live web, fact check, "what is the latest…", prices, versions | tag `search` (default Gemini `agy`) | `Agent(general-purpose, model sonnet, effort medium)` with WebSearch; judging what it finds is still `deep`'s job |
 | x-data: X / Twitter posts, trends, accounts, sentiment on X | tag `x-data` (default Grok) | tell the user it needs a lane with X data; do not fake it with web search |
 | image: generate or edit an image | tag `image` (default Codex via `codex-image` or the imagegen skill; Gemini image-generator) | tell the user |
 | video generation | none | tell the user: Grok Imagine, Sora and Veo are web/app only |

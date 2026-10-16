@@ -8,7 +8,7 @@ This session is the triage layer. Decide who does each task, then check the resu
 
 | Task needs | Who |
 |---|---|
-| search / fact check | a lane tagged `search` (default Gemini `agy`), else `deep` |
+| search / fact check | a lane tagged `search` (default Gemini `agy`), else `Agent(general-purpose, model sonnet, effort medium)` with WebSearch; judging what it finds is still `deep`'s job |
 | x-data (X / Twitter) | a lane tagged `x-data` (default Grok); none else |
 | image generation or editing | a lane tagged `image` (default Codex codex-image, then Gemini) |
 | long-context / multimodal: long video/audio or huge documents | a lane tagged `long-context` or `multimodal` (default Gemini) |
