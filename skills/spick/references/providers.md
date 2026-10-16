@@ -166,7 +166,7 @@ Called end to end with a user key on 2026-10-14:
 
 ## Subscriptions and the quota cache
 
-`~/.claude/spick.json` may carry a `subscriptions` object. Only the providers listed in it are collected and shown; a missing key means not subscribed. Write it by hand (setup does not manage it yet):
+`~/.claude/spick.json` may carry a `subscriptions` object. Only the providers listed in it are collected and shown; a missing key means not subscribed. Write it with `scripts/set_subscription.py` (`--provider claude|codex|gemini|grok --plan "<text>" [--price "<text>"]`, `--remove`, `--list`, `--dry-run`; it backs up to `spick.json.bak` and validates), never by hand. The result looks like:
 
 ```json
 "subscriptions": {

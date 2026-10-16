@@ -30,6 +30,7 @@ What to do when the user types a spick phrase or a `/spick` command, and what ea
 - `references/providers-catalog.md` - checked `base_url`, key name and meter preset per API service. Read it before writing a registry entry.
 - `scripts/add_lane.py` - registers one lane in `spick.json` (backup, validation, `--dry-run`).
 - `scripts/set_lane.py` - changes one field of one lane (`--list` shows tags, data, enabled, notes; `--field enabled --value yes|no` is the one on/off switch; backup, validation, `--dry-run`). The user may change any field; never hand-edit `spick.json`.
+- `scripts/set_subscription.py` - records which plan the user is on per built-in provider (`subscriptions`, what the Quota line shows): `--provider P --plan "<text>" [--price "<text>"]`, `--remove`, `--list`; backup, validation, `--dry-run`.
 - `scripts/invoke.py` - calls a registered lane (`--list-models`).
 - `scripts/lanes.py` - lane registry (`--validate`, `--line`, `--json`); built-ins in `assets/builtin-lanes.json`.
 - `scripts/triage_hint.py` - the Hint line: the keywords of a prompt and the default route they imply (`--stdin-json` from the hook, `--text` by hand); table in `assets/triage-hints.json`, twin in the dashboard mod's `hint.ts`.

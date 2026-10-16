@@ -25,11 +25,12 @@ Show it to the user. For anything missing, give the install or login command and
 
 Nothing is required except Claude itself. With no outside CLI installed the skill still does Claude-internal tiering.
 
-## 2. Ask three things
+## 2. Ask four things
 
 1. **Which lanes to enable** among the detected ones (default: all that are logged in).
 2. **Main-session model**: recommend Haiku and say why (it only triages and does chores). Offer Sonnet for users who want fewer handoffs. Mention that in the Claude desktop app they must also pick the model once in the composer's model menu; the app remembers its own choice.
 3. **Default effort** for the main session (recommend Medium).
+4. **Which plan each enabled lane is on** (Claude too), in the user's own words, for example "Max 20x, $200/mo" or "Pro Lite". Optional: a provider left out is simply not shown on the Quota line.
 
 ## 3. Install
 
@@ -41,6 +42,8 @@ Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <h
 - inserts `assets/claude-md-snippet.md` into `~/.claude/CLAUDE.md` between `<!-- spick:start -->` / `<!-- spick:end -->` markers (re-running replaces the block, never duplicates it),
 - registers a `UserPromptSubmit` hook (`scripts/triage-hook.sh`) in `~/.claude/settings.json` that prints a three-question triage checklist on every prompt; small models follow a per-turn checklist far better than a once-per-session rule,
 - sets `model` and `effortLevel` in `~/.claude/settings.json` only if `--model` / `--effort` were given, keeping every other key.
+
+Then record each plan from question 4, one call per provider: `python3 <skill-dir>/scripts/set_subscription.py --provider <claude|codex|gemini|grok> --plan "<plan>" [--price "<price>"]`. Never hand-edit `spick.json`.
 
 Tell the user what was written, file by file.
 
