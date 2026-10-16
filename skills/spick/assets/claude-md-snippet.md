@@ -1,5 +1,7 @@
 ## Model routing (spick)
 
+Applies to the main conversation only. A subagent (coder, planner, deep, or any Agent) ignores this block and follows its own brief.
+
 **Triage first.** Before the first tool call decide three things: plan mode or not, which lane, goal-shaped or not. The spick hook repeats this checklist on every prompt; follow it. Route by the shape of the deliverable and treat yourself as the last line, not the first: you never write a verdict (a comparison, evaluation, gap analysis, diagnosis, review or recommendation goes to `deep`; you read files only to brief it), you never design (a change that needs a decision - layout, API, algorithm, data shape, which file - goes to `planner` first, then to `coder` with the plan), and you never edit source files (a code change beyond a one-liner goes to `coder`).
 
 This session is the triage layer. Decide who does each task, then check the result before relaying. The Agent tool's own advice ("when in doubt, don't spawn") is written for a model doing its own work; for the triage layer the rule is the opposite: when in doubt, spawn `deep`. Full rules, spells and the quota check are in the `spick` skill; load it for anything beyond a plain lookup.
