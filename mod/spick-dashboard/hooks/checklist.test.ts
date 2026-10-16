@@ -40,8 +40,8 @@ test('routing on: the three questions, the bash hook\'s substance, no notes', ()
 test('routing off: the off sentence alone', () => {
   expect(checklist(ctl({ routing: 'off' }), HAIKU, true)).toBe(offSentence(true))
   expect(checklist(ctl({ manualModel: true }), HAIKU, true)).toBe(offSentence(true))
-  // on, on a model that is not Haiku, routes nothing
-  expect(checklist(ctl(), FABLE, true)).toBe(offSentence(true))
+  // on, on a model that is not Haiku, routes nothing (and says /spick force exists)
+  expect(checklist(ctl(), FABLE, true)).toBe(offSentence(true, true))
   // force routes on any model
   expect(checklist(ctl({ routing: 'force' }), FABLE, true)).not.toBe(offSentence(true))
 })
@@ -132,6 +132,16 @@ test('while the band shows (labelLine false) no sentence asks for the label line
   // labelLine true keeps today's wording
   expect(checklist(ctl({ routing: 'off' }), HAIKU, true)).toBe(offSentence(true))
   expect(checklist(ctl({ review: 'off' }), HAIKU, true).split('\n').at(-1)).toBe(reviewOffNote(true))
+})
+
+test('on but not Haiku: the off sentence names /spick force; switched off or picked by hand, it does not', () => {
+  const note = ' (`/spick force` routes on any model; a forced session still sends code to `coder` so the main context stays small)'
+  expect(checklist(ctl(), FABLE, true)).toBe(offSentence(true) + note)
+  expect(checklist(ctl(), FABLE, false)).toBe(offSentence(false) + note)
+  expect(offSentence(true, true)).toBe(offSentence(true) + note)
+  expect(checklist(ctl({ routing: 'off' }), FABLE, true)).toBe(offSentence(true))
+  expect(checklist(ctl({ manualModel: true }), FABLE, true)).toBe(offSentence(true))
+  expect(checklist(ctl(), HAIKU, true)).not.toContain('/spick force')
 })
 
 test('force: the label example names the session model', () => {

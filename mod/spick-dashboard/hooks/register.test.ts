@@ -352,6 +352,8 @@ const START = { cwd: '/repo', surface: 'terminal' as const, isInteractive: true 
 const OFF_HEAD = 'Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; '
 /** the off sentence while the band shows (a terminal session) */
 const OFF = OFF_HEAD + 'the status band shows who worked, so print no label line.'
+// on, in a session that is not Haiku: the off sentence also says /spick force exists
+const OFF_NOT_HAIKU = OFF + ' (`/spick force` routes on any model; a forced session still sends code to `coder` so the main context stays small)'
 /** the off sentence where no band is drawn */
 const OFF_LABEL = OFF_HEAD + 'still end with the label line.'
 const MODELS: Record<string, string> = { opus: 'claude-opus-5-5', haiku: 'claude-haiku-5-5', fable: 'claude-fable-5-1' }
@@ -425,12 +427,12 @@ test('on, on a model that is not Haiku, routes nothing; force routes there; auto
   mock.store(on)
   session(on, 'claude-fable-5-1')
   await $.session.start(START)
-  expect(await contextOf($)).toEqual([OFF])
+  expect(await contextOf($)).toEqual([OFF_NOT_HAIKU])
   expect((await $.command.run({ command: 'spick', args: 'on', ...RUN })).text).toBe('spick: routing on · routes nothing (Fable 5.1 is not Haiku)')
   expect((await $.command.run({ command: 'spick', args: 'force', ...RUN })).text).toBe('spick: routing force')
   expect(isChecklist(await contextOf($))).toBe(true)
   expect((await $.command.run({ command: 'spick', args: 'auto', ...RUN })).text).toBe('spick: routing on · routes nothing (Fable 5.1 is not Haiku)')
-  expect(await contextOf($)).toEqual([OFF])
+  expect(await contextOf($)).toEqual([OFF_NOT_HAIKU])
 })
 
 test('a routing value stored under the old names is read in its new name, and written under the new key only', async ($, on) => {

@@ -32,7 +32,7 @@ Spick 让主会话保持低成本，只在真正需要的任务上动用 Opus，
    ```
 
 2. 在 Claude Code 中输入 `spick setup`。该命令探测已安装的 CLI，安装三个子代理，并注册分诊清单钩子。
-3. 桌面版应用需在模型菜单中选择一次 Haiku。
+3. 桌面版应用需在模型菜单中选择一次 Haiku；除非强制开启（`/spick force`），Spick 只在 Haiku 会话里分流。
 
 手动安装、仪表盘 Mod 与卸载见[安装](#安装)。
 
@@ -200,6 +200,10 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 ### Spick 会切换主会话的模型吗？
 
 不会。Spick 不改主会话的模型。想逐轮切换，可与 Spick 同时运行 claude-router。见[已知限制](#已知限制)。
+
+### 在 Sonnet、Opus 或 Fable 会话里
+
+在 `/spick on`（默认）下，这类会话按设计不分流：主模型自己就能做，清单换成一句说明。不装仪表盘 Mod 时，CLAUDE.md 区块也是同样的规则。`/spick force` 在任何模型上都保留委派：编辑仍交给 `coder` 在它自己的上下文里执行，`deep` 仍给出独立的第二意见，尽管主模型自己也能做。长会话里主上下文会被编辑细节塞满时，或判断类结论想让全新上下文复核时，值得这样做。
 
 ### Gemini、Grok、Codex 是必需的吗？
 

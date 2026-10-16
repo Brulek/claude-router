@@ -32,7 +32,7 @@ Spick keeps the main session cheap and spends Opus only on tasks that need it, s
    ```
 
 2. Enter `spick setup` in Claude Code. Setup detects the installed CLIs, installs the subagents and registers the checklist hook.
-3. In the desktop app, select Haiku once in the model menu.
+3. In the desktop app, select Haiku once in the model menu; Spick routes only in a Haiku session unless forced (`/spick force`).
 
 Manual installation, the dashboard mod and uninstall are under [Installation](#installation).
 
@@ -200,6 +200,10 @@ Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini /
 ### Does Spick switch the main session's model?
 
 No. Spick does not change the main session's model. To switch it on each turn, run claude-router alongside Spick. See [Known limitations](#known-limitations).
+
+### Sessions on Sonnet, Opus or Fable
+
+With `/spick on` (the default) such a session routes nothing, by design: the main model can do the work itself, so the checklist is replaced by one sentence saying so. Without the dashboard mod the CLAUDE.md block says the same. `/spick force` keeps the delegation on any model: `coder` still runs edits in its own context, and `deep` still gives an independent second opinion, even though the main model could do both. That is worth it in long sessions where the main context would fill with edit noise, and for verdicts you want checked by a fresh context.
 
 ### Do I need Gemini, Grok and Codex?
 

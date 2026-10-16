@@ -9,8 +9,10 @@ export const LANE_NAMES: Record<string, string> = { gemini: 'Gemini', grok: 'Gro
 
 // `labelLine` is false while the status band shows (it records who worked): then no sentence asks for the label line.
 const OFF_HEAD = 'Spick routing is off for this session: do the work yourself, do not dispatch coder/planner/deep by the Spick table, do not route to Gemini/Grok/Codex; '
-export const offSentence = (labelLine: boolean): string =>
-  OFF_HEAD + (labelLine ? 'still end with the label line.' : 'the status band shows who worked, so print no label line.')
+/** said when the switch is `on` but the session model is not Haiku: the user may not know force exists */
+export const FORCE_NOTE = ' (`/spick force` routes on any model; a forced session still sends code to `coder` so the main context stays small)'
+export const offSentence = (labelLine: boolean, notHaiku = false): string =>
+  OFF_HEAD + (labelLine ? 'still end with the label line.' : 'the status band shows who worked, so print no label line.') + (notHaiku ? FORCE_NOTE : '')
 export const reviewOffNote = (labelLine: boolean): string =>
   labelLine ? 'Codex review is off: skip the review step and write `Review: off` in the label line.' : 'Codex review is off: skip the review step.'
 export const laneName = (lane: string): string => LANE_NAMES[lane] ?? lane
@@ -80,7 +82,7 @@ export function effectiveRouting(c: Controls, sessionModel: string): Effective {
  * right after item 2, where the model has just read the buckets.
  */
 export function checklist(c: Controls, sessionModel: string, labelLine: boolean, quotaLine?: string, lanes?: readonly LaneInfo[], hint?: string | null): string {
-  if (!effectiveRouting(c, sessionModel).on) return offSentence(labelLine)
+  if (!effectiveRouting(c, sessionModel).on) return offSentence(labelLine, c.routing === 'on' && !c.manualModel && !/haiku/i.test(sessionModel))
   // the label example names the session's own model (forced on may run on any)
   const main = sessionModel ? modelName(sessionModel) : 'Haiku 5.5'
   const declared = lanes ?? []
