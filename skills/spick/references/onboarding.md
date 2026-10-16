@@ -44,7 +44,7 @@ Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <h
 
 Tell the user what was written, file by file.
 
-Optional: if the user has other AI services (DeepSeek, Kimi, OpenRouter, a local Ollama, a relay), ask which ones and follow "Adding an outside AI" in `SKILL.md`: you write the `lane_registry` entries yourself, the user only stores each key in the keychain. Leaving it out is the normal case and changes nothing. The field list is in `references/providers.md` (Lane registry).
+Optional: if the user has other AI services (DeepSeek, Kimi, OpenRouter, a local Ollama, a relay), ask which ones and follow "Adding an outside AI" in `references/operations.md`: you write the `lane_registry` entries yourself, the user only stores each key in the keychain. Leaving it out is the normal case and changes nothing. The field list is in `references/providers.md` (Lane registry).
 
 ## 4. Finish
 

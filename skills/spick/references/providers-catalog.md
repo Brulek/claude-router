@@ -20,4 +20,4 @@ Notes:
 
 Not in catalogue: read the provider's docs with WebFetch first, before writing any entry.
 
-GLM (Zhipu), Doubao (Volcano Engine Ark), relay stations (new-api / one-api) and anything else: not in catalogue, read the provider's docs before writing an entry. Do not write their URLs or model ids from memory. Ask the user for the docs URL and read it first (see "Adding an outside AI" in `SKILL.md`). Volcano Engine needs AK/SK signing for its balance and Zhipu has no known public balance endpoint, so use `meter` type `none` for them.
+GLM (Zhipu), Doubao (Volcano Engine Ark), relay stations (new-api / one-api) and anything else: not in catalogue, read the provider's docs before writing an entry. Do not write their URLs or model ids from memory. Ask the user for the docs URL and read it first (see "Adding an outside AI" in `references/operations.md`). Volcano Engine needs AK/SK signing for its balance and Zhipu has no known public balance endpoint, so use `meter` type `none` for them.
