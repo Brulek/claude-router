@@ -29,6 +29,16 @@ export const LANE_TAIL = `   A prompt that mixes kinds is split by kind: you fet
 export const laneBullets = (registry: boolean): string[] => [LANE_HEAD, LANE_BULLET_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, registry ? LANE_BULLET_REGISTRY : LANE_BULLET_BUILTIN, LANE_BULLET_YOU, LANE_TAIL]
 /** checklist item 2 when the user declared lane_registry, as one block */
 export const REGISTRY_LANE_LINE = laneBullets(true).join('\n')
+// The fixed lines of the checklist. test_triage_hint.py reads these constants out of this file and compares the
+// default checklist with what scripts/triage-hook.sh prints: keep each a plain string literal.
+export const TITLE_LINE = '[spick triage - answer all three before the first tool call]'
+export const PLAN_LINE = '1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).'
+export const GOAL_LINE = '3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.'
+export const REVIEW_CODEX = 'Review: Codex gpt-6-astra (medium)'
+export const WHO_WITH_REVIEWER = 'every participant, reviewer included, carries its own model and effort'
+export const WHO_PLAIN = 'every participant carries its own model and effort'
+export const labelLineText = (main: string, review: string, who: string): string =>
+  `Reply starts with the deliverable; end with the label line: no delegate -> \`[Model: ${main} | Effort: medium]\`; with delegates -> \`[Model: ${main} (medium) → coder Sonnet 5.5 (high) | ${review}]\` — ${who}. Never write \`→ none\` or \`→ 无\`.`
 export const NO_LABEL_LINE = 'Reply starts with the deliverable; the status band shows who worked, so print no label line.'
 
 /** True where an AbovePrompt band is drawn: terminal and desktop. */
@@ -75,17 +85,15 @@ export function checklist(c: Controls, sessionModel: string, labelLine: boolean,
   const declared = lanes ?? []
   const registry = declared.length > 0
   const codex = !registry || declared.some(l => l.id === 'codex')
-  const review = c.review === 'off' ? 'Review: off' : codex ? 'Review: Codex gpt-6-astra (medium)' : 'Review: skipped'
-  const who = c.review !== 'off' && codex ? 'every participant, reviewer included, carries its own model and effort' : 'every participant carries its own model and effort'
+  const review = c.review === 'off' ? 'Review: off' : codex ? REVIEW_CODEX : 'Review: skipped'
+  const who = c.review !== 'off' && codex ? WHO_WITH_REVIEWER : WHO_PLAIN
   const lines = [
-    '[spick triage - answer all three before the first tool call]',
-    '1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).',
+    TITLE_LINE,
+    PLAN_LINE,
     ...laneBullets(registry),
     ...(hint ? [hint] : []),
-    '3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.',
-    labelLine
-      ? `Reply starts with the deliverable; end with the label line: no delegate -> \`[Model: ${main} | Effort: medium]\`; with delegates -> \`[Model: ${main} (medium) → coder Sonnet 5.5 (high) | ${review}]\` — ${who}. Never write \`→ none\` or \`→ 无\`.`
-      : NO_LABEL_LINE,
+    GOAL_LINE,
+    labelLine ? labelLineText(main, review, who) : NO_LABEL_LINE,
   ]
   if (c.review === 'off') lines.push(reviewOffNote(labelLine))
   if (registry) {

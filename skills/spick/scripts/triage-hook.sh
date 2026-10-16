@@ -9,6 +9,7 @@
 # A stale marker (mod uninstalled) expires on its own. `find -mmin` works on both macOS and Linux.
 # The quota cache (~/.claude/spick-quota.json) is refreshed from here in the background, never awaited;
 # the last line printed below is a one-line summary of that cache (plain facts, no rules).
+# The mod builds the same text from checklist.ts; test_triage_hint.py runs this hook and fails when the two drift.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 py=$(command -v python3 || command -v python || true)
 marker="${HOME}/.claude/.spick-mod-active"

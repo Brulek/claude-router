@@ -12,6 +12,7 @@ import triage_hint as th  # noqa: E402
 
 REPO = os.path.dirname(os.path.dirname(os.path.dirname(HERE)))
 HINT_TS = os.path.join(REPO, "mod", "spick-dashboard", "hooks", "hint.ts")
+CHECKLIST_TS = os.path.join(REPO, "mod", "spick-dashboard", "hooks", "checklist.ts")
 SCRIPT = os.path.join(HERE, "triage_hint.py")
 HOOK = os.path.join(HERE, "triage-hook.sh")
 with open(os.path.join(HERE, "testdata", "triage_hints.json"), encoding="utf-8") as f:
@@ -21,6 +22,20 @@ PROMPT_1 = FIXTURE[0]["prompt"]   # the comparison that was kept by the main ses
 LANE_HEAD = "2. Lane? Route by the shape of the deliverable, top to bottom, first match wins; you are the last line, not the first:"
 BULLET_BUILTIN = "   - web lookup -> Gemini (agy); X data -> Grok."
 BULLET_REGISTRY = "   - a task an outside lane is tagged for -> pick from the Lanes line by its tags; never send anything above a lane's data: level."
+
+
+def ts_constants(path):
+    """The `export const NAME = '...'` string literals of a .ts file (single, double or backtick quotes, no ${}),
+    plus the template of each `export const name = (...): string =>` arrow, unescaped."""
+    with open(path, encoding="utf-8") as f:
+        src = f.read()
+    unesc = lambda t: re.sub(r"\\(.)", r"\1", t)
+    out = {}
+    for m in re.finditer(r"^export const (\w+) = (?:'((?:[^'\\\n]|\\.)*)'|\"((?:[^\"\\\n]|\\.)*)\"|`((?:[^`\\$]|\\.)*)`)$", src, re.M):
+        out[m.group(1)] = unesc(next(g for g in m.groups()[1:] if g is not None))
+    for m in re.finditer(r"^export const (\w+) = \([^)]*\): string =>\n\s*`((?:[^`\\]|\\.)*)`$", src, re.M):
+        out[m.group(1)] = unesc(m.group(2))
+    return out
 
 
 class Fixture(unittest.TestCase):
@@ -125,6 +140,16 @@ class Hook(unittest.TestCase):
             self.assertIn(LANE_HEAD, lines)
             self.assertFalse(any(l.startswith("   Hint") for l in lines))
             self.assertTrue(any(l.startswith("3. Goal-shaped?") for l in lines))
+
+    def test_the_hook_prints_the_mods_default_checklist(self):
+        # the mod cannot spawn bash, so the two texts are compared here: the default checklist rebuilt from
+        # checklist.ts's constants against the hook's own output, minus the trailing Quota line
+        k = ts_constants(CHECKLIST_TS)
+        label = k["labelLineText"].replace("${main}", "Haiku 5.5").replace("${review}", k["REVIEW_CODEX"]).replace("${who}", k["WHO_WITH_REVIEWER"])
+        want = [k["TITLE_LINE"], k["PLAN_LINE"], k["LANE_HEAD"], k["LANE_BULLET_DEEP"], k["LANE_BULLET_PLANNER"],
+                k["LANE_BULLET_CODER"], k["LANE_BULLET_BUILTIN"], k["LANE_BULLET_YOU"], k["LANE_TAIL"], k["GOAL_LINE"], label]
+        got = [l for l in self.run_hook(prompt="x") if l and not l.startswith("Quota")]
+        self.assertEqual(got, want)
 
 
 if __name__ == "__main__":
