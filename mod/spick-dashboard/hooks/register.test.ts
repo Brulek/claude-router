@@ -2,6 +2,7 @@ import { test, expect, mock } from 'claude-code/testing'
 import type { Engine, Plugin, TestBody } from 'claude-code/testing'
 import type { LaneTotals, TurnRecord } from '../types'
 import { SCRIPT, fakeSetLane } from './fakelane'
+import { parseGateLog } from './gatelog'
 
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 
@@ -904,6 +905,51 @@ test('the gate stays quiet when something was delegated, on a short reply or a K
   expect(await stop(LONG_REPLY)).toBeUndefined()
   await $.turn.complete({ turnId: 't8', ...DONE })
   expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(1)
+})
+
+test('each gate firing and what became of it is a line in ~/.claude/spick-gate.jsonl; design words are never gated', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-16T10:00:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  const world = session(on)
+  // the log as last written (session() records every write), a foreign line in it from the start
+  const logText = () => world.writes.filter(w => w.path === '/h/.claude/spick-gate.jsonl').at(-1)?.text ?? 'not json\n'
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-gate.jsonl' ? { value: logText() } : { deny: 'missing' }))
+  on('session.id', async () => ({ value: 's1' }))
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async () => ({ result: {} as never }))
+  await $.session.start(START)
+  const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
+  const stop = async (msg: string, active = false) => (await $.classic.Stop({ stop_hook_active: active as false, last_assistant_message: msg })).block
+  const lines = () => parseGateLog(logText())
+  // sent back, then kept with a Kept: line
+  await turn('t1', VERDICT)
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'diff a b' })
+  expect(await stop(LONG_REPLY)).toContain('spick gate')
+  expect(lines()).toEqual([{ at: '2026-10-16T10:00:00.000Z', sessionId: 's1', kind: 'judgement', words: ['为什么'], outcome: 'sent-back' }])
+  expect(logText().startsWith('not json\n')).toBe(true)
+  expect(await stop(LONG_REPLY + '\nKept: the deliverable is a diff.', true)).toBeUndefined()
+  expect(lines().map(l => l.outcome)).toEqual(['sent-back', 'kept'])
+  // a third stop of the same turn logs nothing more
+  await stop(LONG_REPLY + '\nKept: again.', true)
+  expect(lines().length).toBe(2)
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // sent back, then delegated to deep
+  await turn('t2', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'git diff' })
+  expect(await stop(LONG_REPLY)).toContain('spick gate')
+  await $.tool.call({ ...agentCall('a2', 'deep'), model: 'opus', effort: 'medium' })
+  await stop(LONG_REPLY, true)
+  expect(lines().slice(2).map(l => [l.kind, l.outcome])).toEqual([['review', 'sent-back'], ['review', 'delegated']])
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  // design words alone: a Hint line, never a send-back, nothing logged
+  await turn('t3', '这个功能怎么设计，where is the design doc')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', command: 'ls docs' })
+  expect(await stop(LONG_REPLY)).toBeUndefined()
+  await $.turn.complete({ turnId: 't3', ...DONE })
+  expect(lines().length).toBe(4)
 })
 
 test('gate off persists to the store and comes back at the next session.start', async ($, on) => {

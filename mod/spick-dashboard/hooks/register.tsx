@@ -5,6 +5,8 @@ import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checkl
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
 import { EDIT_CAP, UNCHECKED_RE, editCapReason, isCheckCommand, uncheckedReason } from './guard'
+import { KEPT_RE, appendGateLog, gateLogPath, gateOutcome } from './gatelog'
+import type { GateLogEntry } from './gatelog'
 import { findHints, gateReason, lineOf } from './hint'
 import type { Hint } from './hint'
 import { readQuota } from './quota'
@@ -237,6 +239,21 @@ async function addSpend($: EngineInterface, s: SpendState, row: SpendRow): Promi
   await run
 }
 
+/** one line in ~/.claude/spick-gate.jsonl (gatelog.ts), read, appended and written whole; writes run one at a time */
+let gateLogChain: Promise<void> = Promise.resolve()
+function logGate($: EngineInterface, entry: GateLogEntry): Promise<void> {
+  const run = gateLogChain.then(async () => {
+    const home = await $.env.get('HOME')
+    if (!home) return
+    const path = gateLogPath(home)
+    let prev = ''
+    try { prev = await $.fs.read(path) } catch {}
+    await $.fs.write(path, appendGateLog(prev, entry))
+  })
+  gateLogChain = run.catch(() => undefined)
+  return run
+}
+
 const SPEND = '.claude/skills/spick/scripts/spend.py'
 
 /** `/spick spend`: the last seven days as scripts/spend.py sums them, or one line saying why not */
@@ -447,8 +464,6 @@ const routingOptions: readonly Routing[] = ['on', 'force', 'off']
 const reviewOptions: readonly Review[] = ['auto', 'off']
 const gateOptions: readonly Gate[] = ['on', 'off']
 const guardOptions: readonly Guard[] = ['on', 'off']
-/** a reply whose one line starting with Kept: states why a hinted task stayed with the main session */
-const KEPT_RE = /(^|\n)\s*(Kept|自留)[:：]/
 /** an answer at least this long, with no tool call, counts as a verdict delivered rather than a question back */
 const LONG_ANSWER = 400
 const nextRouting = (r: Routing): Routing => (r === 'on' ? 'force' : r === 'force' ? 'off' : 'on')
@@ -493,6 +508,8 @@ export const register: Register = on => {
   let mainTurnId = ''
   /** the turn the gate or the guard's check already sent back once (one send-back per turn, for both) */
   let gateAskedTurn = ''
+  /** the gate's firing this turn, until a later stop logs what became of it (kept or delegated) */
+  let gateFired: { turnId: string; entry: GateLogEntry } | null = null
   /** this session's spend record (~/.claude/spick-spend/<sessionId>.json) */
   const spend: SpendState = { sessionId: '', cwd: '', startedAt: '', rows: [], chain: Promise.resolve() }
   /** the guard's per-turn state, cleared at turn.start */
@@ -768,15 +785,25 @@ export const register: Register = on => {
   // Stop time, where the gate and the guard's check intervene (with the guard's edit cap, the only places this module
   // does). Both fire at most once per turn between them, never while routing is off, and the reason returned is what
   // Claude Code hands the model as the reason to continue.
-  // The gate: a prompt the Hint line called a verdict (or a design) that the main session answered on its own,
-  // delegating nothing, is sent back to dispatch deep (or planner) or to say in one line (`Kept:`) why the deliverable
-  // was a lookup after all. Never on a short reply without tool calls (a question back); /spick gate off switches it off.
+  // The gate: a prompt the Hint line called a verdict (judgement or review words; design words never) that the main
+  // session answered on its own, delegating nothing, is sent back to dispatch deep or to say in one line (`Kept:`) why
+  // the deliverable was a lookup after all. Never on a short reply without tool calls (a question back); /spick gate off
+  // switches it off. Each firing, and what became of it, is a line in ~/.claude/spick-gate.jsonl (gatelog.ts).
   // The guard's check: a turn in which any loop (a subagent too) edited source and no loop ran a check is sent back to
   // run one, hand the user a /goal line, or say in one line (`Unchecked:`) why there is none. A delegate does not
   // excuse it. /spick guard off switches it off, with the edit cap.
   on('classic.Stop', async ($, e, next) => {
     const r = await next(e)
     try {
+      // a turn the gate sent back: log, once, whether the model then delegated or kept it with a Kept: line
+      if (gateFired && gateFired.turnId === mainTurnId) {
+        const outcome = gateOutcome(e.last_assistant_message ?? '', delegate !== null)
+        if (outcome) {
+          const entry = { ...gateFired.entry, outcome }
+          gateFired = null
+          await logGate($, entry).catch(() => undefined)
+        }
+      }
       if (r.block || e.stop_hook_active || gateAskedTurn === mainTurnId) return r
       const c = await read($, controls)
       if (!effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) return r
@@ -785,6 +812,10 @@ export const register: Register = on => {
       const g = isGated ? gateReason(hintsOfTurn) : null
       if (g) {
         gateAskedTurn = mainTurnId
+        const sessionId = spend.sessionId || (await $.session.id().catch(() => ''))
+        const entry: GateLogEntry = { at: new Date(await $.clock.now()).toISOString(), sessionId, kind: g.kinds.join('+'), words: g.words, outcome: 'sent-back' }
+        gateFired = { turnId: mainTurnId, entry }
+        await logGate($, entry).catch(() => undefined)
         $.ui.toast(`spick: gate — ${g.kind} kept by the triage session; sent back once`)
         await setCurrent($, { note: { kind: 'warning', text: `gate: ${g.kind} kept` } })
         return { ...r, block: g.text }

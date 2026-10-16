@@ -108,11 +108,12 @@ The gate and the guard are the mod's only two interventions. Everything else it 
 
 **The gate**
 
-- It acts when a prompt's Hint line named a verdict (or a design) and the main session answered it without delegating anything.
-- Then the stop is sent back once. The main session is told to dispatch `deep` (or `planner`), or to state why the deliverable was a plain lookup, in one line starting with `Kept:` (or `自留:`).
+- It acts when a prompt's Hint line named a verdict (judgement or review words) and the main session answered it without delegating anything. Design words stay a Hint line but never send a turn back.
+- Then the stop is sent back once. The main session is told to dispatch `deep`, or to state why the deliverable was a plain lookup, in one line starting with `Kept:` (or `自留:`).
 - It never fires twice in a turn.
 - It never fires on a short reply without tool calls (a question back).
 - `/spick gate off` switches it off.
+- Each firing, and whether the turn then delegated or kept it with a `Kept:` line, is one JSON line in `~/.claude/spick-gate.jsonl`, so false positives can be counted.
 
 **The guard** does two things while routing is in force.
 

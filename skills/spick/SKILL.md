@@ -21,7 +21,7 @@ Once per session: `test -f ~/.claude/spick.json`. Missing means a first run: sto
 
 **You do not design.** A change that needs a decision the user did not make (layout, API, algorithm, data shape, which file) goes to `planner` first, however small; `coder` executes the plan. A design by the smallest model is the mis-route spick exists to prevent.
 
-**The Hint line**, when the checklist carries one, names prompt keywords (`scripts/triage_hint.py` or the mod; `assets/triage-hints.json`) and the route they imply, e.g. `judgement words (对比, 差距) -> start from Agent(deep); pick the effort by the table`. Follow it, or put one line starting with `Kept:` in the reply saying why the deliverable is a plain lookup. With the dashboard mod, a hinted verdict or design you answer yourself, nothing delegated and no `Kept:` line, is sent back once at stop time (the gate).
+**The Hint line**, when the checklist carries one, names prompt keywords (`scripts/triage_hint.py` or the mod; `assets/triage-hints.json`) and the route they imply, e.g. `judgement words (对比, 差距) -> start from Agent(deep); pick the effort by the table`. Follow it, or put one line starting with `Kept:` in the reply saying why the deliverable is a plain lookup. With the dashboard mod, a hinted verdict you answer yourself, nothing delegated and no `Kept:` line, is sent back once at stop time (the gate; design words are never sent back).
 
 "default" names the built-in lane, used when no Lanes line names another with that tag.
 

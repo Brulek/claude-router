@@ -67,20 +67,21 @@ test('the line shows at most three words per kind and keeps the fixed head and t
   expect(line).not.toContain('评价')
 })
 
-test('gateReason: a verdict or a design the main session kept; other kinds are not the gate\'s business', () => {
+test('gateReason: a verdict the main session kept; design words and other kinds are not the gate\'s business', () => {
   const v = gateReason(findHints('把 A 和 B 对比一下，差距在哪'))
   expect(v?.kind).toBe('verdict')
   expect(v?.text).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and nothing was delegated this turn')
   expect(v?.text).toContain('dispatch Agent(deep)')
   expect(v?.text).toContain('reply with one line starting with `Kept:`')
   expect(v?.text.endsWith('This gate fires once per turn.')).toBe(true)
-  const d = gateReason(findHints('这个功能怎么设计'))
-  expect(d?.kind).toBe('design')
-  expect(d?.text).toContain('hinted as a design (怎么设计)')
-  expect(d?.text).toContain('dispatch Agent(planner, high)')
-  // review counts as a verdict; a design next to a verdict reads as a verdict, deep's
-  expect(gateReason(findHints('review this diff'))?.kind).toBe('verdict')
-  expect(gateReason(findHints('评估一下这个方案'))).toMatchObject({ kind: 'verdict' })
+  expect(v?.kinds).toEqual(['judgement'])
+  expect(v?.words).toEqual(['对比', '差距'])
+  // design words are a Hint line only: never gated, however the prompt reads
+  expect(findHints('这个功能怎么设计').map(h => h.kind)).toEqual(['design'])
+  for (const t of ['这个功能怎么设计', 'where is the design doc', 'what is the architecture']) expect(gateReason(findHints(t))).toBeNull()
+  // review counts as a verdict; a design next to a verdict is gated for the verdict alone
+  expect(gateReason(findHints('review this diff'))).toMatchObject({ kind: 'verdict', kinds: ['review'] })
+  expect(gateReason(findHints('评估一下这个方案'))).toMatchObject({ kind: 'verdict', kinds: ['judgement'], words: ['评估'] })
   for (const t of ['fix the bug', 'what is the latest version', '这条推文说了什么', '现在几点了', '']) expect(gateReason(findHints(t))).toBeNull()
   expect(lineOf([])).toBeNull()
   expect(lineOf(findHints('对比一下'))).toBe(hintLine('对比一下'))

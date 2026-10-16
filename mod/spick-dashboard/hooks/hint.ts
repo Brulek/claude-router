@@ -69,23 +69,24 @@ export function hintLine(text: string): string | null {
   return lineOf(findHints(text))
 }
 
-/** the kinds the gate acts on: a verdict (judgement, review) or a design, neither the main session's to deliver */
-const GATED: readonly HintKind[] = ['judgement', 'review', 'design']
+/**
+ * The kinds the gate acts on: a verdict (judgement, review words). Design words stay a Hint line but never send a turn
+ * back: the list is too broad ("where is the design doc" would be gated).
+ */
+const GATED: readonly HintKind[] = ['judgement', 'review']
 
-export type GateReason = { kind: 'verdict' | 'design'; text: string }
+/** `kinds` and `words` are the hinted kinds and matched words the gate fired on, for the gate log (gatelog.ts) */
+export type GateReason = { kind: 'verdict'; kinds: HintKind[]; words: string[]; text: string }
 
 /**
- * Why a stop is sent back once: the hinted kind the main session answered itself, and what to do instead. Null when
- * none of the findings is the gate's business (edit words, web signs and X words are other lanes' affairs). The text
- * is what Claude Code hands the model as its reason to continue.
+ * Why a stop is sent back once: the hinted verdict the main session answered itself, and what to do instead. Null when
+ * none of the findings is the gate's business (design and edit words, web signs and X words are other lanes' affairs).
+ * The text is what Claude Code hands the model as its reason to continue.
  */
 export function gateReason(hints: readonly Hint[]): GateReason | null {
   const hit = hints.filter(h => GATED.includes(h.kind))
   if (!hit.length) return null
-  const verdict = hit.some(h => h.kind !== 'design')
-  const kind = verdict ? 'verdict' : 'design'
-  const who = verdict ? 'Agent(deep)' : 'Agent(planner, high)'
-  const words = hit.flatMap(h => h.words.slice(0, MAX_SHOWN)).join(', ')
-  const text = `spick gate: this prompt was hinted as a ${kind} (${words}) and nothing was delegated this turn, so the ${kind} came from the triage session itself. Do one of two things now: dispatch ${who} with the facts you gathered and relay its answer in place of yours; or, if the deliverable really was a plain lookup, reply with one line starting with \`Kept:\` that says why, and stop. This gate fires once per turn.`
-  return { kind, text }
+  const words = hit.flatMap(h => h.words.slice(0, MAX_SHOWN))
+  const text = `spick gate: this prompt was hinted as a verdict (${words.join(', ')}) and nothing was delegated this turn, so the verdict came from the triage session itself. Do one of two things now: dispatch Agent(deep) with the facts you gathered and relay its answer in place of yours; or, if the deliverable really was a plain lookup, reply with one line starting with \`Kept:\` that says why, and stop. This gate fires once per turn.`
+  return { kind: 'verdict', kinds: hit.map(h => h.kind), words, text }
 }
