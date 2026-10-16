@@ -312,6 +312,9 @@ test('formatters', () => {
   expect(near(estimateCost('claude-haiku-5-5', writes), 0.125)).toBe(true)
   expect(near(estimateCost('claude-sonnet-5-5', writes), 2.5)).toBe(true)
   expect(near(estimateCost('claude-opus-5-5', writes), 5)).toBe(true)
+  // Fable 5.1: $10 in, $50 out, $0.25 cache read, 12.5 cache write; a session on Fable shows a cost in /spick spend
+  expect(near(estimateCost('claude-fable-5-1', writes), 12.5)).toBe(true)
+  expect(near(estimateCost('claude-fable-5-1', { input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 0 }), 10 + 5 + 0.25)).toBe(true)
   const mixed = estimateCost('claude-sonnet-5-5', { input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 1_000_000, cache_creation_input_tokens: 400_000 })
   expect(near(mixed, 2 + 1 + 0.2 + 1)).toBe(true)
   expect(estimateCost('gemini-3.8-flash', { input_tokens: 10, output_tokens: 10, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 })).toBeNull()

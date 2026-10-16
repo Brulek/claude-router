@@ -7,11 +7,13 @@ const CLAUDE_NAMES: Record<string, string> = {
   'claude-fable-5-1': 'Fable 5.1',
 }
 // price table, USD per million tokens: input, output, cache read, cache write
-// (1.25 x input). Estimates only.
+// (1.25 x input). Estimates only. Source: the claude-api skill's model table (cached 2026-10-06; Claude Code 2.1.299),
+// which gives input, output and, for Fable 5.1, a cache read of $0.25; Haiku 5.5 is priced for prompts up to 100K tokens.
 const PRICES: Record<string, [number, number, number, number]> = {
   'claude-haiku-5-5': [0.1, 0.5, 0.01, 0.125],
   'claude-sonnet-5-5': [2, 10, 0.2, 2.5],
   'claude-opus-5-5': [4, 20, 0.2, 5],
+  'claude-fable-5-1': [10, 50, 0.25, 12.5],
 }
 
 export function modelName(id: string): string {
