@@ -229,6 +229,7 @@ class TaskFiles(unittest.TestCase):
                     self.assertTrue((common.TASKS_DIR / t["template"] / p).is_file(), (tid, p))
             if t["grader"] == "judge":
                 self.assertTrue(t["rubric"], tid)
+                self.assertIsInstance(t["check"]["pass_overall"], int, tid)  # T9 shipped without one: grade.py crashed at its judge
 
 
 class JudgeTask(unittest.TestCase):
@@ -278,6 +279,10 @@ class JudgeTask(unittest.TestCase):
             self.assertEqual(calls, {"codex": 1, "claude": 2})
             self.assertEqual(graded[b_run]["judge_overall"], 3)  # claude alone decides now
             self.assertTrue(graded[b_run]["pass"])
+            # a cached call that scored nothing (a failed judge) is made again, not reused
+            (Path(out) / "judge" / "T5.claude.txt").write_text("exit 1; no verdict", encoding="utf-8")
+            grade.judge_task(out, "T5", self.task, graded, {}, args)
+            self.assertEqual(calls, {"codex": 1, "claude": 3})
 
 
 if __name__ == "__main__":

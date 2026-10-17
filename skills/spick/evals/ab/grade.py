@@ -142,10 +142,11 @@ def call_claude(prompt, cwd, timeout=900):
     """The second judge: Opus through `claude -p` with no tools, hooks and the global mod off. The user's global
     CLAUDE.md still loads (its label-line rule does not touch the JUDGE_JSON line). The text the parser reads is the
     result, followed by a trailer with the exit code, the call's cost and the model that answered."""
-    settings = Path(cwd) / "_claude-judge-settings.json"
+    # absolute paths: claude resolves a relative --settings against its own cwd, which is this directory
+    settings = (Path(cwd) / "_claude-judge-settings.json").resolve()
     settings.write_text(json.dumps({"disableAllHooks": True, "enabledPlugins": {common.GLOBAL_MOD_KEY: False}}),
                         encoding="utf-8")
-    mcp = Path(cwd) / "_claude-judge-mcp.json"  # no MCP servers: the user's connectors would add 100k tokens of context
+    mcp = (Path(cwd) / "_claude-judge-mcp.json").resolve()  # no MCP servers: the user's connectors would add 100k tokens
     mcp.write_text('{"mcpServers": {}}', encoding="utf-8")
     cmd = ["claude", "-p", prompt, "--output-format", "json", "--model", "opus", "--tools", "",
            "--settings", str(settings), "--mcp-config", str(mcp), "--strict-mcp-config"]
@@ -360,7 +361,8 @@ def judge_task(out, tid, task, graded, judge_info, args):
     info = {"calls": 0, "tokens": None, "cost_usd": None, "judges": {}}
     for name in args.judges:
         rawf = jdir / (f"{tid}.txt" if name == "codex" else f"{tid}.{name}.txt")
-        if stale or not rawf.exists():
+        # a cached verdict is reused only when it scored something: a failed call is not a verdict to keep
+        if stale or not rawf.exists() or not parse_judge(rawf.read_text(encoding="utf-8"), key):
             rawf.write_text(JUDGES[name](prompt, jdir), encoding="utf-8")
         raw_text = rawf.read_text(encoding="utf-8")
         tokens, cost = judge_cost(name, raw_text)
