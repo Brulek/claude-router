@@ -36,6 +36,31 @@ class Fixture(unittest.TestCase):
         self.assertTrue(any(c["line"] is None and c["prompt"] for c in FIXTURE))
 
 
+class Corpus(unittest.TestCase):
+    """testdata/hint_corpus.json: labelled prompts both implementations must answer alike (hint.test.ts reads a rendered
+    copy; render_rules.py --check keeps the copy current)."""
+
+    def test_every_prompt_gets_its_kinds(self):
+        with open(os.path.join(HERE, "testdata", "hint_corpus.json"), encoding="utf-8") as f:
+            corpus = json.load(f)
+        self.assertGreaterEqual(len(corpus), 40)
+        self.assertTrue(any(c["kinds"] == [] and "/" in c["prompt"] for c in corpus), "paths")
+        self.assertTrue(any(c["kinds"] == [] and "```" in c["prompt"] for c in corpus), "code blocks")
+        self.assertTrue(any(c["kinds"] == [] and "不要" in c["prompt"] for c in corpus), "Chinese negations")
+        self.assertTrue(any(c["kinds"] == [] and "don't" in c["prompt"] for c in corpus), "English negations")
+        for c in corpus:
+            self.assertEqual([k for k, _ in th.find_hints(c["prompt"])], c["kinds"], c["prompt"])
+
+    def test_blanking_and_negation_rules(self):
+        self.assertEqual(th.blank("a https://e.com/review进行对比"), ("a  进行对比", True))
+        self.assertEqual(th.blank("x ```fix``` y")[0], "x   y")
+        self.assertNotIn("review", th.blank("see src/review.py and ~/x and ./y and ../z")[0])
+        self.assertEqual(th.find_hints("不要修改"), [])
+        self.assertEqual(th.find_hints("不要 1234567修改"), [("code", ["修改"])])
+        self.assertEqual([k for k, _ in th.find_hints("要不要修改")], ["judgement", "code"])
+        self.assertEqual(th.find_hints("don't fix the tests, fix the parser"), [("code", ["fix"])])
+
+
 class Table(unittest.TestCase):
     def test_kinds_in_priority_order(self):
         self.assertEqual(list(th.load_table()), ["judgement", "review", "design", "code", "web", "x"])

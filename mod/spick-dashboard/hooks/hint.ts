@@ -32,29 +32,64 @@ const phrase = (kind: HintKind, t: string): string => PHRASE_TEMPLATES[kind].spl
 export const HINT_HEAD = '   Hint (keywords in this prompt, not a verdict): '
 export const HINT_TAIL = '. Keeping a hinted task yourself needs a one-line reason in the reply, on a line starting with `Kept:`.'
 const MAX_SHOWN = 3
-const URL_RE = /https?:\/\/\S+/i
 const WEB_ADDRESS = 'a web address'
+// Hint v2, the same steps as triage_hint.py: a fenced code block (``` or ~~~, unterminated runs to the end), then a
+// URL (ASCII only, so Chinese glued to it survives; it still counts as a web sign), then a path-like token (a run of
+// path characters holding a / or starting with ~) each become one space before any keyword is looked for.
+const FENCE_RE = /(```|~~~)[\s\S]*?(?:\1|$)/g
+const URL_RE = /https?:\/\/[!-~]+/gi
+const TOKEN_RE = /[A-Za-z0-9_.~/-]+/g
+/** a keyword preceded by a negation that ends at most this many characters before it does not fire */
+const NEG_WINDOW = 6
 
 const esc = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 const isAscii = (s: string) => /^[\x00-\x7f]+$/.test(s)
-/** an ASCII entry on word boundaries, case-insensitively (spaces match any whitespace); any other entry as a substring */
-const matches = (text: string, low: string, word: string): boolean => {
-  if (!isAscii(word)) return text.includes(word)
-  const pat = '(?<![a-z0-9])' + word.toLowerCase().split(/\s+/).map(esc).join('\\s+') + '(?![a-z0-9])'
-  return new RegExp(pat).test(low)
+/** only A-Z lowered, so positions in the result are positions in the text */
+const lowerAscii = (s: string) => s.replace(/[A-Z]/g, c => c.toLowerCase())
+
+/** the text with code blocks, URLs and path-like tokens blanked, and whether it held a URL */
+export function blank(text: string): { text: string; hadUrl: boolean } {
+  let t = text.replace(FENCE_RE, ' ')
+  const hadUrl = new RegExp(URL_RE.source, 'i').test(t)
+  t = t.replace(URL_RE, ' ')
+  t = t.replace(TOKEN_RE, m => (m.includes('/') || m.startsWith('~') ? ' ' : m))
+  return { text: t, hadUrl }
+}
+
+type Span = readonly [number, number]
+/** where `word` occurs in `low`: an ASCII entry on word boundaries (spaces match any whitespace), any other as a substring */
+function spans(low: string, word: string): Span[] {
+  const out: Span[] = []
+  if (isAscii(word)) {
+    const re = new RegExp('(?<![a-z0-9])' + word.toLowerCase().split(/\s+/).map(esc).join('\\s+') + '(?![a-z0-9])', 'g')
+    for (const m of low.matchAll(re)) out.push([m.index ?? 0, (m.index ?? 0) + m[0].length])
+    return out
+  }
+  for (let i = low.indexOf(word); i >= 0; i = low.indexOf(word, i + 1)) out.push([i, i + word.length])
+  return out
 }
 
 export type Hint = { kind: HintKind; words: string[] }
 
-/** the kinds that fired, in the table's order, each with its matched words; a word a longer match already covers is left out */
+/**
+ * The kinds that fired, in the table's order, each with its matched words; a word a longer match already covers is
+ * left out. A word fires when one of its occurrences has no negation ending within NEG_WINDOW characters before it;
+ * a negation inside a keyword (不要 in 要不要) is not one.
+ */
 export function findHints(text: string): Hint[] {
-  const t = text ?? ''
-  const low = t.toLowerCase()
+  const { text: blanked, hadUrl } = blank(text ?? '')
+  const low = lowerAscii(blanked)
+  const kinds = Object.keys(KEYWORDS) as HintKind[]
+  const hits = kinds.map(kind => ({ kind, ws: KEYWORDS[kind].map(w => ({ w, sps: spans(low, w) })) }))
+  const inside = hits.flatMap(h => h.ws.flatMap(x => x.sps))
+  const negEnds = NEGATIONS.flatMap(n => spans(low, n))
+    .filter(([s, e]) => !inside.some(([a, b]) => a <= s && e <= b && !(a === s && b === e)))
+    .map(([, e]) => e)
+  const fires = (sps: readonly Span[]) => sps.some(([start]) => !negEnds.some(e => start - NEG_WINDOW <= e && e <= start))
   const out: Hint[] = []
-  for (const kind of Object.keys(KEYWORDS) as HintKind[]) {
-    const found: string[] = []
-    if (kind === 'web' && URL_RE.test(t)) found.push(WEB_ADDRESS)
-    for (const w of KEYWORDS[kind]) if (matches(t, low, w) && !found.some(f => f.includes(w))) found.push(w)
+  for (const { kind, ws } of hits) {
+    const found: string[] = kind === 'web' && hadUrl ? [WEB_ADDRESS] : []
+    for (const { w, sps } of ws) if (fires(sps) && !found.some(f => f.includes(w))) found.push(w)
     if (found.length) out.push({ kind, words: found })
   }
   return out
