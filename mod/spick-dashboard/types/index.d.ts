@@ -70,9 +70,15 @@ export type Gate = 'on' | 'off'
  * to go to a coder) and sends a turn that edited source without running a check back once at stop time; `off` never
  */
 export type Guard = 'on' | 'off'
+/**
+ * verdicts: `keep` follows the size rule (a verdict over small material stays in the main session with a `Kept:` line),
+ * `deep` sends every verdict to `deep`, and a `Kept:` line no longer satisfies the gate for a judgement hint
+ */
+export type Verdicts = 'keep' | 'deep'
 export type Controls = {
   routing: Routing
   review: Review
+  verdicts: Verdicts
   gate: Gate
   guard: Guard
   /** the user picked a model by hand this session: routing is off until /spick on or /spick force */
@@ -95,7 +101,7 @@ declare module 'claude-code' {
       totals: Record<string, LaneTotals>
       quota: Quota | null
       hidden: boolean
-      /** the switches; routing, review, the gate and the guard are also kept in $.store (the lanes' on/off lives in spick.json) */
+      /** the switches; routing, review, verdicts, the gate and the guard are also kept in $.store (the lanes' on/off lives in spick.json) */
       controls: Controls
       /** the session model id from $.session.model(), '' until read */
       sessionModel: string

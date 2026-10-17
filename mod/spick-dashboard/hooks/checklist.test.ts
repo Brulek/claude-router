@@ -1,7 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
 import { lanesFromCache, lanesFromConfig } from './quotaline'
-import { CHECKLIST_TEMPLATE, DEFAULT_CONTROLS, EFFORT_DEFAULTS, LANE_BULLET_DEEP, LANE_BULLET_LANES_BUILTIN, LANE_BULLET_LANES_NONE, LANE_BULLET_YOU, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
+import { CHECKLIST_TEMPLATE, DEFAULT_CONTROLS, EFFORT_DEFAULTS, LANE_BULLET_DEEP, LANE_BULLET_DEEP_VERDICTS_DEEP, LANE_BULLET_LANES_BUILTIN, LANE_BULLET_LANES_NONE, LANE_BULLET_YOU, LANE_BULLET_YOU_VERDICTS_DEEP, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, parseVerdicts, ARGUMENT_HINT, USAGE } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
 const FABLE = 'claude-fable-5-1'
@@ -304,5 +304,53 @@ test('the guard switch parses and defaults to on', () => {
   expect(parseSpick(' Guard ON ')).toEqual({ kind: 'guard', value: 'on' })
   for (const bad of ['guard', 'guard maybe', 'guard on now']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
   expect(ARGUMENT_HINT).toContain('guard on|off')
-  expect(USAGE).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend|audit]')
+  expect(USAGE).toBe('spick: usage /spick [on|force|off|review on|off|verdicts keep|deep|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend|audit]')
+})
+
+test('the verdicts switch parses and defaults to keep', () => {
+  expect(DEFAULT_CONTROLS.verdicts).toBe('keep')
+  expect(parseVerdicts('deep')).toBe('deep')
+  expect(parseVerdicts('keep')).toBe('keep')
+  expect(parseVerdicts(undefined)).toBe('keep')
+  expect(parseVerdicts('on')).toBe('keep')
+  expect(parseSpick('verdicts deep')).toEqual({ kind: 'verdicts', value: 'deep' })
+  expect(parseSpick(' Verdicts KEEP ')).toEqual({ kind: 'verdicts', value: 'keep' })
+  for (const bad of ['verdicts', 'verdicts on', 'verdicts deep now', 'verdict deep']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
+  expect(ARGUMENT_HINT).toContain('verdicts keep|deep')
+})
+
+test('verdicts deep swaps the verdict and main-session bullets for their rules.json variants and changes nothing else', () => {
+  const keep = checklist(ctl(), HAIKU, true).split('\n')
+  const deep = checklist(ctl({ verdicts: 'deep' }), HAIKU, true).split('\n')
+  // keep is the default: the same text as no switch at all (the bash hook's)
+  expect(checklist(ctl({ verdicts: 'keep' }), HAIKU, true)).toBe(keep.join('\n'))
+  expect(deep.length).toBe(keep.length)
+  expect(deep.indexOf(LANE_BULLET_DEEP_VERDICTS_DEEP)).toBe(keep.indexOf(LANE_BULLET_DEEP))
+  expect(deep.indexOf(LANE_BULLET_YOU_VERDICTS_DEEP)).toBe(keep.indexOf(LANE_BULLET_YOU))
+  expect(deep).not.toContain(LANE_BULLET_DEEP)
+  expect(deep).not.toContain(LANE_BULLET_YOU)
+  const swapped = new Set([LANE_BULLET_DEEP, LANE_BULLET_YOU, LANE_BULLET_DEEP_VERDICTS_DEEP, LANE_BULLET_YOU_VERDICTS_DEEP])
+  expect(deep.filter(l => !swapped.has(l))).toEqual(keep.filter(l => !swapped.has(l)))
+  // the wording: small material goes to deep too, and no Kept: clause is left on the main-session bullet
+  expect(LANE_BULLET_DEEP_VERDICTS_DEEP).toContain('small material too -> Agent(deep)')
+  expect(LANE_BULLET_DEEP_VERDICTS_DEEP).toContain('a `Kept:` line does not excuse one')
+  expect(LANE_BULLET_YOU_VERDICTS_DEEP).not.toContain('Kept:')
+  expect(LANE_BULLET_YOU_VERDICTS_DEEP.endsWith('-> you.')).toBe(true)
+  // every lane variant: the same six bullets, the two swapped in place; and the hook's budget (test_rules.py: 14 lines, 320 words) holds
+  for (const v of ['builtin', 'registry', 'none'] as const) {
+    const b = laneBullets(v, 'deep')
+    expect(b.length).toBe(laneBullets(v).length)
+    expect(b[2]).toBe(LANE_BULLET_DEEP_VERDICTS_DEEP)
+    expect(b.at(-2)).toBe(LANE_BULLET_YOU_VERDICTS_DEEP)
+    expect(b.filter(l => l.startsWith('   - ')).length).toBe(6)
+  }
+  const codex = [{ id: 'codex', kind: 'cli-subscription', tags: ['code', 'review'], data: 'code' }]
+  for (const lanes of [undefined, { registry: true, lanes: codex }, { registry: true, lanes: [] }]) {
+    const lines = checklist(ctl({ verdicts: 'deep' }), HAIKU, true, undefined, lanes).split('\n').filter(l => !l.startsWith('Lanes ('))
+    expect(lines.length).toBeLessThanOrEqual(14)
+    expect(lines.join('\n').split(/\s+/).filter(Boolean).length).toBeLessThanOrEqual(320)
+  }
+  // routing off: the off sentence, whatever the switch says
+  expect(checklist(ctl({ routing: 'off', verdicts: 'deep' }), HAIKU, true)).toBe(offSentence(true))
+  expect(checklist(ctl({ verdicts: 'deep' }), FABLE, true)).toBe(offSentence(true, true))
 })

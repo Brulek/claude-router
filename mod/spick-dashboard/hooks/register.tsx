@@ -1,8 +1,8 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 import type { LanesState } from './checklist'
-import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
-import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
+import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord, Verdicts } from '../types'
+import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, parseVerdicts } from './checklist'
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, sampleNote, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
 import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, asksAboutItself, checkOf, declaredChecks, editCapReason, escalationLine, oneCommand, uncheckedReason } from './guard'
@@ -82,24 +82,26 @@ async function lanesNow($: EngineInterface): Promise<LanesState | null> {
   return await $.fs.read(p.spickJson).then(lanesFromConfig, () => null)
 }
 
-/** The four remembered choices: routing, review, the gate and the guard. The lanes' on/off is not remembered here: it lives in spick.json. */
+/** The five remembered choices: routing, review, verdicts, the gate and the guard. The lanes' on/off is not remembered here: it lives in spick.json. */
 async function loadControls($: EngineInterface): Promise<void> {
   // routing under its new names (on, force, off) in spick:routing2; a value stored before the rename is migrated
   const stored = await $.store.get(ROUTING_KEY)
   const routing = stored === undefined || stored === null ? migrateRouting(await $.store.get('spick:routing')) : parseRouting(stored)
   const review = parseReview(await $.store.get('spick:review'))
+  const verdicts = parseVerdicts(await $.store.get(VERDICTS_KEY))
   const gate = parseGate(await $.store.get('spick:gate'))
   const guard = parseGuard(await $.store.get('spick:guard'))
   // a manual model pick lasts one session only
-  await update($, controls, () => ({ routing, review, gate, guard, manualModel: false }))
+  await update($, controls, () => ({ routing, review, verdicts, gate, guard, manualModel: false }))
 }
 
-/** Change the switches and write the four remembered ones back to $.store. */
+/** Change the switches and write the five remembered ones back to $.store. */
 async function setControls($: EngineInterface, change: (c: Controls) => Controls): Promise<Controls> {
   const next = await update($, controls, change)
   try {
     await $.store.set(ROUTING_KEY, next.routing)
     await $.store.set('spick:review', next.review)
+    await $.store.set(VERDICTS_KEY, next.verdicts)
     await $.store.set('spick:gate', next.gate)
     await $.store.set('spick:guard', next.guard)
   } catch {}
@@ -326,7 +328,7 @@ async function statusParagraph($: EngineInterface): Promise<string> {
   const rows = await read($, laneRows)
   const lanes = (rows ?? LANE_KEYS.map(id => ({ id, enabled: true }))).map(l => `${laneName(l.id)} ${l.enabled ? 'on' : 'off'}`).join(', ')
   const quotaText = await quotaLine($, false).catch(() => 'spick: quota not read')
-  return `spick: routing ${c.routing}, ${eff.why}; review ${c.review}; gate ${c.gate}; guard ${c.guard}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
+  return `spick: routing ${c.routing}, ${eff.why}; review ${c.review}; verdicts ${c.verdicts}; gate ${c.gate}; guard ${c.guard}; lanes: ${lanes}; band ${(await read($, hidden)) ? 'hidden' : 'shown'}; ${quotaText.replace(/^spick: /, '')}.`
 }
 
 async function setCurrent($: EngineInterface, patch: Partial<TurnRecord>): Promise<void> {
@@ -580,20 +582,25 @@ function passThrough<E, R>($: unknown, e: E, next: (e: E) => R): R {
 
 const routingOptions: readonly Routing[] = ['on', 'force', 'off']
 const reviewOptions: readonly Review[] = ['auto', 'off']
+const verdictsOptions: readonly Verdicts[] = ['keep', 'deep']
 const gateOptions: readonly Gate[] = ['on', 'off']
 const guardOptions: readonly Guard[] = ['on', 'off']
+/** the pane's note under the verdicts switch: what the value in force does */
+const VERDICTS_NOTE: Record<Verdicts, string> = { keep: 'small material stays here with a Kept: line', deep: 'every verdict goes to deep; a Kept: line does not excuse one' }
 /** an answer at least this long, with no tool call, counts as a verdict delivered rather than a question back */
 const LONG_ANSWER = 400
 const nextRouting = (r: Routing): Routing => (r === 'on' ? 'force' : r === 'force' ? 'off' : 'on')
 /**
  * A switch's value in force, in its own colour: on success green (routing's and a lane's alike), force and review's
- * auto the brand's, off subtle (off is not an error).
+ * auto the brand's, off subtle (off is not an error); verdicts' keep green as the default, deep the brand's as force.
  */
-const VALUE_COLORS: Record<string, 'claude' | 'success' | 'subtle'> = { on: 'success', force: 'claude', auto: 'claude', off: 'subtle' }
+const VALUE_COLORS: Record<string, 'claude' | 'success' | 'subtle'> = { on: 'success', force: 'claude', auto: 'claude', off: 'subtle', keep: 'success', deep: 'claude' }
 /** after the band switch's `on` while on routes nothing (a model that is not Haiku), in the warning colour */
 const NOT_HAIKU_NOTE = ' (not Haiku)'
 /** where routing is remembered, under its names since 2026-10-14 (on, force, off); spick:routing held auto, on, off */
 const ROUTING_KEY = 'spick:routing2'
+/** where the verdicts switch is remembered (keep, deep) */
+const VERDICTS_KEY = 'spick:verdicts'
 const LANE_HOTKEYS: Record<string, string> = { gemini: 'g', grok: 'k', codex: 'c' }
 /** the lanes page's field help, two lines at 80 columns (the fields set_lane.py takes) */
 const LANE_HELP = ['name tags data enabled notes kind base_url api model max_tokens', 'key_ref meter_type meter_preset health_url · enabled yes|no']
@@ -712,7 +719,7 @@ export const register: Register = on => {
 
   on('session.start', async ($, e, next) => {
     try {
-      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, gate, guard, lanes, band, quota, spend, audit', argumentHint: ARGUMENT_HINT, immediate: true })
+      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, verdicts, gate, guard, lanes, band, quota, spend, audit', argumentHint: ARGUMENT_HINT, immediate: true })
       void refreshQuota($).catch(() => undefined)
     } catch {}
     try { await loadControls($) } catch {}
@@ -761,7 +768,8 @@ export const register: Register = on => {
         // the findings are kept for the turn this prompt starts, where the gate reads them at stop time
         const hints = findHints(e.text)
         pendingHints = hints
-        block = checklist(await read($, controls), fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)), (await quotaLineNow($)) ?? undefined, (await lanesNow($)) ?? undefined, lineOf(hints))
+        const ctl = await read($, controls)
+        block = checklist(ctl, fresh || (await read($, sessionModel)) || mainModel, !(await bandShowing($, surfaces)), (await quotaLineNow($)) ?? undefined, (await lanesNow($)) ?? undefined, lineOf(hints, ctl.verdicts))
         // keep the bash hook silent through long sessions: refresh the marker hourly
         const now = await $.clock.now()
         if (now - markerAt >= MARKER_REFRESH_MS) {
@@ -1052,7 +1060,8 @@ export const register: Register = on => {
   // The gate, by required role: judgement words need deep, review words the review lane or deep (gate.ts). When that
   // role did not complete this turn (a deep subagent that finished or still runs in the background, a review call
   // that returned cleanly), the reply has no `Kept:` line and the turn was substantive (a tool call, or 400+
-  // characters), the turn is sent back. Design words never gate; /spick gate off switches it off.
+  // characters), the turn is sent back. Under /spick verdicts deep a `Kept:` line no longer excuses a judgement hint
+  // (a review hint still). Design words never gate; /spick gate off switches it off.
   // The guard's check: a turn in which any loop (a subagent too) edited source and no check passed after the last
   // edit is sent back to run one, hand the user a /goal line, or say in one line (`Unchecked:`) why there is none.
   // A delegate does not excuse it. /spick guard off switches it off, with the edit cap.
@@ -1074,7 +1083,7 @@ export const register: Register = on => {
       if (!effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) return r
       // a short reply with no tool call is a question back, not a delivered verdict
       const isSubstantive = mainToolCalls > 0 || answer.length >= LONG_ANSWER
-      const g = c.gate === 'on' && isSubstantive && !KEPT_RE.test(answer) ? gateFiring(hintsOfTurn, delegatesOfTurn) : null
+      const g = c.gate === 'on' && isSubstantive ? gateFiring(hintsOfTurn, delegatesOfTurn, { kept: KEPT_RE.test(answer), verdictsDeep: c.verdicts === 'deep' }) : null
       const isUnchecked = c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !isChecked(guardTurn) && !UNCHECKED_RE.test(answer)
       if (!g && !isUnchecked) return r
       // one send-back per turn, carrying every reason at once
@@ -1200,6 +1209,9 @@ export const register: Register = on => {
       case 'review':
         await setControls($, c => ({ ...c, review: cmd.value }))
         return { text: `spick: review ${cmd.value}` }
+      case 'verdicts':
+        await setControls($, c => ({ ...c, verdicts: cmd.value }))
+        return { text: `spick: verdicts ${cmd.value}` }
       case 'gate':
         await setControls($, c => ({ ...c, gate: cmd.value }))
         return { text: `spick: gate ${cmd.value}` }
@@ -1454,6 +1466,11 @@ export const register: Register = on => {
       part('Review', [
         // a click sets that value; v presses the other one
         radio('review', reviewOptions, ctl.review, 'v', v => { void setControls($, c => ({ ...c, review: v as Review })).catch(() => undefined) }),
+      ]),
+      part('Verdicts', [
+        // a click sets that value; j presses the other one; the note under the values says what the one in force does
+        radio('verdicts', verdictsOptions, ctl.verdicts, 'j', v => { void setControls($, c => ({ ...c, verdicts: v as Verdicts })).catch(() => undefined) }),
+        [gap(HOTKEY_W), note(clip(VERDICTS_NOTE[ctl.verdicts], contentW - HOTKEY_W))],
       ]),
       part('Gate', [
         // a click sets that value; e presses the other one

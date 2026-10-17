@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { HINT_HEAD, HINT_TAIL, KEYWORDS, NEGATIONS, blank, findHints, gateReason, hintLine, lineOf } from './hint'
+import { HINT_HEAD, HINT_TAIL, KEYWORDS, NEGATIONS, PHRASE_TEMPLATES_VERDICTS_DEEP, blank, findHints, gateReason, hintLine, lineOf } from './hint'
 import type { HintKind } from './hint'
 
 // The cases triage_hint.py's tests read too (scripts/testdata/hint_corpus.json: expected kinds; triage_hints.json: exact
@@ -114,6 +114,21 @@ test('the line shows at most three words per kind and keeps the fixed head and t
   expect(line.endsWith(HINT_TAIL)).toBe(true)
   expect(line).toContain('judgement words (对比, 比较, 评估) -> size the material: small -> you, with a `Kept:` line; large or high-stakes -> Agent(deep)')
   expect(line).not.toContain('评价')
+})
+
+test('under /spick verdicts deep the judgement phrase sends every size to deep; other kinds keep their phrase; keep is the default', () => {
+  expect(Object.keys(PHRASE_TEMPLATES_VERDICTS_DEEP)).toEqual(['judgement'])
+  const hints = findHints('对比一下这两个脚本，然后 fix the bug')
+  expect(hints.map(h => h.kind)).toEqual(['judgement', 'code'])
+  const keep = lineOf(hints) ?? ''
+  const deep = lineOf(hints, 'deep') ?? ''
+  expect(lineOf(hints, 'keep')).toBe(keep)
+  expect(keep).toContain('judgement words (对比) -> size the material: small -> you, with a `Kept:` line')
+  expect(deep).toContain('judgement words (对比) -> Agent(deep), whatever the size: verdicts go to deep this session and a `Kept:` line does not excuse one')
+  expect(deep).not.toContain('size the material')
+  expect(deep).toContain('; edit words (fix) -> Agent(coder) once nothing is left to decide')
+  expect(deep.startsWith(HINT_HEAD) && deep.endsWith(HINT_TAIL)).toBe(true)
+  expect(lineOf([], 'deep')).toBeNull()
 })
 
 test('gateReason: a verdict the main session kept; design words and other kinds are not the gate\'s business', () => {

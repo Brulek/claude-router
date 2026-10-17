@@ -39,7 +39,7 @@ Once per session: `test -f <config>/spick.json` (`<config>` is `$CLAUDE_CONFIG_D
 | `deep` | medium | medium: ordinary verdicts: a diagnosis within one file, a comparison of two small things, a review of a small diff; high: hard problems, multi-file debugging, first drafts of formal writing; xhigh: key decisions, final drafts, money or law; max: only when the user says "extremely important" |
 <!-- rules:end -->
 
-**Not dispatching is the default for small work.** Delegation costs a handoff: brief, cold context, relay. A one-file edit, a lookup, a tidy-up: do it yourself. A verdict over small material (a few files, under ~200 lines) is yours with a `Kept:` line; large material or high stakes go to `deep`; a failing-test bug goes to a Haiku `coder` first (`model: haiku`; the test is the check), Sonnet at high only after a failed check. Reading files on the way does not make a verdict a lookup; unsure: `deep`.
+**Not dispatching is the default for small work.** A one-file edit, a lookup, a tidy-up: do it yourself. A verdict over small material (a few files, under ~200 lines) is yours with a `Kept:` line (`/spick verdicts deep` sends every verdict to `deep`); large material or high stakes go to `deep`; a failing-test bug goes to a Haiku `coder` first (`model: haiku`; the test is the check), Sonnet at high only after a failed check. Reading files on the way does not make a verdict a lookup; unsure: `deep`.
 
 **The planner threshold is narrow.** `planner` is for a decision the user did not make about architecture, a public interface, a data format or a cross-module trade-off. Local layout, naming and which file to touch are `coder`'s calls; send it the goal, not a design.
 

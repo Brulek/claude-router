@@ -50,6 +50,32 @@ test('gateFiring names the missing roles and words; design words never gate; not
   expect(r.text).toContain('`Kept:`')
 })
 
+test('a Kept: line excuses every kind under verdicts keep; under verdicts deep it excuses a review hint only, and the text offers deep alone', () => {
+  // the reply's Kept: line, read by the gate: nothing missing
+  expect(gateFiring([J, R], [], { kept: true })).toBeNull()
+  expect(gateFiring([J, R], [], { kept: true, verdictsDeep: false })).toBeNull()
+  expect(gateFiring([J, R], [], { kept: false })).not.toBeNull()
+  expect(gateFiring([J, R], [], {})).toEqual(gateFiring([J, R], []))
+  // verdicts deep: the judgement hint stays missing, the review hint is excused
+  const strict = gateFiring([J, R], [], { kept: true, verdictsDeep: true })!
+  expect(strict.kinds).toEqual(['judgement'])
+  expect(strict.roles).toEqual(['deep'])
+  expect(strict.words).toEqual(['对比', '差距'])
+  expect(strict.text).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and no deep run completed this turn, so the verdict came from the triage session itself.')
+  expect(strict.text).toContain('Verdicts go to deep this session (/spick verdicts deep), so a `Kept:` line does not excuse it: dispatch Agent(deep) with the facts you gathered and relay its answer in place of yours.')
+  expect(strict.text).not.toContain('Do one of two things')
+  expect(strict.text).not.toContain('reply with one line starting with')
+  // without a Kept: line the strict wording too: the model is told the line would not help
+  expect(gateFiring([J], [], { verdictsDeep: true })!.text).toContain('a `Kept:` line does not excuse it')
+  // a review hint alone: a Kept: line excuses it under deep as well; without one, the usual two ways out
+  expect(gateFiring([R], [], { kept: true, verdictsDeep: true })).toBeNull()
+  expect(gateFiring([R], [], { verdictsDeep: true })!.text).toContain('Do one of two things now')
+  // a deep run, finished or still running, satisfies a judgement hint under deep as ever
+  expect(gateFiring([J], [{ lane: 'deep', status: 'completed' }], { verdictsDeep: true })).toBeNull()
+  expect(gateFiring([J], [{ lane: 'deep', status: 'running' }], { kept: true, verdictsDeep: true })).toBeNull()
+  expect(gateFiring([J], [{ lane: 'deep', status: 'failed' }], { kept: true, verdictsDeep: true })).not.toBeNull()
+})
+
 test('KEPT_RE and keptLine take a line starting with Kept: or 自留:, nothing mid-line', () => {
   expect(KEPT_RE.test('answer\nKept: a lookup')).toBe(true)
   expect(KEPT_RE.test('the word Kept: mid-line')).toBe(false)

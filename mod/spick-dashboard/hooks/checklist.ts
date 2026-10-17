@@ -1,8 +1,8 @@
-import type { Controls, Gate, Guard, LaneInfo, Review, Routing } from '../types'
+import type { Controls, Gate, Guard, LaneInfo, Review, Routing, Verdicts } from '../types'
 import { modelName } from './format'
 import { lanesLine } from './quotaline'
 
-export const DEFAULT_CONTROLS: Controls = { routing: 'on', review: 'auto', gate: 'on', guard: 'on', manualModel: false }
+export const DEFAULT_CONTROLS: Controls = { routing: 'on', review: 'auto', verdicts: 'keep', gate: 'on', guard: 'on', manualModel: false }
 /** the three built-in lanes the Controls row has a button for; the rest are edited on the lanes page or with /spick lane */
 export const LANE_KEYS: readonly string[] = ['gemini', 'grok', 'codex']
 export const LANE_NAMES: Record<string, string> = { gemini: 'Gemini', grok: 'Grok', codex: 'Codex' }
@@ -36,6 +36,12 @@ export const LANE_BULLET_YOU = "   - the answer is in a file, a command's output
 export const LANE_BULLETS_BUILTIN: readonly string[] = [LANE_BULLET_LANES_BUILTIN, LANE_BULLET_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_BUILTIN, LANE_BULLET_YOU]
 export const LANE_BULLETS_REGISTRY: readonly string[] = [LANE_BULLET_LANES_REGISTRY, LANE_BULLET_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_REGISTRY, LANE_BULLET_YOU]
 export const LANE_BULLETS_NONE: readonly string[] = [LANE_BULLET_LANES_NONE, LANE_BULLET_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_NONE, LANE_BULLET_YOU]
+/** the bullets while `/spick verdicts` is deep (the others stand) */
+export const LANE_BULLET_DEEP_VERDICTS_DEEP = "   - a verdict (compare, evaluate, diagnose, review, recommend, formal writing), small material too -> Agent(deep): this session sends every verdict to deep; a `Kept:` line does not excuse one."
+export const LANE_BULLET_YOU_VERDICTS_DEEP = "   - the answer is in a file, a command's output or your knowledge, or a one-file edit or fix -> you."
+export const LANE_BULLETS_BUILTIN_VERDICTS_DEEP: readonly string[] = [LANE_BULLET_LANES_BUILTIN, LANE_BULLET_DEEP_VERDICTS_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_BUILTIN, LANE_BULLET_YOU_VERDICTS_DEEP]
+export const LANE_BULLETS_REGISTRY_VERDICTS_DEEP: readonly string[] = [LANE_BULLET_LANES_REGISTRY, LANE_BULLET_DEEP_VERDICTS_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_REGISTRY, LANE_BULLET_YOU_VERDICTS_DEEP]
+export const LANE_BULLETS_NONE_VERDICTS_DEEP: readonly string[] = [LANE_BULLET_LANES_NONE, LANE_BULLET_DEEP_VERDICTS_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_NONE, LANE_BULLET_YOU_VERDICTS_DEEP]
 export const LANE_TAIL = "   A prompt that mixes kinds is split by kind. Effort for every delegate. A brief is a handoff packet, not your trail; one saying how is a design: planner. A check failing twice: Agent(coder) at high, or Agent(deep) if the cause is unknown."
 export const GOAL_LINE = "3. Goal-shaped? A machine-checkable finish (tests, build, exit 0) needing several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line."
 /** the label line; {main}, {review} and {who} are filled per session */
@@ -92,10 +98,16 @@ export function laneState(l?: readonly LaneInfo[] | LanesState | null): { varian
 }
 
 const BULLETS: Record<LaneVariant, readonly string[]> = { builtin: LANE_BULLETS_BUILTIN, registry: LANE_BULLETS_REGISTRY, none: LANE_BULLETS_NONE }
-/** the lines of checklist item 2, in order; `true` is the declared-lanes wording, `false` the built-in one */
-export const laneBullets = (v: boolean | LaneVariant): string[] => {
+/** the same lists while `/spick verdicts` is deep: the DEEP and YOU bullets swapped for their verdicts_deep text */
+const BULLETS_VERDICTS_DEEP: Record<LaneVariant, readonly string[]> = { builtin: LANE_BULLETS_BUILTIN_VERDICTS_DEEP, registry: LANE_BULLETS_REGISTRY_VERDICTS_DEEP, none: LANE_BULLETS_NONE_VERDICTS_DEEP }
+/**
+ * The lines of checklist item 2, in order; `true` is the declared-lanes wording, `false` the built-in one. `verdicts`
+ * is the /spick verdicts switch: under `deep` the verdict bullet sends small material to deep too and the main-session
+ * bullet drops its `Kept:` clause (rules.json's verdicts_deep texts); `keep`, the default, is the hook's text.
+ */
+export const laneBullets = (v: boolean | LaneVariant, verdicts: Verdicts = 'keep'): string[] => {
   const variant: LaneVariant = v === true ? 'registry' : v === false ? 'builtin' : v
-  return [LANE_HEAD, ...BULLETS[variant], LANE_TAIL]
+  return [LANE_HEAD, ...(verdicts === 'deep' ? BULLETS_VERDICTS_DEEP : BULLETS)[variant], LANE_TAIL]
 }
 /** checklist item 2 when the user declared lane_registry, as one block */
 export const REGISTRY_LANE_LINE = laneBullets(true).join('\n')
@@ -139,7 +151,8 @@ export function effectiveRouting(c: Controls, sessionModel: string): Effective {
  * skipped`. The cache lists the enabled lanes only, so a lane switched off (in spick.json, by /spick lane <id> off, or
  * a Controls button) is simply absent: no note, the same text the bash hook prints. Without a registry every lane is on. `hint`, when
  * given, is the Hint line (hint.ts: the keywords found in the prompt and the default route they imply) and sits
- * right after item 2, where the model has just read the buckets.
+ * right after item 2, where the model has just read the buckets. `c.verdicts` picks item 2's wording for verdicts
+ * (laneBullets); the caller renders the Hint line for the same value (hint.ts lineOf).
  */
 export function checklist(c: Controls, sessionModel: string, labelLine: boolean, quotaLine?: string, lanes?: readonly LaneInfo[] | LanesState | null, hint?: string | null): string {
   if (!effectiveRouting(c, sessionModel).on) return offSentence(labelLine, c.routing === 'on' && !c.manualModel && !/haiku/i.test(sessionModel))
@@ -152,7 +165,7 @@ export function checklist(c: Controls, sessionModel: string, labelLine: boolean,
   const lines = [
     TITLE_LINE,
     PLAN_LINE,
-    ...laneBullets(variant),
+    ...laneBullets(variant, c.verdicts),
     ...(hint ? [hint] : []),
     GOAL_LINE,
     labelLine ? labelLineText(main, review, who) : NO_LABEL_LINE,
@@ -183,6 +196,9 @@ export function parseReview(v: unknown): Review {
 export function parseGate(v: unknown): Gate {
   return v === 'off' || v === 'on' ? v : DEFAULT_CONTROLS.gate
 }
+export function parseVerdicts(v: unknown): Verdicts {
+  return v === 'keep' || v === 'deep' ? v : DEFAULT_CONTROLS.verdicts
+}
 export function parseGuard(v: unknown): Guard {
   return v === 'off' || v === 'on' ? v : DEFAULT_CONTROLS.guard
 }
@@ -196,6 +212,7 @@ export type SpickCommand =
   | { kind: 'open' }
   | { kind: 'routing'; value: Routing }
   | { kind: 'review'; value: Review }
+  | { kind: 'verdicts'; value: Verdicts }
   | { kind: 'gate'; value: Gate }
   | { kind: 'guard'; value: Guard }
   | LaneCommand
@@ -204,7 +221,7 @@ export type SpickCommand =
   | { kind: 'spend' }
   | { kind: 'usage' }
 
-export const ARGUMENT_HINT = '[on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend|audit]'
+export const ARGUMENT_HINT = '[on|force|off|review on|off|verdicts keep|deep|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend|audit]'
 export const USAGE = `spick: usage /spick ${ARGUMENT_HINT}`
 
 /**
@@ -237,6 +254,7 @@ export function parseSpick(args: string): SpickCommand {
   if (w.length === 1 && a === 'quota') return { kind: 'quota' }
   if (w.length === 1 && a === 'spend') return { kind: 'spend' }
   if (w.length === 2 && a === 'review' && (b === 'on' || b === 'off')) return { kind: 'review', value: b === 'on' ? 'auto' : 'off' }
+  if (w.length === 2 && a === 'verdicts' && (b === 'keep' || b === 'deep')) return { kind: 'verdicts', value: b }
   if (w.length === 2 && a === 'gate' && (b === 'on' || b === 'off')) return { kind: 'gate', value: b }
   if (w.length === 2 && a === 'guard' && (b === 'on' || b === 'off')) return { kind: 'guard', value: b }
   if (a === 'lane') return parseLaneText(args.trim().replace(/^lane\s*/i, '')) ?? { kind: 'usage' }

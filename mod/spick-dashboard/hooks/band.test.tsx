@@ -264,7 +264,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(narrow).toContain('Quota')
   })
 
-  test(`pane Buttons are all plain, with the eleven hotkeys, each once, and no chrome, on ${surface}`, async ($, on) => {
+  test(`pane Buttons are all plain, with the twelve hotkeys, each once, and no chrome, on ${surface}`, async ($, on) => {
     mock.clock(on, { now: 1000 })
     mock.store(on)
     mock.env(on, { HOME: '/h' })
@@ -277,17 +277,17 @@ for (const surface of ['terminal', 'desktop'] as const) {
 
     const ui = await mountPane($, surface)
     const buttons = await ui.findAll({ type: 'Button' })
-    // each value of a switch is a Button of its own (routing on force off, review auto off, gate on off, guard on off, a lane on off)
-    expect(buttons.map(b => b.props.key)).toEqual(['band', 'close', 'routing-on', 'routing-force', 'routing-off', 'review-auto', 'review-off', 'gate-on', 'gate-off', 'guard-on', 'guard-off',
+    // each value of a switch is a Button of its own (routing on force off, review auto off, verdicts keep deep, gate on off, guard on off, a lane on off)
+    expect(buttons.map(b => b.props.key)).toEqual(['band', 'close', 'routing-on', 'routing-force', 'routing-off', 'review-auto', 'review-off', 'verdicts-keep', 'verdicts-deep', 'gate-on', 'gate-off', 'guard-on', 'guard-off',
       'lane-gemini-on', 'lane-gemini-off', 'lane-grok-on', 'lane-grok-off', 'lane-codex-on', 'lane-codex-off', 'edit-lanes', 'refresh'])
     for (const b of buttons) expect(b.props.plain).toBe(true)
-    // eleven hotkeys, each once: a switch's sits on the value it moves to (routing on -> force, review auto -> off, gate on
-    // -> off, guard on -> off, a lane that is on -> off, Codex, off -> on)
+    // twelve hotkeys, each once: a switch's sits on the value it moves to (routing on -> force, review auto -> off, verdicts
+    // keep -> deep, gate on -> off, guard on -> off, a lane that is on -> off, Codex, off -> on)
     const keys = buttons.map(b => b.props.hotkey as string | undefined).filter((k): k is string => k !== undefined)
-    expect([...keys].sort()).toEqual(['b', 'c', 'd', 'e', 'g', 'k', 'l', 'q', 'r', 'v', 'x'])
+    expect([...keys].sort()).toEqual(['b', 'c', 'd', 'e', 'g', 'j', 'k', 'l', 'q', 'r', 'v', 'x'])
     expect(new Set(keys).size).toBe(keys.length)
     const hotkeyOf = async (key: string) => (await ui.find({ type: 'Button', key }))?.props.hotkey
-    expect(await Promise.all(['close', 'band', 'routing-force', 'review-off', 'gate-off', 'guard-off', 'lane-gemini-off', 'lane-grok-off', 'lane-codex-on', 'edit-lanes', 'refresh'].map(hotkeyOf))).toEqual(['x', 'b', 'r', 'v', 'e', 'd', 'g', 'k', 'c', 'l', 'q'])
+    expect(await Promise.all(['close', 'band', 'routing-force', 'review-off', 'verdicts-deep', 'gate-off', 'guard-off', 'lane-gemini-off', 'lane-grok-off', 'lane-codex-on', 'edit-lanes', 'refresh'].map(hotkeyOf))).toEqual(['x', 'b', 'r', 'v', 'j', 'e', 'd', 'g', 'k', 'c', 'l', 'q'])
     expect((await ui.find({ type: 'Button', key: 'close' }))?.props.role).toBe('dismiss')
     // no pills, brackets or a help line of keys
     const text = (await linesOf(ui)).join('\n')
@@ -316,6 +316,8 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await lines()).toContain('Routing      ● on  r: ○ force     ○ off')
     expect(await lines()).toContain('             routes (Haiku 5.5 session)')
     expect(await lines()).toContain('Review       ● auto  v: ○ off')
+    expect(await lines()).toContain('Verdicts     ● keep  j: ○ deep')
+    expect(await lines()).toContain('             small material stays here with a Kept: line')
     expect(await lines()).toContain('Gate         ● on  e: ○ off')
     expect(await lines()).toContain('Guard        ● on  d: ○ off')
     expect((await lines())[0]).toMatch(/^SPICK {2}routing on · /)
@@ -367,6 +369,15 @@ for (const surface of ['terminal', 'desktop'] as const) {
     expect(await lines()).toContain('Guard     d: ○ on     ● off')
     await ui.press({ key: 'guard-on' })
     expect(await lines()).toContain('Guard        ● on  d: ○ off')
+    // j: verdicts keep <-> deep, deep in the brand colour, and the note under it changes with the value
+    await pressHotkey(ui, 'j')
+    expect(await lines()).toContain('Verdicts  j: ○ keep     ● deep')
+    expect(await lines()).toContain('             every verdict goes to deep; a Kept: line does not excuse one')
+    expect(await props(/^deep$/)).toEqual([{ bold: true, color: 'claude' }])
+    expect(await props(/^keep$/)).toEqual([{ color: 'subtle' }])
+    await ui.press({ key: 'verdicts-keep' })
+    expect(await lines()).toContain('Verdicts     ● keep  j: ○ deep')
+    expect(await props(/^keep$/)).toEqual([{ bold: true, color: 'success' }])
     // a lane: the name a label, on and off its radio buttons, through set_lane.py
     expect(await lines()).toContain('Lanes     Gemini     ● on  g: ○ off')
     await pressHotkey(ui, 'g')
@@ -645,6 +656,8 @@ const EXAMPLE_80 = [
   'Routing      ● on  r: ○ force     ○ off',
   '             routes (Haiku 5.5 session)',
   'Review       ● auto  v: ○ off',
+  'Verdicts     ● keep  j: ○ deep',
+  '             small material stays here with a Kept: line',
   'Gate         ● on  e: ○ off',
   'Guard        ● on  d: ○ off',
   '',
@@ -853,11 +866,11 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const { fake } = lanesWorld(on)
     const ui = await $.ui.mount({ ...LANE_PANE, surface })
     const buttons = await ui.findAll({ type: 'Button' })
-    // band, close, routing's three, review's two, the gate's two, the guard's two, each lane's two, edit lanes, refresh
-    expect(buttons).toHaveLength(19)
+    // band, close, routing's three, review's two, verdicts' two, the gate's two, the guard's two, each lane's two, edit lanes, refresh
+    expect(buttons).toHaveLength(21)
     for (const b of buttons) expect(b.props.plain).toBe(true)
     const keys = buttons.map(b => b.props.hotkey).filter(Boolean)
-    expect([...keys].sort()).toEqual(['b', 'c', 'd', 'e', 'g', 'k', 'l', 'q', 'r', 'v', 'x'])
+    expect([...keys].sort()).toEqual(['b', 'c', 'd', 'e', 'g', 'j', 'k', 'l', 'q', 'r', 'v', 'x'])
     expect(new Set(keys).size).toBe(keys.length)
     expect(await ui.find({ type: 'Button', key: 'edit-lanes' })).toMatchObject({ props: { plain: true, hotkey: 'l' } })
     // the Edit lanes row is the last row of the Lanes section

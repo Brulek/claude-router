@@ -37,6 +37,9 @@ CORPUS = os.path.join(HERE, "testdata", "hint_corpus.json")
 LINES_FIXTURE = os.path.join(HERE, "testdata", "triage_hints.json")
 
 VARIANTS = ("builtin", "registry", "none")
+# the mod's /spick verdicts switch: a bullet's optional text, and the phrases map, used while it is `deep`
+VERDICTS_KEY = "verdicts_deep"
+PHRASES_VERDICTS_DEEP = "phrases_verdicts_deep"
 AGENTS = ("coder", "planner", "deep")
 LEVELS = ("low", "medium", "high", "xhigh", "max")
 ROUTE_RE = re.compile(r"^(self|lane:[a-z-]+|agent:[a-z-]+( then agent:[a-z-]+)?)$")
@@ -90,6 +93,16 @@ def validate(r):
     for kind, p in phrases.items():
         if not isinstance(p, str) or "{t}" not in p:
             errs.append("phrases.%s must hold {t}" % kind)
+    pvd = r.get(PHRASES_VERDICTS_DEEP)
+    if pvd is not None:
+        if not isinstance(pvd, dict):
+            errs.append("%s must be a map of hint kind to phrase" % PHRASES_VERDICTS_DEEP)
+        else:
+            for kind, p in pvd.items():
+                if kind not in hints:
+                    errs.append("%s.%s is not a hint kind" % (PHRASES_VERDICTS_DEEP, kind))
+                if not isinstance(p, str) or "{t}" not in p:
+                    errs.append("%s.%s must hold {t}" % (PHRASES_VERDICTS_DEEP, kind))
     neg = r.get("negations")
     if not isinstance(neg, list) or not all(isinstance(n, str) and n for n in neg):
         errs.append("negations must be a list of strings")
@@ -106,8 +119,8 @@ def validate(r):
         covered += b.get("kinds") or []
         if "text" not in b and not all(v in b for v in VARIANTS):
             errs.append("bullet %s needs text, or builtin, registry and none" % b.get("name"))
-        for t in [b.get("text")] + [b.get(v) for v in VARIANTS]:
-            if t is not None and (not t.startswith("   - ") or "\n" in t):
+        for t in [b.get("text")] + [b.get(v) for v in VARIANTS] + [b.get(VERDICTS_KEY)]:
+            if t is not None and (not isinstance(t, str) or not t.startswith("   - ") or "\n" in t):
                 errs.append("bullet %s: each line starts with '   - '" % b.get("name"))
     if covered != ids:
         errs.append("checklist bullets must cover the kinds once each, in order (have %s)" % covered)
@@ -122,8 +135,18 @@ def validate(r):
 
 # ---------- the checklist ----------
 
-def bullet_text(b, variant):
+def bullet_text(b, variant, verdicts="keep"):
+    """A bullet's line for a lane variant; under the mod's `/spick verdicts deep` a bullet that has that text uses it."""
+    if verdicts == "deep" and VERDICTS_KEY in b:
+        return b[VERDICTS_KEY]
     return b["text"] if "text" in b else b[variant]
+
+
+def bullet_const(b, variant, verdicts="keep"):
+    """The TypeScript constant that holds bullet_text(b, variant, verdicts)."""
+    if verdicts == "deep" and VERDICTS_KEY in b:
+        return "LANE_BULLET_%s_VERDICTS_DEEP" % b["name"]
+    return "LANE_BULLET_%s" % b["name"] if "text" in b else "LANE_BULLET_%s_%s" % (b["name"], variant.upper())
 
 
 def label_line(r, variant):
@@ -167,8 +190,13 @@ def filter_template(lines, variant, hint=None):
     return out
 
 
-def checklist_variant(r, variant, hint=None):
-    return filter_template(checklist_template(r), variant, hint)
+def checklist_variant(r, variant, hint=None, verdicts="keep"):
+    """The hook's text for a lane variant; `verdicts="deep"` is what the mod shows under /spick verdicts deep."""
+    lines = filter_template(checklist_template(r), variant, hint)
+    if verdicts == "deep":
+        swap = {bullet_text(b, variant): b[VERDICTS_KEY] for b in r["checklist"]["bullets"] if VERDICTS_KEY in b}
+        lines = [swap.get(line, line) for line in lines]
+    return lines
 
 
 # ---------- TypeScript ----------
@@ -190,9 +218,17 @@ def ts_rules_block(r):
             for v in VARIANTS:
                 lines.append("export const LANE_BULLET_%s_%s = %s" % (b["name"], v.upper(), ts_str(b[v])))
     for v in VARIANTS:
-        names = ["LANE_BULLET_%s" % b["name"] if "text" in b else "LANE_BULLET_%s_%s" % (b["name"], v.upper())
-                 for b in c["bullets"]]
+        names = [bullet_const(b, v) for b in c["bullets"]]
         lines.append("export const LANE_BULLETS_%s: readonly string[] = [%s]" % (v.upper(), ", ".join(names)))
+    # the mod's /spick verdicts deep: the bullets that change, then each variant's list with them swapped in
+    with_deep = [b for b in c["bullets"] if VERDICTS_KEY in b]
+    if with_deep:
+        lines.append("/** the bullets while `/spick verdicts` is deep (the others stand) */")
+        for b in with_deep:
+            lines.append("export const LANE_BULLET_%s_VERDICTS_DEEP = %s" % (b["name"], ts_str(b[VERDICTS_KEY])))
+        for v in VARIANTS:
+            names = [bullet_const(b, v, "deep") for b in c["bullets"]]
+            lines.append("export const LANE_BULLETS_%s_VERDICTS_DEEP: readonly string[] = [%s]" % (v.upper(), ", ".join(names)))
     lines += ["export const LANE_TAIL = %s" % ts_str(c["tail"]),
               "export const GOAL_LINE = %s" % ts_str(c["goal"]),
               "/** the label line; {main}, {review} and {who} are filled per session */",
@@ -225,6 +261,11 @@ def ts_hints_block(r):
               "export const PHRASE_TEMPLATES: Record<HintKind, string> = {"]
     for k in kinds:
         lines.append("  %s: %s," % (ts_str(k), ts_str(r["phrases"][k])))
+    lines += ["}",
+              "/** the phrases used instead while `/spick verdicts` is deep; a kind not named here keeps its phrase */",
+              "export const PHRASE_TEMPLATES_VERDICTS_DEEP: Partial<Record<HintKind, string>> = {"]
+    for k, p in (r.get(PHRASES_VERDICTS_DEEP) or {}).items():
+        lines.append("  %s: %s," % (ts_str(k), ts_str(p)))
     lines += ["}", "// hints:end"]
     return "\n".join(lines)
 

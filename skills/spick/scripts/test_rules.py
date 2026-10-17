@@ -17,6 +17,13 @@ def words(text):
     return len(text.split())
 
 
+def broken(f):
+    """validate() of a copy of rules.json after f changed it: the problems it names"""
+    r = copy.deepcopy(RULES)
+    f(r)
+    return rr.validate(r)
+
+
 class Schema(unittest.TestCase):
     def test_rules_json_is_valid(self):
         self.assertEqual(rr.validate(RULES), [])
@@ -30,10 +37,6 @@ class Schema(unittest.TestCase):
         self.assertEqual(list(RULES["hints"]), ["judgement", "review", "design", "code", "web", "x"])
 
     def test_broken_rules_are_named(self):
-        def broken(f):
-            r = copy.deepcopy(RULES)
-            f(r)
-            return rr.validate(r)
         self.assertTrue(broken(lambda r: r["kinds"].reverse()))
         self.assertTrue(broken(lambda r: r["kinds"][0].update(route="lane x")))
         self.assertTrue(broken(lambda r: r["efforts"]["deep"].update(default="huge")))
@@ -41,6 +44,19 @@ class Schema(unittest.TestCase):
         self.assertTrue(broken(lambda r: r["checklist"]["bullets"].pop()))
         self.assertTrue(broken(lambda r: r["checklist"].update(label="no placeholders")))
         self.assertTrue(broken(lambda r: r.update(version=1)))
+
+    def test_the_verdicts_deep_variants_are_validated(self):
+        # the mod's /spick verdicts deep: two bullets carry a second text, the judgement phrase a second wording
+        bullets = RULES["checklist"]["bullets"]
+        self.assertEqual([b["name"] for b in bullets if rr.VERDICTS_KEY in b], ["DEEP", "YOU"])
+        self.assertEqual(list(RULES[rr.PHRASES_VERDICTS_DEEP]), ["judgement"])
+        self.assertTrue(broken(lambda r: r["checklist"]["bullets"][1].update(verdicts_deep="no dash")))
+        self.assertTrue(broken(lambda r: r["checklist"]["bullets"][1].update(verdicts_deep=3)))
+        self.assertTrue(broken(lambda r: r[rr.PHRASES_VERDICTS_DEEP].update(judgement="no placeholder")))
+        self.assertTrue(broken(lambda r: r[rr.PHRASES_VERDICTS_DEEP].update(bogus="x {t}")))
+        self.assertTrue(broken(lambda r: r.update(phrases_verdicts_deep=["x"])))
+        # both are optional: without them the policy is the default alone
+        self.assertEqual(broken(lambda r: (r.pop(rr.PHRASES_VERDICTS_DEEP), [b.pop(rr.VERDICTS_KEY, None) for b in r["checklist"]["bullets"]])), [])
 
 
 class Rendered(unittest.TestCase):
@@ -71,6 +87,26 @@ class Rendered(unittest.TestCase):
             self.assertEqual(sum(1 for line in lines if line.startswith("   - ")), len(RULES["checklist"]["bullets"]))
         self.assertIn("Review: skipped]", rr.checklist_variant(RULES, "none")[-1])
 
+    def test_the_verdicts_deep_variant_swaps_two_bullets_and_nothing_else(self):
+        swapped = [b for b in RULES["checklist"]["bullets"] if rr.VERDICTS_KEY in b]
+        for v in rr.VARIANTS:
+            keep, deep = rr.checklist_variant(RULES, v), rr.checklist_variant(RULES, v, verdicts="deep")
+            self.assertEqual(len(keep), len(deep))
+            diff = [(a, b) for a, b in zip(keep, deep) if a != b]
+            self.assertEqual([a for a, _ in diff], [rr.bullet_text(b, v) for b in swapped])
+            self.assertEqual([b for _, b in diff], [b[rr.VERDICTS_KEY] for b in swapped])
+            self.assertEqual(rr.checklist_variant(RULES, v, verdicts="keep"), keep)
+        # the hook's file carries the default only; the mod's constants carry both
+        with open(rr.CHECKLIST_TXT, encoding="utf-8") as f:
+            self.assertNotIn("small material too", f.read())
+        with open(rr.CHECKLIST_TS, encoding="utf-8") as f:
+            ts = f.read()
+        for name in ("LANE_BULLET_DEEP_VERDICTS_DEEP", "LANE_BULLET_YOU_VERDICTS_DEEP", "LANE_BULLETS_BUILTIN_VERDICTS_DEEP",
+                     "LANE_BULLETS_REGISTRY_VERDICTS_DEEP", "LANE_BULLETS_NONE_VERDICTS_DEEP"):
+            self.assertIn("export const %s" % name, ts)
+        with open(rr.HINT_TS, encoding="utf-8") as f:
+            self.assertIn("export const PHRASE_TEMPLATES_VERDICTS_DEEP", f.read())
+
 
 class Budget(unittest.TestCase):
     """Spec section 9: the always-on text stays small; the numbers live in rules.json and are asserted here too."""
@@ -81,11 +117,13 @@ class Budget(unittest.TestCase):
 
     def test_the_rendered_checklist_fits(self):
         b = RULES["budget"]
-        # the variant the model sees, Hint, Lanes and Quota lines aside (the scripts append those)
+        # the variant the model sees, Hint, Lanes and Quota lines aside (the scripts append those), under both
+        # values of the mod's verdicts switch
         for v in rr.VARIANTS:
-            lines = rr.checklist_variant(RULES, v)
-            self.assertLessEqual(len(lines), b["checklist_lines"], v)
-            self.assertLessEqual(words("\n".join(lines)), b["checklist_words"], v)
+            for verdicts in ("keep", "deep"):
+                lines = rr.checklist_variant(RULES, v, verdicts=verdicts)
+                self.assertLessEqual(len(lines), b["checklist_lines"], (v, verdicts))
+                self.assertLessEqual(words("\n".join(lines)), b["checklist_words"], (v, verdicts))
 
     def test_the_snippet_fits(self):
         with open(rr.SNIPPET, encoding="utf-8") as f:

@@ -124,6 +124,7 @@ The mod acts on facts, at the cheapest moment. Everything else it shows is read 
 - A review call counts only when it is the line's one command (`codex exec "<review prompt>"` or `invoke.py --lane <review lane>`; a diff piped into it is fine, but `true || codex exec "review"`, a `;` or `&&` chain, an output piped away, or `--help` and `--version` are not), its result is not an error, and its output reads as a report: at least one non-empty line, at least 20 characters, and a first line that is not a usage message (`usage:`, `Usage:`, or one holding `--help`). A `deep` call counts when its subagent's end arrived without failure; when the call returned before any such event (the engine does not guarantee the order), its own result must be no error and not empty.
 - At stop, the turn is sent back when that role did not complete (a `deep` subagent that finished, or still runs in the background; a review call as above; a refused, failed or timed-out call does not count), the reply has no line starting with `Kept:` (or `自留:`), and the turn was substantive (a tool call, or a reply of 400 characters or more).
 - `/spick gate off` switches it off.
+- `/spick verdicts deep` removes the `Kept:` way out for a judgement hint (a review hint keeps it): the send-back then names `deep` alone. See the `/spick verdicts` row below.
 
 The gate and the guard send a turn back at most once, with every reason in one block.
 
@@ -186,6 +187,7 @@ Two steps remain for you: `claude plugin uninstall spick-dashboard` and deleting
 | `spick quota` | Displays the quota line |
 | `/spick on\|force\|off` | Routing switch: `on` routes in a Haiku session only, `force` on any model |
 | `/spick review on\|off` | Codex review step |
+| `/spick verdicts keep\|deep` | Where a verdict goes, remembered. `keep` (the default) is the size rule: a verdict over small material (a few files, under ~200 lines) stays in the main session with a `Kept:` line. `deep` sends every verdict to `deep`, small material too: the checklist's verdict bullet and the judgement Hint phrase change (both from `rules.json`), and the gate no longer takes a `Kept:` line for a judgement hint. The real harness run of 2026-10-17 priced the trade at one judge point on a small verdict for about $0.30 (`docs/reviews/2026-10-17-real-harness-ab.md`, section 6). The bash hook alone (no mod) has no session state and keeps the default |
 | `/spick gate on\|off` | The gate: a hinted verdict the main session kept is sent back once at stop time |
 | `/spick guard on\|off` | The guard: the main session edits at most 1 source file per turn itself (a second is refused and handed to `coder`), and a turn that edited source without a passing check is sent back once at stop time. The cap is a tool-level soft bound: edits made through Bash (`sed -i`, a redirection) are not counted |
 | `/spick lane <id>` | Shows one lane's record |
@@ -198,7 +200,7 @@ Two steps remain for you: `claude plugin uninstall spick-dashboard` and deleting
 
 Where `/spick spend` and `/spick audit` get their data: the mod writes one turn record per session to `~/.claude/spick/turns/<sessionId>.jsonl`, a line per main turn with who ran, the usage, the gate and the checks. Sessions from earlier versions are read from the old per-session spend files. Without the mod there is no record: the bash hook sees no usage.
 
-Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
+Pane hotkeys: `r` routing, `v` review, `j` verdicts, `e` gate, `d` guard, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
 
 ## Requirements
 

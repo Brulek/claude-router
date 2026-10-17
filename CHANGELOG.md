@@ -164,3 +164,17 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
   rubric; the first real run's results are in `docs/reviews/2026-10-17-real-harness-ab.md`: spick 24/30 at $3.33
   against bare Opus 23/30 at $12.09 and bare Sonnet 22/30 at $5.93, the only deficit being the small verdict kept on
   Haiku (T7).
+
+### 1.0.0, the `/spick verdicts` switch (2026-10-17, after the real harness run)
+
+- `/spick verdicts keep|deep` (dashboard mod, remembered under `spick:verdicts`; default `keep`, so nothing changes
+  until it is set): `deep` sends every verdict to `deep`, small material too. It answers the one deficit of the real
+  harness run: a small verdict kept on Haiku scores one judge point below an Opus verdict for about $0.30 less, a trade
+  that is now the session's choice instead of the policy's.
+- Under `deep` the checklist's verdict bullet and the judgement Hint phrase take their `verdicts_deep` texts from
+  `rules.json` (`render_rules.py` renders them next to the default; the hook's `checklist.txt`, SKILL.md's table and
+  the CLAUDE.md block keep the default), the main-session bullet drops its `Kept:` clause, and the gate no longer takes
+  a `Kept:` line for a judgement hint: the send-back names `deep` alone. A review hint keeps its `Kept:` way out.
+- The pane gets a Verdicts row (`j`) with a note on what the value does; `/spick` with no UI lists `verdicts`. Both
+  variants stay inside the 14-line / 320-word checklist budget (`test_rules.py`). Design:
+  `docs/superpowers/specs/2026-10-17-verdicts-switch-design.md`.
