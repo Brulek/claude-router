@@ -344,20 +344,20 @@ class TestState(Base):
         for old in ("spick-quota.json", "spick-spend", "spick-gate.jsonl", "spick-backup", ".spick-mod-active"):
             self.assertFalse(os.path.exists(self.path(old)), old)
         self.assertEqual(self.read("spick", "quota.json"), '{"written_at": "x"}')
-        self.assertTrue(os.path.exists(self.path("spick", "spend", "s1.json")))
-        self.assertEqual(self.read("spick", "gate.jsonl"), '{"a": 1}\n')
+        self.assertTrue(os.path.exists(self.path("spick", "spick-spend", "s1.json")))
+        self.assertEqual(self.read("spick", "spick-gate.jsonl"), '{"a": 1}\n')
         # the old backup sits next to this run's
         self.assertEqual(len(self.backups()), 2)
-        self.assertIn("moved  %s -> %s" % (self.path("spick-spend"), self.path("spick", "spend")), r.stdout)
+        self.assertIn("moved  %s -> %s" % (self.path("spick-spend"), self.path("spick", "spick-spend")), r.stdout)
         # nothing left to move: the second run says nothing about it
         self.assertNotIn("round 1 ->", self.run_setup().stdout)
 
     def test_a_log_already_in_place_keeps_both_halves(self):
         os.makedirs(self.path("spick"))
-        self.put(os.path.join("spick", "gate.jsonl"), '{"new": 1}\n')
+        self.put(os.path.join("spick", "spick-gate.jsonl"), '{"new": 1}\n')
         self.put("spick-gate.jsonl", '{"old": 1}')
         self.run_setup()
-        self.assertEqual(self.read("spick", "gate.jsonl"), '{"old": 1}\n{"new": 1}\n')
+        self.assertEqual(self.read("spick", "spick-gate.jsonl"), '{"old": 1}\n{"new": 1}\n')
 
     def test_paths_py_and_setup_agree_on_the_state_dir(self):
         def ask(name):

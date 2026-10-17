@@ -4,15 +4,16 @@
   config dir   $CLAUDE_CONFIG_DIR when set and not empty, else ~/.claude (Claude Code's own rule)
   spick.json   <config>/spick.json (stays beside settings.json)
   state dir    <config>/spick/: quota.json, quota.lock, turns/<sessionId>.jsonl (one file per session, so two
-               sessions never write one file), mod-active/<sessionId>, backup/, plus spend/ and gate.jsonl,
-               the round-1 records moved here by --migrate
+               sessions never write one file), mod-active/<sessionId>, backup/, plus spick-spend/ and
+               spick-gate.jsonl, the round-1 records moved here by --migrate under their own names (spend.py reads
+               the old per-session spend files from there)
 
 The mod's hooks/paths.ts follows the same rule; triage-hook.sh computes it inline (bash, so the
 checklist prints without python). Every Python script asks this module instead of joining paths itself.
 
 Usage:
   paths.py <name>     print one path: config, spick.json, state, quota.json, quota.lock, turns,
-                      mod-active, backup, spend, gate.jsonl
+                      mod-active, backup, spend, gate
   paths.py --migrate  move the round-1 state files (spick-quota.json, spick-spend/, spick-gate.jsonl,
                       spick-backup/) into the state dir, once; prints one line per move. Exit 0, or 1
                       when a move failed (the line says which).
@@ -30,14 +31,14 @@ IN_STATE = {
     "turns": "turns",
     "mod-active": "mod-active",
     "backup": "backup",
-    "spend": "spend",
-    "gate.jsonl": "gate.jsonl",
+    "spend": "spick-spend",
+    "gate": "spick-gate.jsonl",
 }
 # round-1 names in the config dir -> their name in the state dir
 LEGACY = (
     ("spick-quota.json", "quota.json"),
     ("spick-spend", "spend"),
-    ("spick-gate.jsonl", "gate.jsonl"),
+    ("spick-gate.jsonl", "gate"),
     ("spick-backup", "backup"),
 )
 # round-1 single marker files, replaced by mod-active/<session>; removed by --migrate
