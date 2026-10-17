@@ -52,12 +52,12 @@ leave the machine); mid-session model switching (claude-router's job).
 
 | Finding | Where it lands | Test |
 |---|---|---|
-| N1 a compound command, an in-flight edit or a check outside the edits' scope passes as a check | v2-fix-mod item 1 (single-command rule, edits counted when completed, `afterLastEdit`); the scope limit stays documented | guard.test.ts, register.test.ts |
-| N2 a tool return can fake a completed review or deep | v2-fix-mod item 2 (single-command review calls with real output; foreground completion by `turn.complete`, `confirmedBy` recorded) | register.test.ts |
-| N3 nested delegates and post-timeout completions missing from the record | v2-fix-mod item 3 | turnlog/register tests, test_spend.py, test_audit.py |
-| N4 a cold quota cache reverts disabled lanes to the defaults | v2-fix-mod item 4 (spick.json is the authority) | register.test.ts |
-| N5 the A/B cannot prove it measured the checkout's mod | v2-fix-evals item 4 (probe per arm, `_probe.json`) | test_run.py |
-| N6 exit failures counted as passes, unknown cost as zero, Explore unbound | v2-fix-evals items 1-3 | test_grade.py, test_report.py |
-| N7 quoted `--lane` parsed as "0" | v2-fix-mod item 5 | format.test.ts |
-| N8 version stamped without checking what the install kept; `~/.claude/spick.json` hard-coded in SKILL | v2-fix-mod item 6 | test_setup.py |
-| A P1 data level: override without audit | v2-fix-mod item 7 (`<state>/invoke.jsonl`, audit.py) | test_invoke.py |
+| N1 a compound command, an in-flight edit or a check outside the edits' scope passes as a check | 993e468 (single-command rule, edits counted when completed, `afterLastEdit`); the scope limit stays documented | guard.test.ts, register.test.ts |
+| N2 a tool return can fake a completed review or deep | d3c4c5d (single-command review calls with 200+ chars of output; foreground completion by `turn.complete`, else `confirmedBy: tool.result`) | register.test.ts |
+| N3 nested delegates and post-timeout completions missing from the record | 7cb234a | turnlog/register tests, test_spend.py, test_audit.py |
+| N4 a cold quota cache reverts disabled lanes to the defaults | 2cde1a4 (spick.json is the authority when the cache is cold) | register.test.ts |
+| N5 the A/B cannot prove it measured the checkout's mod | c786f30 (probe per arm, `_probe.json`), f537ad9 (README) | test_run.py |
+| N6 exit failures counted as passes, unknown cost as zero, Explore unbound | 90b20be, 3ba160e, 0fca132 | test_grade.py, test_report.py |
+| N7 quoted `--lane` parsed as "0" | 002e28e | format.test.ts |
+| N8 version stamped without checking what the install kept; `~/.claude/spick.json` hard-coded in SKILL | 3f3cea9 | test_setup.py |
+| A P1 data level: override without audit | f69c4ac (`<state>/invoke.jsonl`, audit.py) | test_invoke.py |
