@@ -47,11 +47,12 @@ From `skills/spick/evals/ab/`:
 ```
 python3 run.py --setup                      # creates .venv with pytest (gitignored)
 python3 run.py --arms haiku-spick,haiku-bare,sonnet-bare,opus-bare --runs 3 --parallel 2 --out results/
-python3 grade.py results/                   # hidden tests, rules, and one Codex judge call per judged task
+python3 grade.py results/                   # hidden tests, rules, and one blind judge call (Codex) per judged task
+python3 grade.py results/ --judges codex,claude   # add a second judge, Opus through `claude -p` with no tools; the first named decides pass
 python3 report.py results/                  # writes results/REPORT-<date>.md
 ```
 
-Add `haiku-hook,sonnet-free,opus-free` to `--arms` for the full seven-arm matrix. Useful flags: `--tasks T1,T2`, `--timeout 900` (seconds per run), `--force` (redo finished runs; without it a rerun skips cells that have a `result.json`), `--dry-run` (print commands only), `--claude-bin` (a stub for pipeline tests), `--allow-unverified` and `--probe-timeout 180` (see the next section). `grade.py` takes `--no-judge` and `--rejudge`. Unit tests, from the repo root: `python3 -m unittest discover -s skills/spick/evals/ab -p 'test_*.py'`.
+Add `haiku-hook,sonnet-free,opus-free` to `--arms` for the full seven-arm matrix. Useful flags: `--tasks T1,T2`, `--timeout 900` (seconds per run), `--force` (redo finished runs; without it a rerun skips cells that have a `result.json`), `--dry-run` (print commands only), `--claude-bin` (a stub for pipeline tests), `--allow-unverified` and `--probe-timeout 180` (see the next section). `grade.py` takes `--judges` (default `codex`), `--no-judge` and `--rejudge`. Unit tests, from the repo root: `python3 -m unittest discover -s skills/spick/evals/ab -p 'test_*.py'`.
 
 The full default matrix is 8 tasks x 4 arms x 3 runs = 96 runs, and the Opus arm and the judge are the expensive parts. Run `--tasks T1,T2` first to see the shape.
 
@@ -77,7 +78,7 @@ A failed probe (the call itself failed, or the record is missing or unexpected) 
 
 `<out>/<arm>/<task>/run-<n>/` holds `work/` (the tree as the agent left it) and `result.json`: the `claude -p` JSON (`result`, `total_cost_usd`, `modelUsage`, `num_turns`, `subagent_stats`), wall time, exit code, timeout flag, the start-up probe of its invocation (`meta.probe`), and for spick arms the lines of `~/.claude/spick/turns/<sessionId>.jsonl` if the mod wrote them. The out dir also holds `_probe.json` and `_probe/<arm>/work/` (the probe calls). `grade.py` adds `grades.json` and `judge/` (raw judge output and the letter-to-run key); `report.py` adds the report. `samples/` in this folder is a one-run example of that shape.
 
-The judge sees every answer of a task at once under shuffled letters, with the `[Model:` label line and any `Kept:` line cut, so it cannot tell the arms apart. The key stays in `judge/<task>.key.json`.
+The judge sees every answer of a task at once under shuffled letters, with the `[Model:` label line and any `Kept:` line cut, so it cannot tell the arms apart. The key stays in `judge/<task>.key.json`; raw verdicts are `judge/<task>.txt` (Codex) and `judge/<task>.claude.txt`. With two judges both see the same letters; the first judge named in `--judges` decides pass, and the report's Second judge section shows each judge's mean per cell and how many runs the two score within one point of each other.
 
 ## Limits
 
@@ -87,5 +88,5 @@ The judge sees every answer of a task at once under shuffled letters, with the `
 - Measured on 2026-10-17 (`claude` 2.1.302): `disableAllHooks: true` disables the mod (no turn record, no marker), the `enabledPlugins` key alone does not, and `--plugin-dir` is honoured next to it; `haiku-spick` therefore leaves hooks on. The marketplace `spick` is installed from the checkout directory itself, so the "global" mod is this same code: the `enabledPlugins` key is what keeps it out of a run, and the probe's record check means something only because of it. The probe passed against a real `claude` for the first time on that date.
 - The `*-free` arms still read the user's global `~/.claude/CLAUDE.md`, which may carry the spick routing block. They are strong-model baselines with spick's instructions visible but no spick tooling (no mod, no hook, no spick agents); read them as "big model that may delegate on its own", not as "a model that has never heard of spick".
 - Costs are Claude Code's `total_cost_usd`. Outside-CLI delegates (Gemini, Grok, Codex) are not in it; the report marks such cells `>=`. The judge is priced separately and its cost stays unknown.
-- One judge, small n, no cross-session cache effects, no leak testing. The report ends with "What this matrix cannot show".
+- One judge by default (a second one, Opus through `claude -p`, with `--judges codex,claude`), small n, no cross-session cache effects, no leak testing. The report ends with "What this matrix cannot show".
 - Each run has a 15-minute timeout; the whole process group is killed on expiry.

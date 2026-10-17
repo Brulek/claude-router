@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
 """Grade every run under an out dir: exact checks, hidden tests, rules, and one blind judge call per judged task.
 
-    python3 grade.py results/            # writes results/grades.json and results/judge/
-    python3 grade.py results/ --no-judge # skip codex; judged cells stay pass=null
+    python3 grade.py results/                       # writes results/grades.json and results/judge/
+    python3 grade.py results/ --judges codex,claude  # a second blind judge (Opus via `claude -p`); the first decides pass
+    python3 grade.py results/ --no-judge            # skip the judges; judged cells stay pass=null
 
 The judge sees all answers of a task at once under shuffled letters, with the arm-revealing
 `[Model:` and `Kept:` lines cut; the letter -> run key is written next to the judge's raw output.
@@ -135,6 +136,38 @@ def call_codex(prompt, cwd, timeout=900):
            "-c", 'model_reasoning_effort="medium"', prompt]
     r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
     return r.stdout + "\n--stderr--\n" + r.stderr[-800:]
+
+
+def call_claude(prompt, cwd, timeout=900):
+    """The second judge: Opus through `claude -p` with no tools, hooks and the global mod off. The user's global
+    CLAUDE.md still loads (its label-line rule does not touch the JUDGE_JSON line). The text the parser reads is the
+    result, followed by a trailer with the exit code, the call's cost and the model that answered."""
+    settings = Path(cwd) / "_claude-judge-settings.json"
+    settings.write_text(json.dumps({"disableAllHooks": True, "enabledPlugins": {common.GLOBAL_MOD_KEY: False}}),
+                        encoding="utf-8")
+    mcp = Path(cwd) / "_claude-judge-mcp.json"  # no MCP servers: the user's connectors would add 100k tokens of context
+    mcp.write_text('{"mcpServers": {}}', encoding="utf-8")
+    cmd = ["claude", "-p", prompt, "--output-format", "json", "--model", "opus", "--tools", "",
+           "--settings", str(settings), "--mcp-config", str(mcp), "--strict-mcp-config"]
+    env = {k: v for k, v in os.environ.items() if k not in common.SESSION_VARS}
+    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
+    res = common.parse_result(r.stdout) or {}
+    models = ",".join((res.get("modelUsage") or {}).keys())
+    return (f"{res.get('result') or ''}\n--claude-judge--\nexit {r.returncode}; is_error {res.get('is_error')}; "
+            f"cost_usd {res.get('total_cost_usd')}; model {models}\n--stderr--\n{r.stderr[-800:]}")
+
+
+JUDGES = {"codex": call_codex, "claude": call_claude}
+
+
+def judge_cost(name, raw_text):
+    """(tokens, cost_usd) a judge's raw output reports: Codex prints `tokens used N` and no price (a subscription
+    CLI); the Claude judge's trailer carries the call's total_cost_usd."""
+    if name == "codex":
+        m = re.search(r"tokens used\s*([\d,]+)", raw_text)
+        return (int(m.group(1).replace(",", "")) if m else None), None
+    m = re.search(r"cost_usd ([0-9.]+)", raw_text)
+    return None, (float(m.group(1)) if m else None)
 
 
 # ---- tests in the work tree --------------------------------------------------------------------
@@ -304,7 +337,9 @@ def grade_run(rdir, rec, task):
 
 
 def judge_task(out, tid, task, graded, judge_info, args):
-    """One blind call over every non-error answer of the task; fills pass/judge_overall into graded."""
+    """One blind call per judge over every non-error answer of the task. The first judge in --judges decides pass and
+    fills judge_overall; every judge's score goes under judges[<name>] so the report can show how far they agree. Raw
+    verdicts are cached next to the key and reused while the set of answers is unchanged."""
     jdir = Path(out) / "judge"
     jdir.mkdir(exist_ok=True)
     answers = []
@@ -314,32 +349,51 @@ def judge_task(out, tid, task, graded, judge_info, args):
             answers.append((rid, rec["result"].get("result") or ""))
     if not answers or args.no_judge:
         return
-    keyf, rawf = jdir / f"{tid}.key.json", jdir / f"{tid}.txt"
+    keyf = jdir / f"{tid}.key.json"
     key = json.loads(keyf.read_text()) if keyf.exists() else None
-    if args.rejudge or key is None or sorted(key.values()) != sorted(r for r, _ in answers) or not rawf.exists():
-        prompt, key = build_judge_prompt(task["rubric"], task["prompt"], answers, template_text(task))
-        raw = call_codex(prompt, jdir)
+    prompt, fresh = build_judge_prompt(task["rubric"], task["prompt"], answers, template_text(task))
+    stale = args.rejudge or key is None or sorted(key.values()) != sorted(r for r, _ in answers)
+    if stale:
+        key = fresh
         keyf.write_text(json.dumps(key, indent=2), encoding="utf-8")
-        rawf.write_text(raw, encoding="utf-8")
-    raw_text = rawf.read_text(encoding="utf-8")
-    # priced separately by the report; a subscription CLI has no per-call dollar figure, so cost stays unknown
-    m = re.search(r"tokens used\s*([\d,]+)", raw_text)
-    judge_info[tid] = {"calls": 1, "tokens": int(m.group(1).replace(",", "")) if m else None, "cost_usd": None}
-    scores = parse_judge(raw_text, key)
     need = task["check"]["pass_overall"]
-    for letter, rid in key.items():
-        if letter in scores:
-            graded[rid]["judge_overall"] = scores[letter]
-            graded[rid]["pass"] = scores[letter] >= need
-    print(f"judge {tid}: {len(scores)}/{len(key)} answers scored")
+    info = {"calls": 0, "tokens": None, "cost_usd": None, "judges": {}}
+    for name in args.judges:
+        rawf = jdir / (f"{tid}.txt" if name == "codex" else f"{tid}.{name}.txt")
+        if stale or not rawf.exists():
+            rawf.write_text(JUDGES[name](prompt, jdir), encoding="utf-8")
+        raw_text = rawf.read_text(encoding="utf-8")
+        tokens, cost = judge_cost(name, raw_text)
+        info["judges"][name] = {"calls": 1, "tokens": tokens, "cost_usd": cost}
+        scores = parse_judge(raw_text, key)
+        for letter, rid in key.items():
+            if letter in scores:
+                graded[rid].setdefault("judges", {})[name] = scores[letter]
+                if name == args.judges[0]:
+                    graded[rid]["judge_overall"] = scores[letter]
+                    graded[rid]["pass"] = scores[letter] >= need
+        print(f"judge {tid} ({name}): {len(scores)}/{len(key)} answers scored")
+    info["calls"] = sum(j["calls"] for j in info["judges"].values())
+    toks = [j["tokens"] for j in info["judges"].values() if j["tokens"] is not None]
+    info["tokens"] = sum(toks) if toks else None
+    costs = [j["cost_usd"] for j in info["judges"].values()]
+    info["cost_usd"] = sum(costs) if costs and all(c is not None for c in costs) else None
+    judge_info[tid] = info
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out")
     ap.add_argument("--no-judge", action="store_true")
-    ap.add_argument("--rejudge", action="store_true", help="call the judge again even if a cached verdict matches")
+    ap.add_argument("--rejudge", action="store_true", help="call the judges again even if a cached verdict matches")
+    ap.add_argument("--judges", default="codex",
+                    help="comma list, the first decides pass: codex (gpt via `codex exec`, medium effort, read-only), "
+                         "claude (Opus through `claude -p`, no tools)")
     args = ap.parse_args()
+    args.judges = [j.strip() for j in args.judges.split(",") if j.strip()]
+    for j in args.judges:
+        if j not in JUDGES:
+            sys.exit(f"unknown judge {j}; known: {', '.join(JUDGES)}")
     if not common.venv_python().exists():
         sys.exit("no venv yet: run `python3 run.py --setup` first")
     tasks = common.load_tasks()

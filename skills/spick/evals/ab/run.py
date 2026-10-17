@@ -26,8 +26,7 @@ import common
 ALLOW = ["Read", "Edit", "Write", "Glob", "Grep", "Bash(python3:*)", "Bash(pytest:*)", "Bash(ls:*)",
          "Bash(cat:*)", "Bash(wc:*)", "Bash(head:*)", "Bash(echo:*)", "Bash(date:*)", "Bash(sort:*)",
          "Bash(shasum:*)"]
-SESSION_VARS = {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
-                "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"}
+SESSION_VARS = common.SESSION_VARS
 
 
 def setup_venv():
@@ -159,10 +158,7 @@ def probe_arm(arm, args, env, agents_file, settings_dir, settle=None):
     out, err, code, timed_out = run_claude(cmd, work, env, args.probe_timeout)
     p = {"arm": arm, "ok": False, "check": None, "detail": "", "session_id": None, "exit_code": code,
          "timed_out": timed_out, "record_seen": None, "schema_version": None}
-    try:
-        res = json.loads(out)
-    except ValueError:
-        res = None
+    res = common.parse_result(out)
     if timed_out or code != 0 or not isinstance(res, dict) or res.get("is_error") or not res.get("session_id"):
         p["detail"] = (f"the probe call failed (exit {code}{', timeout' if timed_out else ''}"
                        f"{'' if isinstance(res, dict) else ', no JSON result'}): {err.strip()[-200:]}")
@@ -238,10 +234,10 @@ def do_run(job, args, env, agents_file, settings_dir, lock, probe=None):
     out, err, code, timed_out = run_claude(cmd, work, env, args.timeout)
     wall = round(time.time() - t0, 1)
     try:
-        result = json.loads(out)
-    except ValueError:
-        result = None
+        json.loads(out)
+    except ValueError:  # keep the raw output whenever it was not clean JSON, even if the tolerant parse reads it
         (rdir / "stdout.txt").write_text(out, encoding="utf-8")
+    result = common.parse_result(out)
     session = (result or {}).get("session_id")
     rec = {
         "meta": {"arm": arm, "task": tid, "run": n, "started": started, "wall_seconds": wall,

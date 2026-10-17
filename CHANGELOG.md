@@ -140,3 +140,6 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
   hooks on; the mod's per-session marker silences the user's global spick hook, and the `enabledPlugins` key alone
   keeps the globally installed copy out. `haiku-hook` no longer adds this checkout's hook when the user's global
   settings already run that very file (a symlinked install). The README records what was measured.
+- `grade.py --judges codex,claude` adds a second blind judge, Opus through `claude -p` with no tools and hooks off;
+  the first judge named decides pass, and the report's Second judge section shows both means per cell and the runs
+  the two score within one point. The result parser tolerates a stray line on stdout and keeps the raw output.

@@ -1,7 +1,10 @@
+import argparse
+import json
 import shutil
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import common
 import grade
@@ -226,6 +229,55 @@ class TaskFiles(unittest.TestCase):
                     self.assertTrue((common.TASKS_DIR / t["template"] / p).is_file(), (tid, p))
             if t["grader"] == "judge":
                 self.assertTrue(t["rubric"], tid)
+
+
+class JudgeTask(unittest.TestCase):
+    """Two judges over the same answers: the first decides pass, both scores are kept, raw verdicts are cached."""
+    task = {"id": "T5", "rubric": "r", "prompt": "t", "template": None, "check": {"pass_overall": 3}}
+
+    def write_runs(self, out):
+        graded = {}
+        for arm, text in (("a", "答案一"), ("b", "答案二")):
+            d = Path(out) / arm / "T5" / "run-1"
+            d.mkdir(parents=True)
+            (d / "result.json").write_text(json.dumps({"meta": {}, "result": {"result": text}}), encoding="utf-8")
+            graded[f"{arm}/T5/run-1"] = {"arm": arm, "task": "T5", "run": 1, "error": False, "pass": None}
+        return graded
+
+    def test_first_judge_decides_pass_and_both_are_recorded(self):
+        calls = {"codex": 0, "claude": 0}
+
+        def codex(prompt, cwd):
+            calls["codex"] += 1
+            return 'ok\nJUDGE_JSON: {"A": {"overall": 4}, "B": {"overall": 2}}\ntokens used\n1,234\n'
+
+        def claude(prompt, cwd):
+            calls["claude"] += 1
+            return 'JUDGE_JSON: {"A": {"overall": 3}, "B": {"overall": 3}}\n--claude-judge--\nexit 0; cost_usd 0.5; model x'
+
+        args = argparse.Namespace(no_judge=False, rejudge=False, judges=["codex", "claude"])
+        with tempfile.TemporaryDirectory() as out, mock.patch.dict(grade.JUDGES, {"codex": codex, "claude": claude}):
+            graded = self.write_runs(out)
+            info = {}
+            grade.judge_task(out, "T5", self.task, graded, info, args)
+            key = json.loads((Path(out) / "judge" / "T5.key.json").read_text())
+            a_run, b_run = key["A"], key["B"]
+            self.assertEqual(graded[a_run]["judge_overall"], 4)
+            self.assertTrue(graded[a_run]["pass"])
+            self.assertFalse(graded[b_run]["pass"])  # codex gave B 2 although claude gave 3: the first judge decides
+            self.assertEqual(graded[a_run]["judges"], {"codex": 4, "claude": 3})
+            self.assertEqual(info["T5"]["judges"]["codex"], {"calls": 1, "tokens": 1234, "cost_usd": None})
+            self.assertEqual(info["T5"]["judges"]["claude"], {"calls": 1, "tokens": None, "cost_usd": 0.5})
+            self.assertEqual(info["T5"]["calls"], 2)
+            self.assertIsNone(info["T5"]["cost_usd"])  # codex's share is unknown, so the total is
+            self.assertTrue((Path(out) / "judge" / "T5.claude.txt").exists())
+            # a second grading over the same answers reuses the cached verdicts
+            grade.judge_task(out, "T5", self.task, graded, {}, args)
+            self.assertEqual(calls, {"codex": 1, "claude": 1})
+            grade.judge_task(out, "T5", self.task, graded, {}, argparse.Namespace(no_judge=False, rejudge=True, judges=["claude"]))
+            self.assertEqual(calls, {"codex": 1, "claude": 2})
+            self.assertEqual(graded[b_run]["judge_overall"], 3)  # claude alone decides now
+            self.assertTrue(graded[b_run]["pass"])
 
 
 if __name__ == "__main__":

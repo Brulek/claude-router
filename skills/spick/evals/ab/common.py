@@ -12,6 +12,9 @@ VENV = HERE / ".venv"
 # The globally installed copy of the mod (key in ~/.claude/plugins/installed_plugins.json). Every arm disables it so
 # no arm gets the mod by accident; haiku-spick loads the checkout's copy with --plugin-dir instead.
 GLOBAL_MOD_KEY = "spick-dashboard@spick"
+# env vars of the Claude Code session the harness runs in; a nested `claude -p` must not inherit them
+SESSION_VARS = {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
+                "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"}
 MOD_DIR = SKILL.parents[1] / "mod" / "spick-dashboard"
 
 # model: --model alias; hook: UserPromptSubmit hook of this checkout; mod: checkout mod via --plugin-dir;
@@ -95,3 +98,32 @@ def run_dirs(out):
         d = p.parent
         found.append((d.parent.parent.name, d.parent.name, int(d.name.split("-")[1]), d))
     return found
+
+
+def parse_result(out):
+    """The `claude -p --output-format json` result as a dict, or None. Strict JSON first; then line by line, so a
+    stray line on stdout (seen once on this machine with a mod loaded) does not cost the whole run; then with control
+    characters tolerated inside strings."""
+    if not out or not out.strip():
+        return None
+    try:
+        res = json.loads(out)
+        return res if isinstance(res, dict) else None
+    except ValueError:
+        pass
+    for line in out.splitlines():
+        line = line.strip()
+        if not line.startswith("{"):
+            continue
+        for strict in (True, False):
+            try:
+                res = json.loads(line, strict=strict)
+            except ValueError:
+                continue
+            if isinstance(res, dict) and "session_id" in res:
+                return res
+    try:
+        res = json.loads(out, strict=False)
+        return res if isinstance(res, dict) else None
+    except ValueError:
+        return None

@@ -295,5 +295,22 @@ class Probe(unittest.TestCase):
         self.assertIsNone(grade.run_metrics(rec, common.load_tasks()["T2"])["probe"])
 
 
+class ParseResult(unittest.TestCase):
+    clean = '{"session_id": "s1", "result": "OK", "total_cost_usd": 0.01}'
+
+    def test_clean_json(self):
+        self.assertEqual(common.parse_result(self.clean)["session_id"], "s1")
+        self.assertIsNone(common.parse_result(""))
+        self.assertIsNone(common.parse_result("not json"))
+
+    def test_a_stray_line_on_stdout_does_not_lose_the_run(self):
+        self.assertEqual(common.parse_result("spick: something printed\n" + self.clean + "\n")["result"], "OK")
+        self.assertEqual(common.parse_result(self.clean + "\ntrailing noise")["session_id"], "s1")
+
+    def test_control_characters_inside_strings_are_tolerated(self):
+        raw = '{"session_id": "s2", "result": "line one\x1b[0m\ttab"}'
+        self.assertEqual(common.parse_result(raw)["session_id"], "s2")
+
+
 if __name__ == "__main__":
     unittest.main()

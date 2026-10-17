@@ -192,5 +192,32 @@ class Render(unittest.TestCase):
             self.assertIn(phrase, text)
 
 
+class SecondJudge(unittest.TestCase):
+    def test_two_judges_get_their_own_lines_and_an_agreement_table(self):
+        runs = {"haiku-bare/T5/run-1": g("haiku-bare", "T5", True, judges={"codex": 4, "claude": 3}),
+                "haiku-bare/T5/run-2": g("haiku-bare", "T5", False, judges={"codex": 2, "claude": 4}),
+                "opus-bare/T5/run-1": g("opus-bare", "T5", True, judges={"codex": 5, "claude": 5})}
+        judge = {"T5": {"calls": 2, "tokens": 900, "cost_usd": None,
+                        "judges": {"codex": {"calls": 1, "tokens": 900, "cost_usd": None},
+                                   "claude": {"calls": 1, "tokens": None, "cost_usd": 0.42}}}}
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": judge}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("- `codex`: 1 call(s) over T5; about 900 tokens; cost unknown", text)
+        self.assertIn("- `claude`: 1 call(s) over T5; about 0 tokens; $0.42 by total_cost_usd", text)
+        self.assertIn("## Second judge", text)
+        self.assertIn("| T5 | haiku-bare | 3.00 | 3.50 | 2 | 1 |", text)
+        self.assertIn("| T5 | opus-bare | 5.00 | 5.00 | 1 | 1 |", text)
+        self.assertIn("2 of 3 scored by both judges are within one point", text)
+
+    def test_one_judge_has_no_second_judge_section(self):
+        runs = {"a/T5/run-1": g("a", "T5", True, judges={"codex": 4})}
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {"T5": {"calls": 1, "tokens": 10, "cost_usd": None}}}))
+            text = report.render(d, "2026-10-17")
+        self.assertNotIn("## Second judge", text)
+        self.assertIn("- `codex`: 1 call(s) over T5", text)
+
+
 if __name__ == "__main__":
     unittest.main()

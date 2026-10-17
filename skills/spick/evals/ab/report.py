@@ -151,12 +151,12 @@ def fmt_rate(a, b):
 
 CAVEATS = """\
 - The user's global `~/.claude/CLAUDE.md` is loaded by `claude -p` in every arm, so the bare arms still read the spick routing block. `--disallowedTools Agent` keeps `*-bare` arms from acting on it; `*-free` arms may. Read the bare arms as "no spick machinery", not "no spick text".
-- One judge (Codex, medium effort) scores T5 and T7, blind and with shuffled letters, but it is a single judge: its verdicts carry its own bias and noise. Treat a judged pass rate as a signal, not a measurement. T6 is graded by rules only.
+- The judge (Codex at medium effort; with `grade.py --judges codex,claude` also Opus through `claude -p` with no tools) scores the judged tasks blind, under shuffled letters, each answer on its own. One judge carries its own bias and noise: treat a judged pass rate as a signal, not a measurement. Two judges that agree make it more than that; two that disagree flag the cell (see the Second judge section). T6 is graded by rules only.
 - n is small. With 3 runs per cell one flaky run moves a pass rate by a third; do not read differences smaller than that.
 - Costs are `total_cost_usd` from Claude Code. A delegate on an outside CLI (Gemini, Grok, Codex) bills on its own subscription, so it is not in that figure; cells with such calls show `>=`, and a spick-arm run whose turn record is missing cannot be told apart from one with no outside calls, so its cost carries `?`.
 - Turn records (`~/.claude/spick/turns/<sessionId>.jsonl`) are written by the mod; a headless run may have none. Their absence is not an error and leaves the turn-record column at 0.
-- The mod arm relies on `disableAllHooks: true` leaving the mod's own prompt hook alone and on `--plugin-dir` taking precedence over the disabled global copy. The start-up probe above is the check on both; the Explore and turn-record columns below are further runtime evidence.
-- The global marker `~/.claude/spick/mod-active/<sessionId>` or the v1 `~/.claude/.spick-mod-active` file may silence the hook of this checkout in `haiku-hook`, and the user's global v1 hook may print as well. `haiku-hook` is a best-effort ablation arm.
+- The mod arm (`haiku-spick`) leaves hooks on: `disableAllHooks` would disable the mod itself (measured on 2026-10-17). The `enabledPlugins` key keeps the globally installed copy out, and the mod's per-session marker silences the user's global spick hook. The start-up probe above is the check; the Explore and turn-record columns below are further runtime evidence.
+- `haiku-hook` is a best-effort ablation arm: with a symlinked install the user's global hook is this checkout's hook and is not added twice; on a machine with a different global hook both would print, and a stale per-session marker could silence it.
 - Global agents in `~/.claude/agents` exist in every arm; `*-free` arms can use them.
 - Sessions were run with the user's real settings otherwise (permissions, MCP servers, plugins other than the mod), which adds the same fixed context to every arm.
 """
@@ -186,6 +186,68 @@ def probe_lines(out_dir):
         state = "INVALID" if not p.get("ok") else ("accepted, not verified" if p.get("check") == "best-effort" else "verified")
         L.append(f"  - `{arm}`: **{state}** - {p.get('detail') or 'no detail'}")
     return L
+
+
+def judge_order(judge, cells):
+    """Judge names in grading order: the first one decided pass. From the judge info's `judges` map (insertion order
+    is the --judges order), then any name only the runs carry."""
+    names = []
+    for j in judge.values():
+        names += [n for n in (j.get("judges") or {"codex": j}) if n not in names]
+    for c in cells.values():
+        for g in c["runs"]:
+            names += [n for n in (g.get("judges") or {}) if n not in names]
+    return names
+
+
+def judge_lines(judge, cells):
+    """One line per judge. A grades.json written before the `judges` map existed is a Codex-only grading."""
+    if not judge:
+        return ["No judge call recorded (grading ran with `--no-judge`, or no judged task was in the matrix)."]
+    per_judge = {}
+    for tid, j in judge.items():
+        for name, v in (j.get("judges") or {"codex": j}).items():
+            per_judge.setdefault(name, {})[tid] = v
+    L = []
+    for name in [n for n in judge_order(judge, cells) if n in per_judge]:
+        per = per_judge[name]
+        toks = sum(v.get("tokens") or 0 for v in per.values())
+        costs = [v.get("cost_usd") for v in per.values()]
+        cost = (f"${sum(costs):.2f} by total_cost_usd" if costs and all(c is not None for c in costs)
+                else "cost unknown (a subscription CLI reports no dollar figure)")
+        L.append(f"- `{name}`: {sum(v.get('calls') or 0 for v in per.values())} call(s) over {', '.join(sorted(per))}; "
+                 f"about {toks:,} tokens; {cost}. Kept out of every arm's cost above.")
+    return L
+
+
+def fmt_mean(values):
+    return f"{sum(values) / len(values):.2f}" if values else "-"
+
+
+def agreement_lines(judge, cells, arms, tids):
+    """When two judges scored the runs: each judge's mean per cell and how many runs they put within one point of each
+    other. The first judge named at grading decided pass; this shows what the second one would change."""
+    names = judge_order(judge, cells)
+    if len(names) < 2:
+        return []
+    a, b = names[0], names[1]
+    L = ["## Second judge", "", f"Judges `{a}` and `{b}` scored the same answers blind, under the same letters. A run is "
+         "agreed when their overall scores are within one point of each other.", "",
+         f"| task | arm | {a} mean | {b} mean | scored by both | within 1 point |", "|---|---|---|---|---|---|"]
+    tot_both = tot_agree = 0
+    for t in tids:
+        for arm in arms:
+            c = cells.get((arm, t))
+            js = [g["judges"] for g in (c["runs"] if c else []) if g.get("judges")]
+            if not js:
+                continue
+            both = [j for j in js if a in j and b in j]
+            agree = sum(1 for j in both if abs(j[a] - j[b]) <= 1)
+            tot_both += len(both)
+            tot_agree += agree
+            L.append(f"| {t} | {arm} | {fmt_mean([j[a] for j in js if a in j])} | {fmt_mean([j[b] for j in js if b in j])} | "
+                     f"{len(both)} | {agree} |")
+    return L + ["", f"Over all judged runs: {tot_agree} of {tot_both} scored by both judges are within one point.", ""]
 
 
 def render(out_dir, today):
@@ -264,14 +326,8 @@ def render(out_dir, today):
         L.append(f"| {t} | {tasks[t]['ideal_tier']} | " + " | ".join(row) + " |")
     L.append("")
 
-    L += ["## Judge", ""]
-    if judge:
-        toks = sum(j["tokens"] or 0 for j in judge.values())
-        L.append(f"{sum(j['calls'] for j in judge.values())} Codex call(s) over {', '.join(sorted(judge))}; about {toks:,} tokens; "
-                 "cost unknown (a subscription CLI reports no dollar figure). It is kept out of every arm's cost above.")
-    else:
-        L.append("No judge call recorded (grading ran with `--no-judge`, or no judged task was in the matrix).")
-    L += ["", "## Caveats", "", *probe_lines(out_dir), CAVEATS, "## What this matrix cannot show", "", CANNOT]
+    L += ["## Judge", "", *judge_lines(judge, cells), "", *agreement_lines(judge, cells, arms, tids)]
+    L += ["## Caveats", "", *probe_lines(out_dir), CAVEATS, "## What this matrix cannot show", "", CANNOT]
     return "\n".join(L)
 
 
