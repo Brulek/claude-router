@@ -132,3 +132,11 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 ### 1.0.0, routing policy v2.2 (2026-10-17, after A/B round 2)
 
 - A bug with a failing test goes to a Haiku `coder` first (`model: haiku`); the test is the check, and only a failed check sends it to the Sonnet `coder` at high effort. In two A/B rounds every one-file fix passed its hidden tests on Haiku.
+
+### 1.0.0, A/B harness against a real `claude` (2026-10-17)
+
+- First run of `skills/spick/evals/ab` against a real `claude` (2.1.302): the `haiku-spick` start-up probe failed
+  because `disableAllHooks: true` disables the mod's own handlers too (no turn record, no marker). The arm now leaves
+  hooks on; the mod's per-session marker silences the user's global spick hook, and the `enabledPlugins` key alone
+  keeps the globally installed copy out. `haiku-hook` no longer adds this checkout's hook when the user's global
+  settings already run that very file (a symlinked install). The README records what was measured.

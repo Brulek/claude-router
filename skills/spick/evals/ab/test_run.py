@@ -80,15 +80,31 @@ class Arms(unittest.TestCase):
         self.assertIn("--agents", c)
         self.assertIn("Agent", c[c.index("--allowedTools"):])
         s = run.arm_settings(common.ARMS["haiku-spick"])
-        self.assertTrue(s["disableAllHooks"])
+        self.assertNotIn("disableAllHooks", s)  # it would disable the mod itself (measured 2026-10-17)
         self.assertNotIn("hooks", s)
+        self.assertFalse(s["enabledPlugins"][common.GLOBAL_MOD_KEY])
 
     def test_hook_arm_has_hook_from_the_checkout_and_no_mod(self):
-        s = run.arm_settings(common.ARMS["haiku-hook"])
+        s = run.arm_settings(common.ARMS["haiku-hook"], global_settings={})
         self.assertNotIn("disableAllHooks", s)
         cmd = s["hooks"]["UserPromptSubmit"][0]["hooks"][0]["command"]
         self.assertIn(str(common.SKILL / "scripts" / "triage-hook.sh"), cmd)
         self.assertNotIn("--plugin-dir", self.cmd("haiku-hook"))
+
+    def test_hook_arm_does_not_add_the_hook_twice_when_the_global_one_is_this_file(self):
+        """A symlinked install runs this checkout's hook from ~/.claude/settings.json already."""
+        with tempfile.TemporaryDirectory() as d:
+            link = Path(d) / "skills" / "spick"
+            link.parent.mkdir()
+            link.symlink_to(common.SKILL)
+            same = {"hooks": {"UserPromptSubmit": [{"hooks": [
+                {"type": "command", "command": f"bash \"{link}/scripts/triage-hook.sh\""}]}]}}
+            self.assertTrue(run.hook_from_global(same))
+            self.assertNotIn("hooks", run.arm_settings(common.ARMS["haiku-hook"], global_settings=same))
+            other = {"hooks": {"UserPromptSubmit": [{"hooks": [
+                {"type": "command", "command": f"bash {d}/elsewhere/triage-hook.sh"}]}]}}
+            self.assertFalse(run.hook_from_global(other))
+            self.assertIn("hooks", run.arm_settings(common.ARMS["haiku-hook"], global_settings=other))
 
     def test_free_arms_allow_agent_without_spick(self):
         for arm in ("sonnet-free", "opus-free"):

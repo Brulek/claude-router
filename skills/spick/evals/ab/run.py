@@ -9,6 +9,7 @@ Results land in <out>/<arm>/<task>/run-<n>/{work/, result.json}; grade.py and re
 import argparse
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -62,14 +63,42 @@ def render_agents():
     return json.dumps(agents, ensure_ascii=False)
 
 
-def arm_settings(cfg):
-    """Settings JSON per arm: hooks off or the checkout's hook; the global mod is disabled in every arm."""
+CHECKOUT_HOOK = common.SKILL / "scripts" / "triage-hook.sh"
+
+
+def global_hook_paths(settings=None):
+    """Resolved paths of the triage-hook.sh scripts the user's global settings run at UserPromptSubmit. With a
+    symlinked install (~/.claude/skills/spick -> this checkout) the global hook is this checkout's own file."""
+    if settings is None:
+        try:
+            settings = json.loads((common.claude_dir() / "settings.json").read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            settings = {}
+    paths = set()
+    for group in (settings.get("hooks") or {}).get("UserPromptSubmit") or []:
+        for h in group.get("hooks") or []:
+            m = re.search(r"([^\s\"']*triage-hook\.sh)", h.get("command") or "")
+            if m:
+                raw = m.group(1).replace("$HOME", str(Path.home())).replace("${HOME}", str(Path.home()))
+                paths.add(Path(os.path.expanduser(raw)).resolve())
+    return paths
+
+
+def hook_from_global(settings=None):
+    """True when the user's global settings already run this checkout's hook (so haiku-hook must not add it twice)."""
+    return CHECKOUT_HOOK.resolve() in global_hook_paths(settings)
+
+
+def arm_settings(cfg, global_settings=None):
+    """Settings JSON per arm: hooks off, or the checkout's hook; the global mod is disabled in every arm. haiku-spick
+    leaves hooks on: disableAllHooks would disable the mod itself (measured, see common.ARMS), and the mod's per-session
+    marker silences the user's global spick hook. The hook arm adds this checkout's hook unless the user's global
+    settings already run that very file (a symlinked install), which would inject the checklist twice."""
     s = {"enabledPlugins": {common.GLOBAL_MOD_KEY: False}}
     if cfg["hooks_off"]:
         s["disableAllHooks"] = True
-    if cfg["hook"]:
-        hook = common.SKILL / "scripts" / "triage-hook.sh"
-        s["hooks"] = {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": f"bash '{hook}'"}]}]}
+    if cfg["hook"] and not hook_from_global(global_settings):
+        s["hooks"] = {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": f"bash '{CHECKOUT_HOOK}'"}]}]}
     return s
 
 
@@ -155,10 +184,13 @@ def probe_arm(arm, args, env, agents_file, settings_dir, settle=None):
         p["ok"] = 2 in versions
         p["detail"] = ("the checkout's mod wrote a schemaVersion 2 turn record" if p["ok"] else
                        f"no schemaVersion 2 turn record for session {sid}: the checkout's mod did not run "
-                       "(--plugin-dir not honoured, or the mod does not write records in headless runs)")
+                       "(--plugin-dir not honoured, disableAllHooks in the settings, or the mod does not write "
+                       "records in headless runs)")
     elif cfg["hook"]:
         p["check"], p["ok"] = "best-effort", True
-        p["detail"] = "accepted unverified: a bash hook leaves no trace the harness can read"
+        p["detail"] = ("accepted unverified: a bash hook leaves no trace the harness can read"
+                       + ("; the hook is the user's global one, which is this checkout's file" if hook_from_global()
+                          else "; the hook was added from this checkout"))
     else:
         p["check"] = "no-record"
         p["ok"] = not p["record_seen"]

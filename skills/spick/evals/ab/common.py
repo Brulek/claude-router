@@ -16,10 +16,12 @@ MOD_DIR = SKILL.parents[1] / "mod" / "spick-dashboard"
 
 # model: --model alias; hook: UserPromptSubmit hook of this checkout; mod: checkout mod via --plugin-dir;
 # agents: skills/spick/assets/agents rendered into --agents; agent_tool: Agent allowed (else --disallowedTools Agent);
-# hooks_off: disableAllHooks, which keeps the user's global v1 hook out of the run (haiku-spick gets its checklist
-# from the mod, which injects it itself; haiku-hook is the only arm that leaves hooks on, see README)
+# hooks_off: disableAllHooks, which keeps the user's global hook out of the run. Not for haiku-spick: measured on
+# 2026-10-17 (claude 2.1.302), disableAllHooks disables the mod's own handlers too (no turn record, no marker), so
+# that arm leaves hooks on and relies on the mod's per-session marker, which silences the user's global spick hook
+# (haiku-hook leaves hooks on by design, see README)
 ARMS = {
-    "haiku-spick": dict(model="haiku", hook=False, mod=True, agents=True, agent_tool=True, hooks_off=True),
+    "haiku-spick": dict(model="haiku", hook=False, mod=True, agents=True, agent_tool=True, hooks_off=False),
     "haiku-hook": dict(model="haiku", hook=True, mod=False, agents=True, agent_tool=True, hooks_off=False),
     "haiku-bare": dict(model="haiku", hook=False, mod=False, agents=False, agent_tool=False, hooks_off=True),
     "sonnet-bare": dict(model="sonnet", hook=False, mod=False, agents=False, agent_tool=False, hooks_off=True),

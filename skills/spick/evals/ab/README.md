@@ -23,7 +23,7 @@ T1-T6 come from the older `mode-compare` workspace. T7 has a planted trap (`set 
 
 | arm | model | hooks | mod | spick agents | Agent tool |
 |---|---|---|---|---|---|
-| `haiku-spick` | haiku | off | checkout's `mod/spick-dashboard` via `--plugin-dir` | yes | yes |
+| `haiku-spick` | haiku | on (the mod's marker silences the user's spick hook) | checkout's `mod/spick-dashboard` via `--plugin-dir` | yes | yes |
 | `haiku-bare` | haiku | off | off | no | no |
 | `sonnet-bare` | sonnet | off | off | no | no |
 | `opus-bare` | opus | off | off | no | no |
@@ -33,9 +33,9 @@ T1-T6 come from the older `mode-compare` workspace. T7 has a planted trap (`set 
 The default matrix is the first four. `*-bare` arms are single-model baselines; `*-free` arms are the fair strong baselines, a big model that may delegate but has no spick. Flags per arm (see `run.py` `build_cmd` and `arm_settings`):
 
 - every arm: `--output-format json --permission-mode acceptEdits --model <alias>` and `--settings` with `{"enabledPlugins": {"spick-dashboard@spick": false}}`, which turns off the globally installed mod (the key is `GLOBAL_MOD_KEY` in `common.py`, taken from `~/.claude/plugins/installed_plugins.json`);
-- hooks off: `"disableAllHooks": true` in that settings file, which keeps the user's global v1 hook out;
-- `haiku-spick`: `--plugin-dir <checkout>/mod/spick-dashboard` and `--agents` rendered from `skills/spick/assets/agents/*.md`; the mod injects the checklist itself, so no bash hook;
-- `haiku-hook`: hooks stay on and `--settings` adds the hook of this checkout;
+- hooks off (bare and free arms): `"disableAllHooks": true` in that settings file, which keeps the user's global hook out;
+- `haiku-spick`: `--plugin-dir <checkout>/mod/spick-dashboard` and `--agents` rendered from `skills/spick/assets/agents/*.md`; the mod injects the checklist itself, so no bash hook is added. Hooks stay on in this arm: `disableAllHooks` disables the mod's own handlers as well (measured on 2026-10-17 with `claude` 2.1.302: no turn record, no marker), and the mod's per-session marker (`~/.claude/spick/mod-active/<sessionId>`) is what silences the user's global spick hook;
+- `haiku-hook`: hooks stay on and `--settings` adds the hook of this checkout, unless the user's global settings already run that very file (a symlinked install, `~/.claude/skills/spick -> <checkout>`), in which case it is not added a second time; the probe line says which;
 - bare arms: `--disallowedTools Agent`; arms with the Agent tool add `Agent` to `--allowedTools`.
 
 The allowed-tools list is the old runner's: Read, Edit, Write, Glob, Grep and Bash for python3, pytest, ls, cat, wc, head, echo, date, sort, shasum.
@@ -83,8 +83,8 @@ The judge sees every answer of a task at once under shuffled letters, with the `
 
 - `claude -p` loads the user's global `~/.claude/CLAUDE.md`, so bare arms still read the spick routing block; `--disallowedTools Agent` stops them acting on it. `*-free` arms may act on it. The global `~/.claude/agents` are present in every arm.
 - The harness never edits `~/.claude`. Running `claude` still writes its own session files there.
-- Known limit on this machine: a global marker file (`~/.claude/.spick-mod-active`, or `~/.claude/spick/mod-active/<sessionId>` in v2) can silence the hook of this checkout, and the user's global v1 hook may print in `haiku-hook` as well. `haiku-hook` is therefore a best-effort arm. The v1 hook of this checkout was not worked around.
-- `haiku-spick` assumes `disableAllHooks: true` leaves the mod's own prompt hook alone and that `--plugin-dir` is not undone by the disabled global key. The start-up probe now checks this at run time (a v2 turn record must appear); the probe was only exercised against stubs here, never against a real `claude`.
+- `haiku-hook` is a best-effort arm: a stale per-session marker (`~/.claude/spick/mod-active/<sessionId>`, kept a day) could silence the hook, and on a machine whose global hook is a different spick copy both hooks print. With a symlinked install the global hook is this checkout's file and the harness does not add it twice.
+- Measured on 2026-10-17 (`claude` 2.1.302): `disableAllHooks: true` disables the mod (no turn record, no marker), the `enabledPlugins` key alone does not, and `--plugin-dir` is honoured next to it; `haiku-spick` therefore leaves hooks on. The marketplace `spick` is installed from the checkout directory itself, so the "global" mod is this same code: the `enabledPlugins` key is what keeps it out of a run, and the probe's record check means something only because of it. The probe passed against a real `claude` for the first time on that date.
 - The `*-free` arms still read the user's global `~/.claude/CLAUDE.md`, which may carry the spick routing block. They are strong-model baselines with spick's instructions visible but no spick tooling (no mod, no hook, no spick agents); read them as "big model that may delegate on its own", not as "a model that has never heard of spick".
 - Costs are Claude Code's `total_cost_usd`. Outside-CLI delegates (Gemini, Grok, Codex) are not in it; the report marks such cells `>=`. The judge is priced separately and its cost stays unknown.
 - One judge, small n, no cross-session cache effects, no leak testing. The report ends with "What this matrix cannot show".
