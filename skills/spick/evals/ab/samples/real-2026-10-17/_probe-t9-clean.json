@@ -1,0 +1,85 @@
+{
+  "at": "2026-10-17T09:27:12+00:00",
+  "claude_version": "2.1.302 (Claude Code)",
+  "checkout_head": "d3764126998adae91a8e457d74a6ea78f0883377",
+  "allow_unverified": false,
+  "arms": {
+    "haiku-spick": {
+      "arm": "haiku-spick",
+      "ok": true,
+      "check": "record",
+      "detail": "the checkout's mod wrote a schemaVersion 2 turn record",
+      "session_id": "64e75bc4-d4aa-4063-88d0-ef2f0832a85f",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": true,
+      "schema_version": 2
+    },
+    "haiku-bare": {
+      "arm": "haiku-bare",
+      "ok": true,
+      "check": "no-record",
+      "detail": "no turn record for the session: the global mod stayed disabled",
+      "session_id": "8c5ab6fd-19b4-4932-b386-dbd229eaffa4",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": false,
+      "schema_version": null
+    },
+    "sonnet-bare": {
+      "arm": "sonnet-bare",
+      "ok": true,
+      "check": "no-record",
+      "detail": "no turn record for the session: the global mod stayed disabled",
+      "session_id": "34e3af1d-e653-4bcd-ab23-3230339cabe6",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": false,
+      "schema_version": null
+    },
+    "sonnet-free": {
+      "arm": "sonnet-free",
+      "ok": true,
+      "check": "no-record",
+      "detail": "no turn record for the session: the global mod stayed disabled",
+      "session_id": "22297fed-d9bf-4a6f-b768-759818abd769",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": false,
+      "schema_version": null
+    },
+    "haiku-hook": {
+      "arm": "haiku-hook",
+      "ok": true,
+      "check": "best-effort",
+      "detail": "accepted unverified: a bash hook leaves no trace the harness can read; the hook is the user's global one, which is this checkout's file",
+      "session_id": "490db760-bdfd-46ac-8a11-cc9cd2fc810c",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": false,
+      "schema_version": null
+    },
+    "opus-bare": {
+      "arm": "opus-bare",
+      "ok": true,
+      "check": "no-record",
+      "detail": "no turn record for the session: the global mod stayed disabled",
+      "session_id": "556df981-d841-4936-90a7-f7989637360f",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": false,
+      "schema_version": null
+    },
+    "opus-free": {
+      "arm": "opus-free",
+      "ok": true,
+      "check": "no-record",
+      "detail": "no turn record for the session: the global mod stayed disabled",
+      "session_id": "78ef656b-df10-4c9a-94f6-ae38ac3505f2",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": false,
+      "schema_version": null
+    }
+  }
+}

@@ -72,4 +72,16 @@ leave the machine); mid-session model switching (claude-router's job).
 | `_probe.json` overwritten on resumed runs | b3f240c (`meta.probe` per run; cells read verified/mixed/not verified) | test_run.py, test_report.py |
 | Missing delegate record read as "no outside calls" | 8e19a96 (`cost_floor: null`, `?` in the report) | test_grade.py, test_report.py |
 
-Open after round 4, by design or pending a live run: the foreground-agent completion fallback on the tool result (`confirmedBy`) until the engine's event order is observed live; the check's scope (which files a test exercises) is not known to the mod; the edit cap does not see Bash writes; `--override-data` needs only a non-empty reason (logged); kept (user-modified) agent files are listed, not blocked, on upgrade; the A/B matrix and the Explore override wait for a CLI login on this machine.
+## Round 5: the first real harness run (2026-10-17-real-harness-ab.md)
+
+What the run itself found, each with its commit and regression test.
+
+| Finding | Landed in | Test |
+|---|---|---|
+| `disableAllHooks` in the spick arm's settings disabled the mod itself (probe failed: no record, no marker) | 5155f1b (hooks stay on; the mod's per-session marker silences the user's global hook; the hook arm does not add this checkout's hook twice) | test_run.py `Arms`, README measurement |
+| A subagent's own `turn.start` reset the main turn's state (delegates [], hint [], gate blind to a running deep) | 43a4fc3 (`if (e.agentId) return next(e)`) | register.test.ts "a subagent's own turn.start does not reset the main turn" |
+| The Claude judge's relative `--settings` path resolved against its cwd; a failed verdict was reused from cache; T9 had no pass threshold | 679a64b | test_grade.py `JudgeTask`, `TaskFiles` |
+| Work trees inside the checkout carried its git status and recent commit titles into every session; T9 answers quoted the commit that fixed the defect they had to find | d376412 (`run.py` refuses an out dir inside a work tree; default `~/spick-ab/results`; K5 in T9's key) | test_run.py `OutDir` |
+| The Opus judge with no built-in tools loaded every MCP tool schema ($2.73 a call) | fdce704 (`--strict-mcp-config` with an empty config: $0.05) | smoke-tested, not unit-tested (a live call) |
+
+Open after round 5, by design or pending a live run: the foreground-agent completion fallback on the tool result (`confirmedBy`) until the engine's event order is observed live; the check's scope (which files a test exercises) is not known to the mod; the edit cap does not see Bash writes; `--override-data` needs only a non-empty reason (logged); kept (user-modified) agent files are listed, not blocked, on upgrade; the A/B matrix and the Explore override wait for a CLI login on this machine.

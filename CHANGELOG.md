@@ -152,3 +152,7 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
   a repository carries its git status and recent commit titles, and the first full run's T9 answers quoted the
   commit that had fixed the defect they were asked to find. T9's key gains that defect as K5. The Claude judge gets
   absolute paths, a failed verdict is never reused from the cache, and every judged task must carry a pass threshold.
+- Judges run hermetically (a fresh directory outside any repository) and a task's key file is inlined into the
+  rubric; the first real run's results are in `docs/reviews/2026-10-17-real-harness-ab.md`: spick 24/30 at $3.33
+  against bare Opus 23/30 at $12.09 and bare Sonnet 22/30 at $5.93, the only deficit being the small verdict kept on
+  Haiku (T7).

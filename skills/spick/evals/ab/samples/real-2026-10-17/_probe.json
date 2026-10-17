@@ -1,0 +1,19 @@
+{
+  "at": "2026-10-17T08:47:16+00:00",
+  "claude_version": "2.1.302 (Claude Code)",
+  "checkout_head": "43a4fc39f89f30845b914555fe9509e4c1d9d500",
+  "allow_unverified": false,
+  "arms": {
+    "haiku-spick": {
+      "arm": "haiku-spick",
+      "ok": true,
+      "check": "record",
+      "detail": "the checkout's mod wrote a schemaVersion 2 turn record",
+      "session_id": "988aed53-dbb6-48b0-8afa-86e6cea9a0fb",
+      "exit_code": 0,
+      "timed_out": false,
+      "record_seen": true,
+      "schema_version": 2
+    }
+  }
+}

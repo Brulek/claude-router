@@ -1,0 +1,14 @@
+**评分理由**
+
+- **K1（检查误判）：** 几乎所有回答都找到了 `guard.ts:94` 只排除 `||`、退出码取整行命令这一点。没有人点出 K1 的另一半：编辑在 `next` 之前计数，使编辑尚未完成时跑的测试被算作"编辑之后"。多数回答写了"失败或被拒的编辑也计数"，这是同一处代码的另一种后果，算真实问题，但不等于 K1 的这一半。
+- **K2（完成状态可伪造）：** 没有回答完整命中。引号参数含 review 即算 review、`true || codex exec "review"`、前台 deep 仅凭返回非空即记 completed，三处都无人指出。B、H、J、L、N、R 提到"后台 Bash 一启动就记为完成或通过"，与"整条 Bash 成功即完成"相近，只给少量部分分。
+- **K3（记账遗漏）：** 超时后删除索引、late 行与用量丢失，大多数回答都有；嵌套委派不进 turn 记录，约一半回答写到。两半都有的算满半分。
+- **K4（冷缓存回退）：** 无人发现。
+- **K5（子代理 turn.start 清空主回合状态）：** A、I 列入正文，都标为未确认，但后果描述准确；F 放在待确认项中，给部分分；B 只提了一句"无法核实"，不计分。
+- **准确性扣分：** M、O、S 把注释里写明的设计（运行中的 deep 算完成、Bash 写文件不计入）列为缺陷；M 还列了推测性的多次 `turn.complete`。
+- **表达扣分：** B、H、R、T 在交付内容前后写了委派或核对过程的说明。
+
+JUDGE_JSON: {"A":{"scores":{"recall":4,"accuracy":4,"evidence":4,"ranking":3,"concision":4},"overall":4},"B":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":3},"overall":3},"C":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":4,"concision":4},"overall":3},"D":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":3},"overall":3},"E":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":4,"concision":4},"overall":3},"F":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":3},"overall":3},"G":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":4},"overall":3},"H":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":4,"concision":3},"overall":3},"I":{"scores":{"recall":4,"accuracy":4,"evidence":4,"ranking":3,"concision":4},"overall":4},"J":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":4},"overall":3},"K":{"scores":{"recall":3,"accuracy":3,"evidence":4,"ranking":3,"concision":3},"overall":3},"L":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":4},"overall":3},"M":{"scores":{"recall":2,"accuracy":2,"evidence":3,"ranking":2,"concision":3},"overall":2},"N":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":4,"concision":4},"overall":3},"O":{"scores":{"recall":2,"accuracy":3,"evidence":4,"ranking":3,"concision":3},"overall":2},"P":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":4},"overall":3},"Q":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":3},"overall":3},"R":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":3},"overall":3},"S":{"scores":{"recall":3,"accuracy":3,"evidence":4,"ranking":3,"concision":4},"overall":3},"T":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":3,"concision":3},"overall":3},"U":{"scores":{"recall":3,"accuracy":4,"evidence":4,"ranking":4,"concision":4},"overall":3}}
+--claude-judge--
+exit 0; is_error False; cost_usd 0.9082498; model claude-opus-5-5
+--stderr--

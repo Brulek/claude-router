@@ -1,0 +1,22 @@
+**评分理由**
+
+- **篇幅是最主要的区分项。** 约 600 字及以下的有 A、D、H、I、R、S、T、U、Q，B、M、O 略超。C、E、F、G、J、K、L、N、P 明显超出（约 850–1100 字），这一项给 1–2 分。
+- **A、D、H**：内容扎实且具体。D 的取舍最鲜明：中午定时、Kopia+B2、对象锁，并说明了不用 Time Machine 的理由。H 有具体时刻、价格和 VSS 权限，信息密度高。
+- **B**：逻辑清楚，每项都附理由，但没有指定任何工具，具体性偏弱。
+- **I、R**：主动标注假设和未知项，取舍清楚，但工具只给"任选"，具体性略弱。R 混入了 `~/Documents/LLM/` 这种与任务无关的路径。
+- **S**：把"家中 NAS"当异地副本，违背 3-2-1。对 `.env` 既说"会进入备份"又说"明确排除规则"，前后矛盾。
+- **T**：分层和验收标准都很具体，结尾附有核实声明，略显多余。
+- **U**：简洁完整，但工具只写"restic 类"，结尾残留了一行模型标签，属于格式瑕疵。
+- **O**：每日自动推送 WIP 分支有副作用；本机、中心、异地三处的关系交代混乱；"每周全量"与 restic 的工作方式不符。
+- **Q**：本地用系统工具、异地用统一工具，取舍讲得清楚，但异地工具没有点名。
+- **M**：说 Syncthing 没有历史版本不准确（它可选开启文件版本）。
+- **J**：多机共用仓库"锁冲突更多"说法不够准确，restic 的 backup 使用非独占锁。
+- **L**：前文写"每晚一次"，后文又说"每天两次快照之间"，自相矛盾。
+- **E**：用 restic 却说"夜间全量"，说法不准确。
+
+[Model: Opus 5.5 | Effort: medium]
+
+JUDGE_JSON: {"A": {"scores": {"coverage": 5, "specificity": 4, "reliability": 5, "length_format": 4, "priority": 4}, "overall": 4}, "B": {"scores": {"coverage": 5, "specificity": 3, "reliability": 4, "length_format": 3, "priority": 5}, "overall": 4}, "C": {"scores": {"coverage": 5, "specificity": 4, "reliability": 5, "length_format": 2, "priority": 4}, "overall": 4}, "D": {"scores": {"coverage": 5, "specificity": 5, "reliability": 5, "length_format": 4, "priority": 5}, "overall": 5}, "E": {"scores": {"coverage": 5, "specificity": 5, "reliability": 4, "length_format": 1, "priority": 4}, "overall": 3}, "F": {"scores": {"coverage": 5, "specificity": 4, "reliability": 5, "length_format": 2, "priority": 4}, "overall": 4}, "G": {"scores": {"coverage": 5, "specificity": 4, "reliability": 5, "length_format": 1, "priority": 4}, "overall": 3}, "H": {"scores": {"coverage": 5, "specificity": 5, "reliability": 5, "length_format": 4, "priority": 4}, "overall": 5}, "I": {"scores": {"coverage": 5, "specificity": 3, "reliability": 5, "length_format": 4, "priority": 5}, "overall": 4}, "J": {"scores": {"coverage": 5, "specificity": 5, "reliability": 4, "length_format": 2, "priority": 4}, "overall": 4}, "K": {"scores": {"coverage": 5, "specificity": 4, "reliability": 4, "length_format": 2, "priority": 5}, "overall": 4}, "L": {"scores": {"coverage": 5, "specificity": 4, "reliability": 4, "length_format": 2, "priority": 4}, "overall": 4}, "M": {"scores": {"coverage": 5, "specificity": 4, "reliability": 4, "length_format": 3, "priority": 4}, "overall": 4}, "N": {"scores": {"coverage": 5, "specificity": 4, "reliability": 5, "length_format": 1, "priority": 4}, "overall": 3}, "O": {"scores": {"coverage": 4, "specificity": 3, "reliability": 3, "length_format": 3, "priority": 3}, "overall": 3}, "P": {"scores": {"coverage": 5, "specificity": 5, "reliability": 5, "length_format": 1, "priority": 4}, "overall": 3}, "Q": {"scores": {"coverage": 5, "specificity": 3, "reliability": 4, "length_format": 4, "priority": 4}, "overall": 4}, "R": {"scores": {"coverage": 5, "specificity": 3, "reliability": 4, "length_format": 4, "priority": 5}, "overall": 4}, "S": {"scores": {"coverage": 4, "specificity": 3, "reliability": 3, "length_format": 4, "priority": 3}, "overall": 3}, "T": {"scores": {"coverage": 5, "specificity": 5, "reliability": 4, "length_format": 4, "priority": 4}, "overall": 4}, "U": {"scores": {"coverage": 5, "specificity": 3, "reliability": 5, "length_format": 4, "priority": 4}, "overall": 4}}
+--claude-judge--
+exit 0; is_error False; cost_usd 0.24347780000000002; model claude-opus-5-5
+--stderr--
