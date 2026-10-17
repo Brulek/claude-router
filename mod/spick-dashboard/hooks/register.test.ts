@@ -122,6 +122,30 @@ test('an agy -p Bash call counts a Gemini turn and the turn closes as lane Gemin
   expect(s.last).toMatchObject({ lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low' })
 })
 
+test('an Agent call of coder, planner or deep with no effort runs at the default from spick.json, else the rules\' default', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  let cfg = JSON.stringify({ efforts: { coder: { default: 'high' } } })
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' ? { value: cfg } : { deny: 'missing' }))
+  const seen: Record<string, unknown> = {}
+  on('tool.call', async ($, e) => { seen[e.tool_use_id] = (e as { effort?: unknown }).effort; return { result: {} as never } })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' as const, isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.tool.call(agentCall('c1', 'coder'))
+  await $.tool.call(agentCall('p1', 'planner'))
+  await $.tool.call(agentCall('d1', 'deep'))
+  await $.tool.call({ ...agentCall('d2', 'deep'), effort: 'max' })
+  await $.tool.call(agentCall('x1', 'Explore'))
+  expect(seen).toEqual({ c1: 'high', p1: 'high', d1: 'medium', d2: 'max', x1: undefined })
+  cfg = 'not json'
+  await $.session.start({ cwd: '/repo', surface: 'terminal' as const, isInteractive: true })
+  await $.tool.call(agentCall('c3', 'coder'))
+  expect(seen.c3).toBe('medium')
+})
+
 test('two Agent calls in flight show the later one; the earlier finishing does not drop to the main session', { plugins: [probePlugin] }, async ($, on) => {
   mock.clock(on, { now: 1000 })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))

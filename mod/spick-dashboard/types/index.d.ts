@@ -79,7 +79,9 @@ export type Controls = {
   manualModel: boolean
 }
 
-export type QuotaWindows = { fiveHour?: number; sevenDay?: number }
+/** a provider's meters; `sampledAt` (ms) is when the source sampled them (Claude Code's fetch, the Codex log line) */
+export type QuotaWindows = { fiveHour?: number; sevenDay?: number; sampledAt?: number }
+/** `readAt` is when the mod last read the sources (it paces re-reads); the pane shows each sample's own age */
 export type Quota = { claude: QuotaWindows | null; codex: QuotaWindows | null; readAt: number }
 
 declare module 'claude-code' {

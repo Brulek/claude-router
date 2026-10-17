@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
-import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
+import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, sampleNote, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
 import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkOf, declaredChecks, editCapReason, escalationLine, uncheckedReason } from './guard'
 import { KEPT_RE, gateFiring, gateOutcome, keptLine, roleDone, sendBackText } from './gate'
@@ -14,6 +14,8 @@ import { ZERO_USAGE, addUsage, appendLines, lateLine, lineText, turnLine, usageE
 import type { CheckEntry, DelegateEntry, GateEvent, UsageEntry } from './turnlog'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
 import { markerPath, spickPaths, turnsFile } from './paths'
+import { DEFAULT_EFFORTS, effortToFill, effortsFrom } from './efforts'
+import type { Efforts } from './efforts'
 import type { SpickPaths } from './paths'
 
 const P = 'spick-dashboard'
@@ -558,6 +560,8 @@ export const register: Register = on => {
   let sessionCwd = ''
   /** the project's own check commands (spick.json guard.check_commands), read once at session.start */
   let declared: RegExp[] = []
+  /** the efforts an Agent call of coder, planner or deep gets when it names none (spick.json efforts) */
+  let efforts: Efforts = DEFAULT_EFFORTS
   /** the guard's per-turn state, cleared at turn.start */
   const guardTurn: GuardTurn = { mainEdits: new Set(), agentEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
   let mainModel = ''
@@ -605,7 +609,9 @@ export const register: Register = on => {
     // the project's own check commands, once per session; a pattern that does not compile is ignored, with one toast
     try {
       const p = await pathsNow($)
-      const d = declaredChecks(p ? await $.fs.read(p.spickJson).catch(() => '') : '')
+      const cfg = p ? await $.fs.read(p.spickJson).catch(() => '') : ''
+      efforts = effortsFrom(cfg)
+      const d = declaredChecks(cfg)
       declared = d.patterns
       if (d.bad.length) $.ui.toast(`spick: guard.check_commands — ignored ${d.bad.length} pattern(s) that do not compile: ${d.bad.join(', ')}`)
     } catch {}
@@ -758,7 +764,14 @@ export const register: Register = on => {
     return next(e)
   }).catch(passThrough)
 
-  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+  on('tool.call', { tool: 'Agent' }, async ($, e0, next) => {
+    // a coder, planner or deep call that names no effort runs at the default: the call is passed on with it filled
+    // (next takes the rewritten envelope; tool, tool_use_id and agentId are the engine's and stay as they were)
+    let e = e0
+    try {
+      const fill = e0.agentId ? null : effortToFill(e0.subagent_type, e0.effort, efforts)
+      if (fill) e = { ...e0, effort: fill as typeof e0.effort }
+    } catch {}
     const id = e.tool_use_id
     try {
       const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn, startedAt: await $.clock.now() }
@@ -1371,7 +1384,7 @@ export const register: Register = on => {
         ]),
       ]),
       [<Button key="refresh" plain hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }}>
-        <Text>refresh</Text>{sub(q ? ` · read ${fmtAge(now - q.readAt)}` : ' · not read')}
+        <Text>refresh</Text>{sub(` · ${sampleNote(q, now, isNarrow)}`)}
       </Button>],
     ]))
 

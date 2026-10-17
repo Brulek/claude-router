@@ -102,26 +102,29 @@ flowchart TD
 
 ![Spick 面板](docs/images/pane.svg)
 
-`/spick` 打开面板。面板包含快捷键开关与最近几轮记录。Haiku 随每条请求读取一行简短的额度信息；面板显示 Claude 与 Codex 的本机额度条。
+`/spick` 打开面板。面板包含快捷键开关与最近几轮记录。Haiku 随每条请求读取一行简短的额度信息；面板显示 Claude 与 Codex 的本机额度条，并标出每份数据的采样时间（Claude Code 或 Codex 日志采样的时刻，而不是面板读文件的时刻）。
 
-拦截（gate）与守卫（guard）是模组仅有的两处干预。其余内容只做展示。
+状态带还显示主循环最近一次请求的大小（`ctx 42k`）。Haiku 会话超过 80,000 token 时，状态带提示 `context 85k: Haiku bills 5x above 100k; /clear or delegate`：Haiku 5.5 对超过 100K token 的请求按五倍单价计费。
 
-**拦截**
+模组只依据事实介入，并且选在代价最小的时刻。其余内容只做展示。
 
-- 触发条件：某条请求的 `Hint` 行判为结论类（判断词或审查词），而主会话什么都没委派就自己答了。设计类词只出现在 `Hint` 行里，从不退回。
-- 此时收工会被退回一次。主会话被要求派 `deep`，或者用一行以 `Kept:`（或 `自留:`）开头的话说明交付物其实只是查阅。
-- 一轮最多退回一次。
-- 没调工具的短回复（反问）不退。
-- `/spick gate off` 可关闭。
-- 每次退回，以及这一轮随后是委派了还是用 `Kept:` 行自留，都会在 `~/.claude/spick-gate.jsonl` 里记一行 JSON，便于统计误判。
-
-**守卫**在分流生效时做两件事。
+**守卫**在分流生效时：
 
 - 编辑上限：主会话每轮只能亲自改 1 个源码文件。第 2 个文件会被拒绝，拒绝信息点名已改的那个文件并要求派 `Agent(coder)`。同一文件反复改、子代理的编辑、笔记（`.md`、`.txt`）、表格（`.csv`、`.tsv`）、日志、锁文件以及开头为 `.claude/` 的路径都不计数；json、yaml、toml 计数，`.claude/worktrees/` 下的 worktree 也计数。这是工具层面的软上限：只看 Edit、Write、NotebookEdit，看不到 `sed -i`、重定向这类 Bash 写入。
-- 收工测试门：本轮任何循环（含子代理）改过源码、却没有任何循环跑过检查命令（测试、构建、lint 或类型检查），收工时退回一次。项目有自己的检查命令时，可在 `~/.claude/spick.json` 的 `guard.check_commands` 里用正则声明（见 `skills/spick/references/providers.md`）。主会话被要求跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。
+- 收工测试门：本轮任何循环（含子代理）改过源码，而最后一次修改之后没有通过的检查，收工时退回。检查只在三种情况同时满足时才算数：命令本身就是检查工具（可以带 `cd x &&`、`env`、`npx`、`sudo`、`time` 前缀；`echo pytest`、`grep pytest README` 都不算）；退出状态正常（`pytest || true`、`pytest --version` 不算）；检查开始之后没有再改源码。项目有自己的检查命令时，可在 `<config>/spick.json` 的 `guard.check_commands` 里用正则声明（见 `skills/spick/references/providers.md`）。主会话被要求跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。
+- 升级：同一个检查在一轮里失败两次时，第二次失败的结果后面会附一行，要求主会话改派 `coder`（effort high），原因不明时派 `deep`，不要再自己修第三次。
 - `/spick guard off` 可关闭守卫，选择会被记住。
 
-拦截与守卫合计一轮最多退回一次。
+**拦截**按结论类请求需要的角色检查：判断词需要 `deep`，审查词需要审查通道（带审查提示的 Codex，或标了 `review` 的通道）或 `deep`。设计类词只出现在 `Hint` 行里，从不拦截。
+
+- 收工时，若该角色本轮没有完成（`deep` 子代理已结束或仍在后台运行算完成；审查调用正常返回算完成；被拒、失败或超时的调用不算），回复里也没有以 `Kept:`（或 `自留:`）开头的一行，且这一轮有实际工作（调过工具，或回复不少于 400 字符），就退回。
+- `/spick gate off` 可关闭。
+
+拦截与守卫合计一轮最多退回一次，所有理由放在同一段里。
+
+**默认 effort。** 派 `coder`、`planner`、`deep` 时若没写 effort，按 `<config>/spick.json` 里 `efforts` 的默认值执行（未设置时 coder medium、planner high、deep medium）。
+
+**每轮记录。** 每个主会话轮次在 `<config>/spick/turns/<sessionId>.jsonl` 里记一行 JSON（`<config>` 为 `CLAUDE_CONFIG_DIR`，未设置时为 `~/.claude`）：Hint、实际由谁执行（每个委派的状态、模型、effort、用量与费用）、拦截的每次触发及其后续、`Kept:` 行、改过的文件、每次检查及其退出状态、升级提示、主循环用量与最近一次请求大小。后台代理在该轮结束后才完成时，会为同一轮追加一行 `late` 记录。`/spick spend` 汇总最近七天的费用（`scripts/spend.py`，也读取 0.x 版模组的按会话文件）；`/spick audit` 运行 `scripts/audit.py`：按 Hint 类别统计轮次与实际执行者、结论类请求的去向、拦截结果与疑似误判、改了源码却没有通过检查的轮次、升级提示、按通道和按类别的费用，以及上下文最大的几个会话。
 
 ## 安装
 

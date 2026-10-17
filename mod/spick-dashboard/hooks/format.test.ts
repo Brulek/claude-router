@@ -3,7 +3,7 @@ import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
   fmtDuration, fmtAge, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE, runningLines,
   tagLine, wrapWords, usageLines, quotaCells, recentLines, clockOf, LABEL_W, HOTKEY_W, NARROW_BELOW,
-  colWidths, usageRows, recentRows, runningRows, quotaWindows, fmtTokens, promptTokens, contextNote, HAIKU_WARN_AT,
+  colWidths, usageRows, recentRows, runningRows, quotaWindows, sampleNote, fmtTokens, promptTokens, contextNote, HAIKU_WARN_AT,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -509,4 +509,23 @@ test('the band shows ctx from 70 columns and gives it up first when space runs s
   expect(L(bandSegments({ ...v, isIdle: true }, 100))).toContain('ctx 42k')
   // squeezed: ctx goes before the elapsed time
   expect(L(bandSegments(v, 72, 30))).toBe('SPICK   Working · Haiku 5.5 · 12s')
+})
+
+test('parseCli restores a quoted model and effort: -m "model", --model=\'model\', --effort "low"', () => {
+  expect(parseCli('grok -p "x" -m "grok-4.7" --effort "medium"')).toEqual({ lane: 'Grok', model: 'grok-4.7', effort: 'medium', isReview: false })
+  expect(parseCli("agy -p 'q' --model='gemini-3.8-flash'")).toEqual({ lane: 'Gemini', model: 'gemini-3.8-flash', isReview: false })
+  expect(parseCli('codex exec -m "gpt-6-astra" "Review this diff"')).toEqual({ lane: 'Codex', model: 'gpt-6-astra', isReview: true })
+  // a -m inside the prompt text is not the flag
+  expect(parseCli('agy -p "use -m wisely"')).toEqual({ lane: 'Gemini', isReview: false })
+})
+
+test('sampleNote gives each provider\'s sample age, the oldest only when narrow, never the read time', () => {
+  const now = 10 * 3_600_000
+  expect(sampleNote(null, now)).toBe('not read')
+  expect(sampleNote({ claude: null, codex: null, readAt: now }, now)).toBe('no sample')
+  const q = { claude: { fiveHour: 1, sampledAt: now - 4 * 60_000 }, codex: { sevenDay: 2, sampledAt: now - 2 * 3_600_000 }, readAt: now }
+  expect(sampleNote(q, now)).toBe('sampled claude 4m ago, codex 2h ago')
+  expect(sampleNote(q, now, true)).toBe('sampled 2h ago')
+  expect(sampleNote({ claude: { fiveHour: 1 }, codex: null, readAt: now }, now)).toBe('sampled claude age unknown')
+  expect(sampleNote({ claude: { fiveHour: 1 }, codex: null, readAt: now }, now, true)).toBe('sample age unknown')
 })

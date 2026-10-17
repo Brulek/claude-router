@@ -69,12 +69,15 @@ export function parseCli(command: string): CliLane | null {
     const hit = segmentLane(seg.trim().split(/\s+/).filter(Boolean))
     if (!hit) continue
     const restored = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
+    // a flag's value as typed, its quotes taken off: -m "grok-4.7" and --model='x' name the model, not a placeholder
+    const value = (t: string) => restored(t).replace(/^(["'])(.*)\1$/s, '$2')
     const text = hit.rest.join(' ')
     const out: CliLane = { lane: hit.lane, isReview: false }
-    const model = text.match(/(?:--model|-m)[=\s]+(\S+)/)
-    if (model?.[1]) out.model = model[1]
-    const effort = text.match(/(?:--effort|--reasoning-effort)[=\s]+(\S+)/) ?? restored(text).match(/model_reasoning_effort="?(\w+)"?/)
-    if (effort?.[1]) out.effort = effort[1]
+    const model = text.match(/(?:^|\s)(?:--model|-m)(?:=|\s+)(\S+)/)
+    if (model?.[1]) out.model = value(model[1])
+    const flag = text.match(/(?:^|\s)(?:--effort|--reasoning-effort)(?:=|\s+)(\S+)/)
+    const effort = flag ? value(flag[1]!) : restored(text).match(/model_reasoning_effort="?(\w+)"?/)?.[1]
+    if (effort) out.effort = effort
     if (hit.lane === 'Codex') {
       const prompts = [...text.matchAll(/"(\d+)"/g)].map(m => quoted[Number(m[1])] ?? '')
       out.isReview = prompts.some(p => /\breview\b/i.test(p))
@@ -433,6 +436,20 @@ export const HAIKU_WARN_AT = 80_000
 export function contextNote(tokens: number | undefined, mainModelId: string): Note | null {
   if (tokens === undefined || tokens <= HAIKU_WARN_AT || !/haiku/i.test(mainModelId)) return null
   return { kind: 'warning', text: `context ${fmtTokens(tokens)}: Haiku bills 5x above 100k; /clear or delegate` }
+}
+
+/**
+ * How old each provider's numbers are, as the source sampled them (never when the mod read the file: a cache read now
+ * can hold a sample from yesterday): `sampled claude 4m ago, codex 2h ago`; `no sample` when no provider has data.
+ */
+export function sampleNote(q: Quota | null | undefined, now: number, narrow = false): string {
+  if (!q) return 'not read'
+  const known = (['claude', 'codex'] as const).flatMap(name => (q[name] ? [{ name, at: q[name]!.sampledAt }] : []))
+  if (known.length === 0) return 'no sample'
+  const age = (at: number | undefined) => (at === undefined ? 'age unknown' : fmtAge(Math.max(0, now - at)))
+  // a narrow pane names the oldest sample only
+  if (narrow) return known.some(k => k.at === undefined) ? 'sample age unknown' : `sampled ${age(Math.min(...known.map(k => k.at!)))}`
+  return `sampled ${known.map(k => `${k.name} ${age(k.at)}`).join(', ')}`
 }
 
 export function fmtCost(usd: number | null): string { return usd === null ? '—' : `$${usd.toFixed(2)}` }

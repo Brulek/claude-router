@@ -211,7 +211,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await mountPane($, surface)
     const all = await linesOf(ui)
     // turn.start refreshed the quota (nothing readable in the test, so no provider has data)
-    for (const want of [/^SPICK {2}routing off · b: band shown +x: close$/, /^Routing {6}● on {2}r: /, /^Review {7}● auto {2}v: /, /^Lanes {5}Gemini {5}● on {2}g: /, /^Usage /, /^Quota {5}unknown$/, /^ {10}q: refresh · read just now$/, /^Recent /]) {
+    for (const want of [/^SPICK {2}routing off · b: band shown +x: close$/, /^Routing {6}● on {2}r: /, /^Review {7}● auto {2}v: /, /^Lanes {5}Gemini {5}● on {2}g: /, /^Usage /, /^Quota {5}unknown$/, /^ {10}q: refresh · no sample$/, /^Recent /]) {
       expect(all.some(l => want.test(l))).toBe(true)
     }
     // one lane: no total row; the head row carries the column heads
@@ -662,7 +662,7 @@ const EXAMPLE_80 = [
   '',
   'Quota     claude  5h ▰▰▱▱▱▱▱▱▱▱  19%   7d ▰▱▱▱▱▱▱▱▱▱   9%',
   '          codex   7d ▰▰▰▰▰▰▰▰▱▱  80%',
-  '          q: refresh · read just now',
+  '          q: refresh · sampled claude 36m ago, codex 1h ago',
   '',
   'Recent    14:52  coder         Sonnet 5.5  high    3m 41s',
   '          14:47  main session  Haiku 5.5   low         6s',
@@ -688,8 +688,9 @@ async function exampleWorld($: Engine, on: Parameters<TestBody>[1], tags = true)
   const rows = LANE_ROWS.map(r => (r.id === 'gemini' ? { ...r, tags: ['search', 'long-context', 'multimodal', 'image'] }
     : r.id === 'codex' ? { ...r, tags: ['code', 'review', 'image'] } : r))
   fakeSetLane(on, tags ? rows : LANE_ROWS.map(r => ({ ...r, tags: [] })))
-  const claudeJson = JSON.stringify({ cachedUsageUtilization: { utilization: { five_hour: { utilization: 19 }, seven_day: { utilization: 9 } } } })
-  const codexLine = JSON.stringify({ payload: { rate_limits: { primary: { used_percent: 80, window_minutes: 10080 } } } })
+  // sampled by Claude Code at 14:20, the Codex log line written at 13:50: the pane shows those ages, not when it read them
+  const claudeJson = JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: localTime(14, 20), utilization: { five_hour: { utilization: 19 }, seven_day: { utilization: 9 } } } })
+  const codexLine = JSON.stringify({ timestamp: new Date(localTime(13, 50)).toISOString(), payload: { rate_limits: { primary: { used_percent: 80, window_minutes: 10080 } } } })
   const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 1, isLink: false })
   on('fs.read', async (_$, e) => ({ value: e.path === '/h/.claude.json' ? claudeJson : codexLine }))
   on('fs.list', async (_$, e) => {
