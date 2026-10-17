@@ -259,3 +259,7 @@ Send on BNB Smart Chain only. A transfer on another network may be lost.
 ## License
 
 MIT, see [LICENSE](LICENSE).
+
+## Evaluation
+
+`skills/spick/evals/ab/` is an A/B harness: eight small tasks run through `claude -p` under a spick arm and several baselines (single-model and free-to-delegate), graded by exact checks, hidden tests and a blind judge, with a report of quality, completion, cost per successful delivery and latency. It is a signal for these tasks, not a proof of general non-inferiority. See [skills/spick/evals/ab/README.md](skills/spick/evals/ab/README.md) for the arms, flags, limits and the command for the full matrix.
