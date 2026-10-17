@@ -8,6 +8,7 @@ from unittest import mock
 
 import common
 import grade
+import run
 
 
 class Exact(unittest.TestCase):
@@ -82,6 +83,16 @@ class Judge(unittest.TestCase):
         for letter, rid in key.items():
             body = prompt.split(f"=== 回答 {letter} ===\n")[1].split("\n\n")[0]
             self.assertEqual(body, common.strip_markers(texts[rid]))
+
+    def test_key_file_is_inlined_for_the_judge(self):
+        t9 = common.load_tasks()["T9"]
+        self.assertEqual(t9["key"], "T9/key.md")
+        text = grade.rubric_text(t9)
+        self.assertIn("K5", text)
+        self.assertIn("turn.start", text)
+        self.assertNotIn("见 tasks/T9/key.md", text)  # a path is no use to a judge without tools
+        self.assertEqual(grade.rubric_text({"rubric": "r"}), "r")
+        self.assertFalse(run.inside_git_work_tree(grade.judge_cwd()))
 
     def test_parse(self):
         raw = '理由\nJUDGE_JSON: {"A": {"scores": {"x": 4}, "overall": 4}, "B": {"scores": {}, "overall": 2}}\n'

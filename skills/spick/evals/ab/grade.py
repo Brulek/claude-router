@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 import common
@@ -131,10 +132,27 @@ def template_text(task):
     return "回答所针对的材料：\n" + "\n".join(parts)
 
 
+def rubric_text(task):
+    """The rubric, with the task's key file (known defects, answers) inlined: a judge with no tools cannot read a
+    path, and one with tools must not have to look around for it (the Claude judge once inferred the key from the
+    repository's commit titles instead)."""
+    rubric = task["rubric"]
+    if task.get("key"):
+        rubric += "\n评分参考（已知缺陷或标准答案，仅裁判可见）：\n" + (common.TASKS_DIR / task["key"]).read_text(encoding="utf-8")
+    return rubric
+
+
+def judge_cwd():
+    """A fresh directory outside any repository for a judge call: a session or exec started inside a git work tree
+    reads that repository's status and recent commits (and could read its files), which is not the judge's material."""
+    return tempfile.mkdtemp(prefix="spick-judge-")
+
+
 def call_codex(prompt, cwd, timeout=900):
+    """`cwd` is where the raw verdict will be kept; the call itself runs in a hermetic directory (judge_cwd)."""
     cmd = ["codex", "exec", "--skip-git-repo-check", "--sandbox", "read-only",
            "-c", 'model_reasoning_effort="medium"', prompt]
-    r = subprocess.run(cmd, cwd=cwd, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
+    r = subprocess.run(cmd, cwd=judge_cwd(), capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
     return r.stdout + "\n--stderr--\n" + r.stderr[-800:]
 
 
@@ -142,16 +160,18 @@ def call_claude(prompt, cwd, timeout=900):
     """The second judge: Opus through `claude -p` with no tools, hooks and the global mod off. The user's global
     CLAUDE.md still loads (its label-line rule does not touch the JUDGE_JSON line). The text the parser reads is the
     result, followed by a trailer with the exit code, the call's cost and the model that answered."""
-    # absolute paths: claude resolves a relative --settings against its own cwd, which is this directory
-    settings = (Path(cwd) / "_claude-judge-settings.json").resolve()
+    # the call runs in a hermetic directory (judge_cwd); absolute paths, since claude resolves a relative
+    # --settings against its own cwd
+    work = Path(judge_cwd())
+    settings = work / "_claude-judge-settings.json"
     settings.write_text(json.dumps({"disableAllHooks": True, "enabledPlugins": {common.GLOBAL_MOD_KEY: False}}),
                         encoding="utf-8")
-    mcp = (Path(cwd) / "_claude-judge-mcp.json").resolve()  # no MCP servers: the user's connectors would add 100k tokens
+    mcp = work / "_claude-judge-mcp.json"  # no MCP servers: the user's connectors would add 100k tokens of context
     mcp.write_text('{"mcpServers": {}}', encoding="utf-8")
     cmd = ["claude", "-p", prompt, "--output-format", "json", "--model", "opus", "--tools", "",
            "--settings", str(settings), "--mcp-config", str(mcp), "--strict-mcp-config"]
     env = {k: v for k, v in os.environ.items() if k not in common.SESSION_VARS}
-    r = subprocess.run(cmd, cwd=cwd, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
+    r = subprocess.run(cmd, cwd=work, env=env, capture_output=True, text=True, stdin=subprocess.DEVNULL, timeout=timeout)
     res = common.parse_result(r.stdout) or {}
     models = ",".join((res.get("modelUsage") or {}).keys())
     return (f"{res.get('result') or ''}\n--claude-judge--\nexit {r.returncode}; is_error {res.get('is_error')}; "
@@ -352,7 +372,7 @@ def judge_task(out, tid, task, graded, judge_info, args):
         return
     keyf = jdir / f"{tid}.key.json"
     key = json.loads(keyf.read_text()) if keyf.exists() else None
-    prompt, fresh = build_judge_prompt(task["rubric"], task["prompt"], answers, template_text(task))
+    prompt, fresh = build_judge_prompt(rubric_text(task), task["prompt"], answers, template_text(task))
     stale = args.rejudge or key is None or sorted(key.values()) != sorted(r for r, _ in answers)
     if stale:
         key = fresh
