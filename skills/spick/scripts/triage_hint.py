@@ -11,9 +11,9 @@ Usage:
   triage_hint.py --text TEXT      classify TEXT
 Prints the Hint line, or nothing when no keyword matched. Exit 0 always; a broken input prints nothing.
 
-The keyword table is assets/triage-hints.json; mod/spick-dashboard/hooks/hint.ts carries a copy
-(test_triage_hint.py checks they match). Kinds are in priority order; an ASCII entry matches on word
-boundaries, case-insensitively; any other entry as a substring; a web address counts as a web sign.
+The keyword table and the phrases are in assets/rules.json ("hints", "phrases"); render_rules.py copies them into
+mod/spick-dashboard/hooks/hint.ts. Kinds are in priority order; an ASCII entry matches on word boundaries,
+case-insensitively; any other entry as a substring; a web address counts as a web sign.
 """
 import json
 import os
@@ -21,28 +21,27 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-TABLE_PATH = os.path.join(os.path.dirname(HERE), "assets", "triage-hints.json")
+RULES_PATH = os.path.join(os.path.dirname(HERE), "assets", "rules.json")
 MAX_SHOWN = 3
 URL_RE = re.compile(r"https?://\S+", re.I)
 WEB_ADDRESS = "a web address"
 
-# what each kind's keywords imply; {t} is the matched words
-PHRASES = {
-    "judgement": "judgement words ({t}) -> start from Agent(deep); pick the effort by the table",
-    "review": "review words ({t}) -> the review lane for a diff, else Agent(deep)",
-    "design": "design words ({t}) -> Agent(planner) before any coder",
-    "code": "edit words ({t}) -> Agent(coder) once nothing is left to decide",
-    "web": "web signs ({t}) -> the search lane fetches, judging what it finds is still deep's",
-    "x": "X words ({t}) -> the x-data lane",
-}
 HEAD = "   Hint (keywords in this prompt, not a verdict): "
 TAIL = ". Keeping a hinted task yourself needs a one-line reason in the reply, on a line starting with `Kept:`."
 
 
-def load_table(path=TABLE_PATH):
+def load_rules(path=RULES_PATH):
     with open(path, encoding="utf-8") as f:
-        d = json.load(f)
-    return {k: v for k, v in d.items() if not k.startswith("_")}
+        return json.load(f)
+
+
+def load_table(path=RULES_PATH):
+    """{kind: [keywords]} in priority order."""
+    return load_rules(path)["hints"]
+
+
+# what each kind's keywords imply; {t} is the matched words
+PHRASES = load_rules()["phrases"]
 
 
 def _matches(text, low, word):

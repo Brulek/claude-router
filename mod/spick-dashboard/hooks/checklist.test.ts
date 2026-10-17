@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
-import { DEFAULT_CONTROLS, LANE_BULLET_DEEP, LANE_BULLET_YOU, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
+import { CHECKLIST_TEMPLATE, DEFAULT_CONTROLS, EFFORT_DEFAULTS, LANE_BULLET_DEEP, LANE_BULLET_LANES_BUILTIN, LANE_BULLET_LANES_NONE, LANE_BULLET_YOU, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
 const FABLE = 'claude-fable-5-1'
@@ -15,21 +15,21 @@ test('routing on: the three questions, the bash hook\'s substance, no notes', ()
   const block = checklist(ctl(), HAIKU, true)
   expect(block.startsWith('[spick triage - answer all three before the first tool call]')).toBe(true)
   for (const q of ['1. Plan mode?', '2. Lane?', '3. Goal-shaped?']) expect(block).toContain(q)
-  expect(block).toContain('web lookup -> Gemini (agy); X data -> Grok.')
-  // design first: a change that needs a decision goes to planner before coder, and the brief carries no design of the main session's own
-  expect(block).toContain('a change that needs a decision the user did not make (layout, API, algorithm, data shape, which file) -> Agent(planner); the change then goes to Agent(coder) with the plan.')
-  expect(block).toContain('A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.')
-  // routed by the shape of the deliverable, the most expensive lane first: deep, planner, coder, the lanes, and the
-  // main session last, since a small model stops at the first bucket that fits; a verdict is never the main session's
-  const order = ['-> Agent(deep).', '-> Agent(planner);', '-> Agent(coder).', 'web lookup -> Gemini (agy)', '-> you.'].map(s => block.indexOf(s))
+  expect(block).toContain(LANE_BULLET_LANES_BUILTIN)
+  // the planner threshold is narrow: architecture, interface, data format, cross-module; layout and naming are coder's
+  expect(block).toContain('(architecture, public interface, data format, cross-module trade-off) -> Agent(planner)')
+  expect(block).toContain('layout, naming, which file are its calls')
+  // not dispatching is the default for small work, and the brief is a handoff packet
+  expect(block).toContain('small work stays here')
+  expect(block).toContain('A brief is a handoff packet, not your trail')
+  // escalation on a fact: a check failing twice
+  expect(block).toContain('A check failing twice: Agent(coder) at high effort, or Agent(deep) if the cause is unknown.')
+  // the kinds in rules.json order: outside lanes, deep, planner, coder, review, the main session last
+  const order = ['-> Grok', '-> Agent(deep).', '-> Agent(planner)', '-> Agent(coder);', 'a diff to review', '-> you:'].map(s => block.indexOf(s))
   expect(order.every(i => i > -1)).toBe(true)
   expect([...order].sort((a, b) => a - b)).toEqual(order)
-  expect(block).toContain('You never write a verdict yourself; read files only to brief it.')
-  // the harness tells a model doing its own work not to spawn when in doubt; the triage layer is told the opposite
-  expect(block).toContain(`The Agent tool's own "when in doubt, don't spawn" is written for a model doing its own work; you are the triage layer, so when in doubt, spawn deep.`)
   expect(REGISTRY_LANE_LINE).toBe(laneBullets(true).join('\n'))
-  expect(REGISTRY_LANE_LINE).toContain('-> Agent(planner); the change then goes to Agent(coder) with the plan.')
-  expect(REGISTRY_LANE_LINE).toContain('A brief carries no design of your own')
+  expect(REGISTRY_LANE_LINE).toContain('pick from the Lanes line by tag')
   expect(block).toContain('Review: Codex <model> (medium)')
   expect(block).toContain('every participant, reviewer included, carries its own model and effort')
   expect(block).not.toContain('lane is off')
@@ -113,9 +113,28 @@ test('/spick arguments parse; anything else is usage', () => {
   for (const bad of ['lane', 'lane   ', 'lane glm tags', 'review', 'on now', 'details', 'spend 30']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
 })
 
-test('with every switch at its default the block is the bash hook\'s text, word for word', () => {
-  // a copy of scripts/triage-hook.sh's heredoc; test_triage_hint.py runs the hook itself and compares it with this file's constants
-  expect(checklist(DEFAULT_CONTROLS, HAIKU, true)).toBe("[spick triage - answer all three before the first tool call]\n1. Plan mode? 3+ files, irreversible/wide action, ambiguous ask, greenfield build, or user asked for a plan -> call EnterPlanMode now, then dispatch planner inside it (no such tool in headless mode: plan inline and stop before editing).\n2. Lane? Route by the shape of the deliverable, top to bottom, first match wins; you are the last line, not the first:\n   - a verdict: compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing, or you cannot tell how hard it is -> Agent(deep). You never write a verdict yourself; read files only to brief it.\n   - a plan or a design, or a change that needs a decision the user did not make (layout, API, algorithm, data shape, which file) -> Agent(planner); the change then goes to Agent(coder) with the plan.\n   - changed code beyond a one-liner with nothing left to decide -> Agent(coder). You never edit source yourself.\n   - web lookup -> Gemini (agy); X data -> Grok.\n   - a plain lookup, nothing else: the answer is already in a file here, a command's output or your own knowledge (Q&A, find/read, summarise, tidy, run a script) -> you.\n   A prompt that mixes kinds is split by kind: you fetch, a lane searches, deep judges, coder edits. Pick an effort for every delegate. The Agent tool's own \"when in doubt, don't spawn\" is written for a model doing its own work; you are the triage layer, so when in doubt, spawn deep. A brief carries no design of your own: once it starts saying how (use X, then Y), stop and dispatch planner.\n3. Goal-shaped? machine-checkable finish (tests green, build ok, exit 0) that needs several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line; you cannot start it yourself.\nReply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex <model> (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.")
+/** what scripts/triage-hook.sh prints from assets/checklist.txt for one variant (its loop, in TypeScript) */
+const hookText = (variant: 'builtin' | 'registry' | 'none', hint?: string): string[] => {
+  const out: string[] = []
+  for (const line of CHECKLIST_TEMPLATE) {
+    const m = /^\{([a-z,]+)\}(.*)$/.exec(line)
+    if (!m) out.push(line)
+    else if (m[1] === 'hint') { if (hint) out.push(hint) }
+    else if ((m[1] ?? '').split(',').includes(variant)) out.push(m[2] ?? '')
+  }
+  return out
+}
+
+test('with every switch at its default the block is the bash hook\'s text, line for line, in each lane variant', () => {
+  // test_triage_hint.py runs the hook itself against assets/checklist.txt; CHECKLIST_TEMPLATE is that file, rendered
+  const hint = '   Hint (keywords in this prompt, not a verdict): edit words (fix) -> Agent(coder) once nothing is left to decide. Keeping a hinted task yourself needs a one-line reason in the reply, on a line starting with `Kept:`.'
+  expect(checklist(DEFAULT_CONTROLS, HAIKU, true)).toBe(hookText('builtin').join('\n'))
+  expect(checklist(DEFAULT_CONTROLS, HAIKU, true, undefined, undefined, hint)).toBe(hookText('builtin', hint).join('\n'))
+  const codex = [{ id: 'codex', kind: 'cli-subscription', tags: ['code', 'review'], data: 'code' }]
+  const reg = checklist(DEFAULT_CONTROLS, HAIKU, true, undefined, { registry: true, lanes: codex }).split('\n')
+  expect(reg.slice(0, -1)).toEqual(hookText('registry'))
+  expect(checklist(DEFAULT_CONTROLS, HAIKU, true, undefined, { registry: true, lanes: [] })).toBe(hookText('none').join('\n'))
+  expect(checklist(DEFAULT_CONTROLS, HAIKU, true, undefined, { registry: false, lanes: [] })).toBe(hookText('builtin').join('\n'))
 })
 
 test('while the band shows (labelLine false) no sentence asks for the label line', () => {
@@ -223,17 +242,20 @@ test('the Hint line sits right after item 2 and before item 3; absent when there
   expect(checklist(ctl({ routing: 'off' }), HAIKU, true, undefined, undefined, hint)).toBe(offSentence(true))
 })
 
-test('item 2 is one head, five bullets and a tail; deep is the first bullet and the main session the last', () => {
-  for (const registry of [true, false]) {
-    const b = laneBullets(registry)
+test('item 2 is one head, six bullets and a tail; the outside lanes come first and the main session last', () => {
+  for (const v of [true, false, 'builtin', 'registry', 'none'] as const) {
+    const b = laneBullets(v)
     expect(b[0]).toBe(LANE_HEAD)
-    expect(b[1]).toBe(LANE_BULLET_DEEP)
+    expect(b[2]).toBe(LANE_BULLET_DEEP)
     expect(b.at(-2)).toBe(LANE_BULLET_YOU)
     expect(b.at(-1)).toBe(LANE_TAIL)
-    expect(b.filter(l => l.startsWith('   - ')).length).toBe(5)
+    expect(b.filter(l => l.startsWith('   - ')).length).toBe(6)
     // every bullet names who takes it
-    for (const l of b.slice(1, -1)) expect(/-> (Agent\((deep|planner|coder)\)|you\.|Gemini \(agy\)|pick from the Lanes line)/.test(l)).toBe(true)
+    for (const l of b.slice(1, -1)) expect(/-> (Agent\((deep|planner|coder)\)|you:|Grok|Codex|pick from the Lanes line|the lane tagged|Agent\(deep\))|no outside lane/.test(l)).toBe(true)
   }
+  expect(laneBullets('none')[1]).toBe(LANE_BULLET_LANES_NONE)
+  expect(LANE_BULLET_LANES_NONE).toContain('no outside lane is enabled: do not call Gemini, Grok or Codex')
+  expect(EFFORT_DEFAULTS).toEqual({ coder: 'medium', planner: 'high', deep: 'medium' })
 })
 
 test('the gate switch parses and defaults to on', () => {
