@@ -1,0 +1,83 @@
+{
+ "haiku-spick/T3/run-1": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Haiku 5.5 (medium)]"
+ },
+ "haiku-spick/T3/run-2": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Haiku (medium) | Review: skipped]"
+ },
+ "haiku-spick/T3/run-3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Haiku 5.5 (medium)]"
+ },
+ "haiku-spick/T4/run-1": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 (medium) → coder Haiku (default effort) | Review: skipped]"
+ },
+ "haiku-spick/T4/run-2": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 (medium) → coder Haiku (default) | Review: skipped]"
+ },
+ "haiku-spick/T4/run-3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Haiku 5.5 (default effort) | Review: skipped]"
+ },
+ "haiku-spick/T8/run-1": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high)]"
+ },
+ "haiku-spick/T8/run-2": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (default effort) | Review: skipped]"
+ },
+ "haiku-spick/T8/run-3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]"
+ }
+}

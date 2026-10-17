@@ -1,0 +1,137 @@
+{
+ "haiku-spick/T3/run-1": {
+  "agent": "a073c221bec3642a6",
+  "nested": [
+   "aacabeadcc1d79b36"
+  ],
+  "wall_s": 26.7,
+  "own_usage": {
+   "in": 18,
+   "out": 640,
+   "cache_read": 624125,
+   "cache_write": 205963
+  },
+  "api_calls": 9,
+  "has_report": true
+ },
+ "haiku-spick/T3/run-2": {
+  "agent": "a904ebe1323794863",
+  "nested": [
+   "a0fb04f1bf856b352"
+  ],
+  "wall_s": 29.1,
+  "own_usage": {
+   "in": 22,
+   "out": 1302,
+   "cache_read": 816475,
+   "cache_write": 207231
+  },
+  "api_calls": 11,
+  "has_report": true
+ },
+ "haiku-spick/T3/run-3": {
+  "agent": "a35f1aa9fcfab1339",
+  "nested": [
+   "a941d81b10c19304b"
+  ],
+  "wall_s": 26.2,
+  "own_usage": {
+   "in": 16,
+   "out": 187,
+   "cache_read": 542166,
+   "cache_write": 192546
+  },
+  "api_calls": 8,
+  "has_report": true
+ },
+ "haiku-spick/T4/run-1": {
+  "agent": "a64a6a989286ca955",
+  "nested": [
+   "afd55fc0987595793"
+  ],
+  "wall_s": 28.4,
+  "own_usage": {
+   "in": 20,
+   "out": 1239,
+   "cache_read": 736828,
+   "cache_write": 196506
+  },
+  "api_calls": 10,
+  "has_report": true
+ },
+ "haiku-spick/T4/run-2": {
+  "agent": "a5c5471dbe0e76795",
+  "nested": [
+   "af9a575638c76a094"
+  ],
+  "wall_s": 34.8,
+  "own_usage": {
+   "in": 28,
+   "out": 1692,
+   "cache_read": 1093676,
+   "cache_write": 224227
+  },
+  "api_calls": 14,
+  "has_report": true
+ },
+ "haiku-spick/T4/run-3": {
+  "agent": "a1a2a899a8371e80d",
+  "nested": [
+   "a263b2b3ef97041ca"
+  ],
+  "wall_s": 28.1,
+  "own_usage": {
+   "in": 18,
+   "out": 683,
+   "cache_read": 624687,
+   "cache_write": 206729
+  },
+  "api_calls": 9,
+  "has_report": true
+ },
+ "haiku-spick/T8/run-1": {
+  "agent": "a1c685d083683bb18",
+  "nested": [
+   "a634c963421cd7431"
+  ],
+  "wall_s": 30.9,
+  "own_usage": {
+   "in": 18,
+   "out": 46,
+   "cache_read": 625875,
+   "cache_write": 208229
+  },
+  "api_calls": 9,
+  "has_report": true
+ },
+ "haiku-spick/T8/run-2": {
+  "agent": "acccf95751f6aa378",
+  "nested": [
+   "a5e4f1f019194c7bb"
+  ],
+  "wall_s": 36.9,
+  "own_usage": {
+   "in": 16,
+   "out": 1198,
+   "cache_read": 544738,
+   "cache_write": 195564
+  },
+  "api_calls": 8,
+  "has_report": true
+ },
+ "haiku-spick/T8/run-3": {
+  "agent": "a24ad83811d55dc47",
+  "nested": [
+   "a23fee6d01013bf29"
+  ],
+  "wall_s": 30.4,
+  "own_usage": {
+   "in": 16,
+   "out": 179,
+   "cache_read": 544186,
+   "cache_write": 194856
+  },
+  "api_calls": 8,
+  "has_report": true
+ }
+}

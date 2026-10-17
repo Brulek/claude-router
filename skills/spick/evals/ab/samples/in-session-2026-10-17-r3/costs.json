@@ -1,0 +1,197 @@
+{
+ "haiku-spick/T3/run-1": {
+  "cost_usd": 0.0198,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 26.7,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 2,
+    "cost": 0.019807850000000002,
+    "lanes": [
+     "coder",
+     "general-purpose"
+    ],
+    "cache_read": 324075,
+    "out": 3713
+   }
+  }
+ },
+ "haiku-spick/T3/run-2": {
+  "cost_usd": 0.0204,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 29.1,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 2,
+    "cost": 0.02035529,
+    "lanes": [
+     "coder",
+     "general-purpose"
+    ],
+    "cache_read": 424149,
+    "out": 3670
+   }
+  }
+ },
+ "haiku-spick/T3/run-3": {
+  "cost_usd": 0.0195,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 26.2,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 2,
+    "cost": 0.019545464999999998,
+    "lanes": [
+     "coder",
+     "general-purpose"
+    ],
+    "cache_read": 323849,
+    "out": 3278
+   }
+  }
+ },
+ "haiku-spick/T4/run-1": {
+  "cost_usd": 0.0204,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 28.4,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 2,
+    "cost": 0.020419464999999998,
+    "lanes": [
+     "coder",
+     "general-purpose"
+    ],
+    "cache_read": 404324,
+    "out": 4094
+   }
+  }
+ },
+ "haiku-spick/T4/run-2": {
+  "cost_usd": 0.0219,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 34.8,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 2,
+    "cost": 0.021936559999999997,
+    "lanes": [
+     "coder",
+     "general-purpose"
+    ],
+    "cache_read": 502576,
+    "out": 4883
+   }
+  }
+ },
+ "haiku-spick/T4/run-3": {
+  "cost_usd": 0.0197,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 28.1,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 2,
+    "cost": 0.01969875,
+    "lanes": [
+     "coder",
+     "general-purpose"
+    ],
+    "cache_read": 304360,
+    "out": 3876
+   }
+  }
+ },
+ "haiku-spick/T8/run-1": {
+  "cost_usd": 0.0791,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 30.9,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "cost": 0.01634933,
+    "lanes": [
+     "general-purpose"
+    ],
+    "cache_read": 272253,
+    "out": 2828
+   },
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "cost": 0.06277,
+    "lanes": [
+     "coder"
+    ],
+    "cache_read": 36490,
+    "out": 1298
+   }
+  }
+ },
+ "haiku-spick/T8/run-2": {
+  "cost_usd": 0.0944,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 36.9,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "cost": 0.01635224,
+    "lanes": [
+     "general-purpose"
+    ],
+    "cache_read": 272369,
+    "out": 2810
+   },
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "cost": 0.07804760000000001,
+    "lanes": [
+     "coder"
+    ],
+    "cache_read": 76863,
+    "out": 1828
+   }
+  }
+ },
+ "haiku-spick/T8/run-3": {
+  "cost_usd": 0.0925,
+  "rows": 2,
+  "unpriced": 0,
+  "nested_rows": 1,
+  "wall_s": 30.4,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "cost": 0.01610573,
+    "lanes": [
+     "general-purpose"
+    ],
+    "cache_read": 272093,
+    "out": 2411
+   },
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "cost": 0.0763932,
+    "lanes": [
+     "coder"
+    ],
+    "cache_read": 33531,
+    "out": 1604
+   }
+  }
+ }
+}
