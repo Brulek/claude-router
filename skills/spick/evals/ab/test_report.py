@@ -128,7 +128,7 @@ class Render(unittest.TestCase):
             self.assertIn(h, text)
         self.assertIn("| T1 chore-count | haiku-bare | 0/1 LOSES", text)
         self.assertIn("| T1 chore-count | opus-bare | 1/1 |", text)
-        for phrase in ("General non-inferiority", "Real bills", "Long-session cache", "Leak safety"):
+        for phrase in ("General non-inferiority", "Real bills", "Long-session cache", "A spick-free baseline", "Leak safety"):
             self.assertIn(phrase, text)
 
 

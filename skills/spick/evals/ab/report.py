@@ -106,7 +106,7 @@ CAVEATS = """\
 - n is small. With 3 runs per cell one flaky run moves a pass rate by a third; do not read differences smaller than that.
 - Costs are `total_cost_usd` from Claude Code. A delegate on an outside CLI (Gemini, Grok, Codex) bills on its own subscription, so it is not in that figure; cells with such calls show `>=`, and an arm whose turn records are missing cannot be told apart from one with no outside calls.
 - Turn records (`~/.claude/spick/turns/<sessionId>.jsonl`) are written by the mod; a headless run may have none. Their absence is not an error and leaves the turn-record column at 0.
-- The mod arm relies on `disableAllHooks: true` leaving the mod's own prompt hook alone and on `--plugin-dir` taking precedence over the disabled global copy. Neither was verifiable offline; the Explore and turn-record columns below are the runtime evidence.
+- The mod arm relies on `disableAllHooks: true` leaving the mod's own prompt hook alone and on `--plugin-dir` taking precedence over the disabled global copy. The start-up probe above is the check on both; the Explore and turn-record columns below are further runtime evidence.
 - The global marker `~/.claude/spick/mod-active/<sessionId>` or the v1 `~/.claude/.spick-mod-active` file may silence the hook of this checkout in `haiku-hook`, and the user's global v1 hook may print as well. `haiku-hook` is a best-effort ablation arm.
 - Global agents in `~/.claude/agents` exist in every arm; `*-free` arms can use them.
 - Sessions were run with the user's real settings otherwise (permissions, MCP servers, plugins other than the mod), which adds the same fixed context to every arm.
@@ -116,6 +116,7 @@ CANNOT = """\
 - **General non-inferiority.** Eight small tasks show whether routing held up on these tasks, not that a routed Haiku session is as good as Opus on work of any other kind.
 - **Real bills.** `total_cost_usd` is list-price arithmetic from token counts. It ignores subscription quotas, outside-CLI delegates and the user's plan; the judge's cost is not in it either.
 - **Long-session cache effects.** Each run is a fresh one-prompt session. Prompt caching across a long working session, where the routing block is paid for once and reused, is not exercised; neither is context growth over many turns.
+- **A spick-free baseline.** The `*-free` arms still read the user's global `~/.claude/CLAUDE.md`, which may carry the spick block. They are strong-model baselines with spick's instructions visible but no spick tooling, not models that have never seen spick.
 - **Leak safety.** Nothing here tests whether a lane's declared data level is respected, or whether code or secrets would reach a lane they should not.
 """
 

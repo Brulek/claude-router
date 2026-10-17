@@ -51,13 +51,31 @@ python3 grade.py results/                   # hidden tests, rules, and one Codex
 python3 report.py results/                  # writes results/REPORT-<date>.md
 ```
 
-Add `haiku-hook,sonnet-free,opus-free` to `--arms` for the full seven-arm matrix. Useful flags: `--tasks T1,T2`, `--timeout 900` (seconds per run), `--force` (redo finished runs; without it a rerun skips cells that have a `result.json`), `--dry-run` (print commands only), `--claude-bin` (a stub for pipeline tests). `grade.py` takes `--no-judge` and `--rejudge`. Unit tests, from the repo root: `python3 -m unittest discover -s skills/spick/evals/ab -p 'test_*.py'`.
+Add `haiku-hook,sonnet-free,opus-free` to `--arms` for the full seven-arm matrix. Useful flags: `--tasks T1,T2`, `--timeout 900` (seconds per run), `--force` (redo finished runs; without it a rerun skips cells that have a `result.json`), `--dry-run` (print commands only), `--claude-bin` (a stub for pipeline tests), `--allow-unverified` and `--probe-timeout 180` (see the next section). `grade.py` takes `--no-judge` and `--rejudge`. Unit tests, from the repo root: `python3 -m unittest discover -s skills/spick/evals/ab -p 'test_*.py'`.
 
 The full default matrix is 8 tasks x 4 arms x 3 runs = 96 runs, and the Opus arm and the judge are the expensive parts. Run `--tasks T1,T2` first to see the shape.
 
+## Start-up probe
+
+Before the matrix, `run.py` makes one call per selected arm with the prompt `Reply with exactly OK.` and checks from the turn-record directory that the arm started as configured. It reads the session id from the result JSON and looks for `~/.claude/spick/turns/<session_id>.jsonl`:
+
+| arm | expected | what it proves |
+|---|---|---|
+| `haiku-spick` | a record with `schemaVersion: 2` appears | the checkout's mod ran (the global copy is disabled, so it cannot have written a v2 record) |
+| `*-bare`, `*-free` | no record file for the session | the global mod stayed disabled |
+| `haiku-hook` | accepted, best effort | a bash hook leaves no trace the harness can read, so only "the call worked" is checked |
+
+A failed probe (the call itself failed, or the record is missing or unexpected) marks the arm invalid and stops the run with a message, because its results would not mean what the arm name says. `--allow-unverified` goes on anyway; the arm then stays invalid in the files below. The probe results, `claude --version` and the checkout's `git rev-parse HEAD` go to `<out>/_probe.json`, and `report.py` shows them under Caveats, with the arm marked INVALID, "verified" or "accepted, not verified". Without a `_probe.json` the report says no probe was recorded. The mod writes its record at turn end, so the probe waits a few seconds after `claude` exits before it decides. A pipeline-test stub passed with `--claude-bin` fails the `haiku-spick` probe unless it writes a v2 record; use `--allow-unverified` with such stubs.
+
+## How runs are scored
+
+- **Errors are never passes.** A run is an error, with `error_reason` recorded in `grades.json`, when `claude` exited non-zero, the result JSON has `is_error: true`, the run timed out, or no result JSON could be parsed. Such a run fails whatever its answer text says and is left out of the judge's answers.
+- **Unknown cost.** A cell's (or arm's) `cost_total` and `cost_per_success` are `null` when some of its runs carry no priced `total_cost_usd`, with `cost_coverage` = priced runs / runs; the report prints `unknown (n/m priced)`. A sum over the priced runs alone is never shown as the total. A run with any outside-CLI delegate (Gemini, Grok, Codex) or any delegate in its turn record without a `costUsd` keeps `cost_floor: true`, and the report prints the number with `>=`.
+- **Explore on Haiku.** `explore_haiku` is `true` only when the result's `subagent_stats.by_type` names an Explore-type agent whose model is Haiku; when that names no model (or the key is absent) the turn record's `delegates[]` is used. `false` means Explore did not run or ran on another model (a Haiku main session plus a Sonnet Explore agent is `false`; a Haiku line in `modelUsage` is not evidence). `"unknown"` means no source names the agent's model; the report counts those separately and does not count them as passes.
+
 ## What a run leaves
 
-`<out>/<arm>/<task>/run-<n>/` holds `work/` (the tree as the agent left it) and `result.json`: the `claude -p` JSON (`result`, `total_cost_usd`, `modelUsage`, `num_turns`, `subagent_stats`), wall time, exit code, timeout flag, and for spick arms the lines of `~/.claude/spick/turns/<sessionId>.jsonl` if the mod wrote them (absent is normal in headless runs). `grade.py` adds `grades.json` and `judge/` (raw judge output and the letter-to-run key); `report.py` adds the report. `samples/` in this folder is a one-run example of that shape.
+`<out>/<arm>/<task>/run-<n>/` holds `work/` (the tree as the agent left it) and `result.json`: the `claude -p` JSON (`result`, `total_cost_usd`, `modelUsage`, `num_turns`, `subagent_stats`), wall time, exit code, timeout flag, and for spick arms the lines of `~/.claude/spick/turns/<sessionId>.jsonl` if the mod wrote them. The out dir also holds `_probe.json` and `_probe/<arm>/work/` (the probe calls). `grade.py` adds `grades.json` and `judge/` (raw judge output and the letter-to-run key); `report.py` adds the report. `samples/` in this folder is a one-run example of that shape.
 
 The judge sees every answer of a task at once under shuffled letters, with the `[Model:` label line and any `Kept:` line cut, so it cannot tell the arms apart. The key stays in `judge/<task>.key.json`.
 
@@ -66,7 +84,8 @@ The judge sees every answer of a task at once under shuffled letters, with the `
 - `claude -p` loads the user's global `~/.claude/CLAUDE.md`, so bare arms still read the spick routing block; `--disallowedTools Agent` stops them acting on it. `*-free` arms may act on it. The global `~/.claude/agents` are present in every arm.
 - The harness never edits `~/.claude`. Running `claude` still writes its own session files there.
 - Known limit on this machine: a global marker file (`~/.claude/.spick-mod-active`, or `~/.claude/spick/mod-active/<sessionId>` in v2) can silence the hook of this checkout, and the user's global v1 hook may print in `haiku-hook` as well. `haiku-hook` is therefore a best-effort arm. The v1 hook of this checkout was not worked around.
-- `haiku-spick` assumes `disableAllHooks: true` leaves the mod's own prompt hook alone and that `--plugin-dir` is not undone by the disabled global key. This could not be confirmed offline; check the Explore and turn-record columns of the report after the first real run.
+- `haiku-spick` assumes `disableAllHooks: true` leaves the mod's own prompt hook alone and that `--plugin-dir` is not undone by the disabled global key. The start-up probe now checks this at run time (a v2 turn record must appear); the probe was only exercised against stubs here, never against a real `claude`.
+- The `*-free` arms still read the user's global `~/.claude/CLAUDE.md`, which may carry the spick routing block. They are strong-model baselines with spick's instructions visible but no spick tooling (no mod, no hook, no spick agents); read them as "big model that may delegate on its own", not as "a model that has never heard of spick".
 - Costs are Claude Code's `total_cost_usd`. Outside-CLI delegates (Gemini, Grok, Codex) are not in it; the report marks such cells `>=`. The judge is priced separately and its cost stays unknown.
 - One judge, small n, no cross-session cache effects, no leak testing. The report ends with "What this matrix cannot show".
 - Each run has a 15-minute timeout; the whole process group is killed on expiry.
