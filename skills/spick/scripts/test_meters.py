@@ -207,7 +207,7 @@ class CacheTest(unittest.TestCase):
                 with open(os.path.join(d, "spick.json"), "w") as f:
                     json.dump({"lanes": {"gemini": False, "grok": False, "codex": False}, "lane_registry": reg}, f)
                 quota.refresh()
-                with open(os.path.join(d, "spick-quota.json")) as f:
+                with open(os.path.join(d, "spick", "quota.json")) as f:
                     text = f.read()
                 return text, quota.build_line(json.loads(text), quota.time.time())
             finally:

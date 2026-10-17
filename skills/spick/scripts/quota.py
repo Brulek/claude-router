@@ -25,7 +25,8 @@ Usage:
   quota.py --bg                (internal) the detached refresh
   quota.py --relane            rebuild only the "lanes" part of the existing cache from spick.json (no
                                collectors, no network, no subprocess); no cache file: does nothing
-Cache: $CLAUDE_CONFIG_DIR/spick-quota.json (default ~/.claude), written atomically.
+Cache: <state>/quota.json, lock <state>/quota.lock (paths.py: <state> is $CLAUDE_CONFIG_DIR/spick, default
+~/.claude/spick), written atomically.
 """
 import concurrent.futures
 import datetime
@@ -44,6 +45,7 @@ import urllib.request
 
 import invoke as invoke_mod   # the one key resolver (read_key) and the no-redirect handler
 import lanes as lanes_mod
+import paths
 
 FRESH_S = 30 * 60          # status word boundary: "fresh" below this age (a label, not a routing rule)
 CACHE_TTL_S = 10 * 60      # refresh in the background when the cache is older than this
@@ -60,15 +62,15 @@ PROVIDERS = ("claude", "codex", "gemini", "grok")
 # ---------- paths and small helpers ----------
 
 def config_dir():
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return paths.config_dir()
 
 
 def cache_path():
-    return os.path.join(config_dir(), "spick-quota.json")
+    return paths.path("quota.json")
 
 
 def lock_path():
-    return os.path.join(config_dir(), "spick-quota.lock")
+    return paths.path("quota.lock")
 
 
 def iso(ts):

@@ -338,12 +338,13 @@ class Relane(Base):
         doc = {"written_at": "2026-10-14T01:00:00Z", "providers": [{"provider": "claude", "facts": []}],
                "lanes": [{"id": "old", "kind": "local", "tags": [], "data": None}]}
         doc.update(extra or {})
-        with open(os.path.join(self.dir, "spick-quota.json"), "w") as f:
+        os.makedirs(os.path.join(self.dir, "spick"), exist_ok=True)
+        with open(os.path.join(self.dir, "spick", "quota.json"), "w") as f:
             json.dump(doc, f)
         return doc
 
     def read_cache(self):
-        with open(os.path.join(self.dir, "spick-quota.json")) as f:
+        with open(os.path.join(self.dir, "spick", "quota.json")) as f:
             return json.load(f)
 
     def test_relane_rebuilds_only_lanes_without_subprocess(self):
@@ -361,7 +362,7 @@ class Relane(Base):
     def test_relane_without_a_cache_does_nothing(self):
         self.base()
         self.assertFalse(quota.relane())
-        self.assertFalse(os.path.exists(os.path.join(self.dir, "spick-quota.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "spick", "quota.json")))
 
     def test_relane_drops_lanes_when_there_is_no_registry(self):
         self.write({"version": 1})

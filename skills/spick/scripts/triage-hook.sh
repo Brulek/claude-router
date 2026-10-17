@@ -4,24 +4,38 @@
 # Line 2 routes by the shape of the deliverable, most expensive lane first and the main session last: a small model
 # stops at the first bucket that fits, so the cheap bucket must come last. After it, triage_hint.py reads the prompt
 # (the hook's stdin JSON) and adds one Hint line naming the keywords it found and the default route they imply.
-# When the spick-dashboard mod is loaded it injects the checklist itself (built from its switches) and
-# writes ~/.claude/.spick-mod-active at session start; a marker younger than 24 hours silences this copy.
-# A stale marker (mod uninstalled) expires on its own. `find -mmin` works on both macOS and Linux.
-# The quota cache ($CLAUDE_CONFIG_DIR/spick-quota.json, default ~/.claude) is refreshed from here in the background, never awaited;
+# When the spick-dashboard mod is loaded it injects the checklist itself (built from its switches) and keeps a marker
+# <state>/mod-active/<session_id> fresh; this hook reads session_id from its stdin JSON and stays silent only while that
+# session's marker is younger than 24 hours, so a second session without the mod still gets the checklist. Markers
+# older than 24 hours (sessions long gone, mod uninstalled) are deleted here. `find -mmin` works on macOS and Linux.
+# <state> is paths.py's rule, inline so the checklist prints without python: $CLAUDE_CONFIG_DIR/spick, default ~/.claude/spick.
+# The quota cache (<state>/quota.json) is refreshed from here in the background, never awaited;
 # the last line printed below is a one-line summary of that cache (plain facts, no rules).
 # The mod builds the same text from checklist.ts; test_triage_hint.py runs this hook and fails when the two drift.
 here="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 py=$(command -v python3 || command -v python || true)
 claude_dir="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
-# the mod can only see HOME, so it writes its marker to ~/.claude even when CLAUDE_CONFIG_DIR points elsewhere: look in both
-marker="$claude_dir/.spick-mod-active"
-[ -f "$marker" ] || marker="$HOME/.claude/.spick-mod-active"
+state="$claude_dir/spick"
 # the prompt arrives as JSON on stdin; a run from a terminal has none
 input=""
 [ -t 0 ] || input=$(cat 2>/dev/null || true)
-if [ -f "$marker" ] && [ -n "$(find "$marker" -mmin -1440 2>/dev/null)" ]; then
+# session_id without python (a UUID in practice); made a safe file name the way paths.ts safeName does
+sid=""
+re='"session_id"[[:space:]]*:[[:space:]]*"([^"]*)"'
+[[ $input =~ $re ]] && sid="${BASH_REMATCH[1]}"
+sid="${sid//[^A-Za-z0-9._-]/_}"
+if [[ $sid == .* ]]; then sid="_${sid#"${sid%%[!.]*}"}"; fi
+[ -d "$state/mod-active" ] && find "$state/mod-active" -type f -mmin +1440 -delete 2>/dev/null
+if [ -n "$sid" ] && [ -f "$state/mod-active/$sid" ] && [ -n "$(find "$state/mod-active/$sid" -mmin -1440 2>/dev/null)" ]; then
   [ -n "$py" ] && "$py" "$here/quota.py" --touch >/dev/null 2>&1   # the mod prints the checklist; keep its cache warm
   exit 0
+fi
+# one line when the skill on disk is newer (or older) than what setup installed: agents and the CLAUDE.md block are stale
+cfg="$claude_dir/spick.json"
+skill_version=$(head -1 "$here/../assets/VERSION" 2>/dev/null | tr -d '[:space:]')
+if [ -f "$cfg" ] && [ -n "$skill_version" ]; then
+  installed=$(sed -n 's/.*"installed_version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' "$cfg" 2>/dev/null | head -1)
+  [ "$installed" = "$skill_version" ] || echo "spick: skill $skill_version installed ${installed:-none}, run spick setup"
 fi
 cat <<'TXT'
 [spick triage - answer all three before the first tool call]
@@ -32,7 +46,6 @@ cat <<'TXT'
    - changed code beyond a one-liner with nothing left to decide -> Agent(coder). You never edit source yourself.
 TXT
 # The lane bullet depends on whether the user declared a lane_registry; the other lines are the same either way.
-cfg="$claude_dir/spick.json"
 registry=0
 [ -f "$cfg" ] && grep -q '"lane_registry"' "$cfg" 2>/dev/null && registry=1
 if [ "$registry" = 1 ]; then
