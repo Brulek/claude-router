@@ -8,7 +8,8 @@ import run
 class Agents(unittest.TestCase):
     def test_render_matches_assets(self):
         agents = json.loads(run.render_agents())
-        self.assertEqual(sorted(agents), ["coder", "deep", "planner"])
+        self.assertEqual(sorted(agents), ["Explore", "coder", "deep", "planner"])
+        self.assertEqual(agents["Explore"]["model"], "haiku")
         coder = agents["coder"]
         self.assertEqual(coder["model"], "sonnet")
         self.assertIn("Edit", coder["tools"])

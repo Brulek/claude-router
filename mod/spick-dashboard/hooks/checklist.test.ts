@@ -296,5 +296,5 @@ test('the guard switch parses and defaults to on', () => {
   expect(parseSpick(' Guard ON ')).toEqual({ kind: 'guard', value: 'on' })
   for (const bad of ['guard', 'guard maybe', 'guard on now']) expect(parseSpick(bad)).toEqual({ kind: 'usage' })
   expect(ARGUMENT_HINT).toContain('guard on|off')
-  expect(USAGE).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend]')
+  expect(USAGE).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend|audit]')
 })

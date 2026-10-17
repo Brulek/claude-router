@@ -1,5 +1,6 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
+import type { LanesState } from './checklist'
 import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, sampleNote, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
@@ -69,7 +70,7 @@ async function quotaLineNow($: EngineInterface): Promise<string | null> {
 }
 
 /** The lanes the user declared (lane_registry), from the same cache; null for a user without one, or when it cannot be read. */
-async function lanesNow($: EngineInterface): Promise<LaneInfo[] | null> {
+async function lanesNow($: EngineInterface): Promise<LanesState | null> {
   try {
     const p = await pathsNow($)
     if (!p) return null
@@ -853,7 +854,7 @@ export const register: Register = on => {
         inFlight.set(id, entry)
         delegate = entry
         // a review call: Codex with a review prompt, or a declared lane tagged review (invoke.py --lane <id>)
-        const isReview = cli.isReview || ((await lanesNow($)) ?? []).some(l => l.id === cli.lane && l.tags.includes('review'))
+        const isReview = cli.isReview || ((await lanesNow($))?.lanes ?? []).some(l => l.id === cli.lane && l.tags.includes('review'))
         const d: DelegateRec = { id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview, startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
         delegatesOfTurn.push(d)
         delegateOfCall.set(id, d)

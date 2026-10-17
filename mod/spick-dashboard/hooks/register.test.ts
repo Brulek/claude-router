@@ -696,7 +696,7 @@ test('every /spick answer is one line starting with spick:', async ($, on) => {
   session(on)
   await $.session.start(START)
   const answer = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text ?? ''
-  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend]')
+  expect(await answer('details')).toBe('spick: usage /spick [on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend|audit]')
   expect(await answer('lane glm')).toBe('spick: unknown lane id glm')
   expect(await answer('hide')).toBe('spick: band hidden · /spick show restores it')
   expect(await answer('show')).toBe('spick: band shown')

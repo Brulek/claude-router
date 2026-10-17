@@ -204,7 +204,7 @@ export type SpickCommand =
   | { kind: 'spend' }
   | { kind: 'usage' }
 
-export const ARGUMENT_HINT = '[on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend]'
+export const ARGUMENT_HINT = '[on|force|off|review on|off|gate on|off|guard on|off|lane <id> [<field> <value>]|hide|show|quota|spend|audit]'
 export const USAGE = `spick: usage /spick ${ARGUMENT_HINT}`
 
 /**
