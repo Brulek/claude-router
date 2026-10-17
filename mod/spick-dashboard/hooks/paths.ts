@@ -1,5 +1,6 @@
-// Where spick keeps its files. The skill's scripts/paths.py is the Python twin: both honour CLAUDE_CONFIG_DIR and fall
-// back to HOME/.claude, so the mod and the hook agree on one state directory. Pure: register.tsx reads the two
+// Where spick keeps its files: <config>/spick/ holds quota.json, turns/<sessionId>.jsonl and mod-active/<sessionId>.
+// The skill's scripts/paths.py is the Python twin: both honour CLAUDE_CONFIG_DIR and fall back to HOME/.claude, so
+// the mod and the hook agree on one state directory. Pure: register.tsx reads the two
 // variables through $.env.get (names spelled as literals there, the validator lists them) and passes them in.
 
 export type SpickPaths = {
@@ -12,6 +13,7 @@ export type SpickPaths = {
   /** <config>/spick/: everything spick writes as it runs */
   state: string
   quota: string
+  /** the turn records, one file per session (turnsFile) */
   turns: string
   modActive: string
 }
@@ -30,7 +32,7 @@ export function spickPaths(configDir: string | undefined, home: string | undefin
     scripts: `${config}/skills/spick/scripts`,
     state,
     quota: `${state}/quota.json`,
-    turns: `${state}/turns.jsonl`,
+    turns: `${state}/turns`,
     modActive: `${state}/mod-active`,
   }
 }
@@ -38,6 +40,14 @@ export function spickPaths(configDir: string | undefined, home: string | undefin
 /** a session id as a file name: anything but letters, digits, dot, dash and underscore becomes _, so it cannot leave the directory */
 export function safeName(id: string): string {
   return id.replace(/[^A-Za-z0-9._-]/g, '_').replace(/^\.+/, '_')
+}
+
+/**
+ * A session's turn record: one file per session, so two sessions never write the same file. `part` above 0 names
+ * the next file once one nears the engine's 4 MiB read limit (<id>.2.jsonl, ...); readers take every *.jsonl.
+ */
+export function turnsFile(p: SpickPaths, sessionId: string, part = 0): string {
+  return `${p.turns}/${safeName(sessionId)}${part > 0 ? `.${part + 1}` : ''}.jsonl`
 }
 
 /** the per-session marker the hook looks for: it stays silent while this file is younger than 24 hours */

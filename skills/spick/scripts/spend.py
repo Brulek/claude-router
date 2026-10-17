@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """spick spend (stdlib only): what the sessions cost, from the files the dashboard mod writes.
 
-The mod (mod/spick-dashboard, hooks/spend.ts) keeps one file per session at
-~/.claude/spick-spend/<sessionId>.json: {"sessionId", "cwd", "startedAt", "rows": [...]}, one row per
-turn that carried usage (the main session's and each subagent's) and one per outside CLI call (tokens 0,
-costUsd null: a CLI reports no usage). Without the mod there are no files: the bash hook sees no usage.
+The mod (mod/spick-dashboard, hooks/turnlog.ts) keeps one turn record per session at
+<config>/spick/turns/<sessionId>.jsonl (<config> is CLAUDE_CONFIG_DIR, else ~/.claude): one JSON line per main turn
+with the main loop's usage and every delegate (subagents with usage, outside CLI calls without), and a `late: true`
+line when a background agent finished after its turn's line. Each becomes a row here: the main loop's usage (a turn
+with none, such as an interrupt, has no row) and one per delegate (an outside CLI call: tokens 0, costUsd null).
+Sessions from before the turn record (mod 0.x) wrote <config>/spick-spend/<sessionId>.json, {"sessionId", "cwd",
+"startedAt", "rows": [...]}; those are read too, also where setup moved them (<config>/spick/spick-spend/). Without
+the mod there are no files: the bash hook sees no usage.
 
 Usage:
   spend.py [--days N] [--by lane|day|session] [--json]
@@ -24,8 +28,92 @@ import sys
 FIELDS = ("inputTokens", "outputTokens", "cacheReadTokens", "cacheCreationTokens")
 
 
+def config_dir(home=None, env=None):
+    """CLAUDE_CONFIG_DIR, else HOME/.claude (scripts/paths.py's rule; kept here so this script stands alone). A home
+    given by a test wins over the variable, so a test never reads the real config dir."""
+    env = os.environ if env is None else env
+    if home is None and env.get("CLAUDE_CONFIG_DIR"):
+        return env["CLAUDE_CONFIG_DIR"]
+    return os.path.join(home if home is not None else os.path.expanduser("~"), ".claude")
+
+
 def spend_dir(home=None):
-    return os.path.join(home if home is not None else os.path.expanduser("~"), ".claude", "spick-spend")
+    """the legacy per-session spend files (mod 0.x)"""
+    return os.path.join(config_dir(home), "spick-spend")
+
+
+def legacy_dirs(config):
+    return [os.path.join(config, "spick-spend"), os.path.join(config, "spick", "spick-spend")]
+
+
+def turns_dir(config):
+    return os.path.join(config, "spick", "turns")
+
+
+def _num(v):
+    return v if isinstance(v, (int, float)) and not isinstance(v, bool) else None
+
+
+def load_turns(directory):
+    """(turns, skipped): every main turn of every *.jsonl file, late lines merged into their turn by turnId and
+    delegate id (the late copy wins); lines that are not JSON objects are counted. A late line whose turn is missing
+    becomes a turn of its own with only that delegate."""
+    turns, late, skipped = {}, [], 0
+    for path in sorted(glob.glob(os.path.join(directory, "*.jsonl"))):
+        try:
+            with open(path, encoding="utf-8") as f:
+                text = f.read()
+        except OSError:
+            skipped += 1
+            continue
+        for raw in text.splitlines():
+            if not raw.strip():
+                continue
+            try:
+                line = json.loads(raw)
+            except ValueError:
+                skipped += 1
+                continue
+            if not isinstance(line, dict) or not isinstance(line.get("turnId"), str):
+                skipped += 1
+                continue
+            key = (str(line.get("sessionId") or os.path.basename(path).split(".")[0]), line["turnId"])
+            if line.get("late"):
+                late.append((key, line))
+            else:
+                line["delegates"] = [d for d in line.get("delegates") or [] if isinstance(d, dict)]
+                turns[key] = line
+    for key, line in late:
+        d = line.get("delegate")
+        if not isinstance(d, dict):
+            continue
+        t = turns.get(key)
+        if t is None:
+            t = turns[key] = {"sessionId": key[0], "turnId": key[1], "at": line.get("at"), "delegates": [], "lateOnly": True}
+        t["delegates"] = [x for x in t["delegates"] if x.get("id") != d.get("id")] + [d]
+    return list(turns.values()), skipped
+
+
+def rows_of_turns(turns):
+    """one row for the main loop's usage of each turn, one per delegate"""
+    rows = []
+    for t in turns:
+        at = parse_at(t.get("at"))
+        if at is None:
+            continue
+        base = {"at": at, "session": str(t.get("sessionId") or ""), "cwd": str(t.get("cwd") or "")}
+        u = t.get("usage")
+        if isinstance(u, dict):
+            rows.append({**base, "lane": "main session", **_tokens(u), "costUsd": _num(u.get("costUsd"))})
+        for d in t.get("delegates") or []:
+            du = d.get("usage") if isinstance(d.get("usage"), dict) else {}
+            rows.append({**base, "lane": str(d.get("lane") or "?"), **_tokens(du), "costUsd": _num(d.get("costUsd"))})
+    return rows
+
+
+def _tokens(u):
+    pairs = zip(FIELDS, ("input", "output", "cacheRead", "cacheWrite"))
+    return {k: _num(u.get(src)) or 0 for k, src in pairs}
 
 
 def parse_at(text):
@@ -134,7 +222,7 @@ def table(groups, total, by, days, sessions):
 
 
 def main(argv=None, home=None, now=None):
-    ap = argparse.ArgumentParser(prog="spend.py", description="What the sessions cost, from ~/.claude/spick-spend/.")
+    ap = argparse.ArgumentParser(prog="spend.py", description="What the sessions cost, from the turn records under <config>/spick/turns/.")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--by", choices=("lane", "day", "session"), default="lane")
     ap.add_argument("--json", action="store_true")
@@ -142,9 +230,18 @@ def main(argv=None, home=None, now=None):
     if a.days < 1:
         ap.error("--days must be 1 or more")
     now = now or dt.datetime.now(dt.timezone.utc)
-    rows, skipped = load(spend_dir(home))
+    config = config_dir(home)
+    rows, skipped = [], 0
+    for d in legacy_dirs(config):
+        r, n = load(d)
+        rows += r
+        skipped += n
     if skipped:
         print(f"spend.py: skipped {skipped} file{'s' if skipped != 1 else ''} that are not spend records", file=sys.stderr)
+    turns, bad_lines = load_turns(turns_dir(config))
+    if bad_lines:
+        print(f"spend.py: skipped {bad_lines} turn record line{'s that do' if bad_lines != 1 else ' that does'} not read", file=sys.stderr)
+    rows += rows_of_turns(turns)
     rows = within(rows, a.days, now)
     groups, total = summarize(rows, a.by)
     sessions = len({r["session"] for r in rows})
