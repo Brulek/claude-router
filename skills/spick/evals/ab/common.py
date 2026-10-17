@@ -16,9 +16,10 @@ MOD_DIR = SKILL.parents[1] / "mod" / "spick-dashboard"
 
 # model: --model alias; hook: UserPromptSubmit hook of this checkout; mod: checkout mod via --plugin-dir;
 # agents: skills/spick/assets/agents rendered into --agents; agent_tool: Agent allowed (else --disallowedTools Agent);
-# hooks_off: disableAllHooks (the user's global spick hook included)
+# hooks_off: disableAllHooks, which keeps the user's global v1 hook out of the run (haiku-spick gets its checklist
+# from the mod, which injects it itself; haiku-hook is the only arm that leaves hooks on, see README)
 ARMS = {
-    "haiku-spick": dict(model="haiku", hook=True, mod=True, agents=True, agent_tool=True, hooks_off=False),
+    "haiku-spick": dict(model="haiku", hook=False, mod=True, agents=True, agent_tool=True, hooks_off=True),
     "haiku-hook": dict(model="haiku", hook=True, mod=False, agents=True, agent_tool=True, hooks_off=False),
     "haiku-bare": dict(model="haiku", hook=False, mod=False, agents=False, agent_tool=False, hooks_off=True),
     "sonnet-bare": dict(model="sonnet", hook=False, mod=False, agents=False, agent_tool=False, hooks_off=True),
