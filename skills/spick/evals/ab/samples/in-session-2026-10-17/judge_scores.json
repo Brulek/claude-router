@@ -1,0 +1,12 @@
+{
+ "judge": {
+  "haiku-spick/T5": 4,
+  "sonnet-free/T5": 3,
+  "sonnet-bare/T5": 3,
+  "haiku-bare/T5": 3,
+  "haiku-bare/T7": 5,
+  "sonnet-free/T7": 4,
+  "haiku-spick/T7": 5,
+  "sonnet-bare/T7": 4
+ }
+}

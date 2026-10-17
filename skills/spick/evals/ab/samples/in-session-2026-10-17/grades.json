@@ -1,0 +1,178 @@
+{
+ "haiku-bare/T1": {
+  "pass": true,
+  "label_line": false
+ },
+ "haiku-bare/T2": {
+  "pass": true,
+  "label_line": false
+ },
+ "haiku-bare/T3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "haiku-bare/T4": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "haiku-bare/T5": {
+  "pass": null,
+  "label_line": false
+ },
+ "haiku-bare/T6": {
+  "chars": 194,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": false
+ },
+ "haiku-bare/T7": {
+  "pass": null,
+  "label_line": false
+ },
+ "haiku-bare/T8": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-bare/T1": {
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-bare/T2": {
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-bare/T3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-bare/T4": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-bare/T5": {
+  "pass": null,
+  "label_line": false
+ },
+ "sonnet-bare/T6": {
+  "chars": 210,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-bare/T7": {
+  "pass": null,
+  "label_line": false
+ },
+ "sonnet-bare/T8": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "haiku-spick/T1": {
+  "pass": true,
+  "label_line": true
+ },
+ "haiku-spick/T2": {
+  "pass": true,
+  "label_line": true
+ },
+ "haiku-spick/T3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true
+ },
+ "haiku-spick/T4": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true
+ },
+ "haiku-spick/T5": {
+  "pass": null,
+  "label_line": true
+ },
+ "haiku-spick/T6": {
+  "chars": 216,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": true
+ },
+ "haiku-spick/T7": {
+  "pass": null,
+  "label_line": true
+ },
+ "haiku-spick/T8": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true
+ },
+ "sonnet-free/T1": {
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-free/T2": {
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-free/T3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-free/T4": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-free/T5": {
+  "pass": null,
+  "label_line": true
+ },
+ "sonnet-free/T6": {
+  "chars": 242,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": false
+ },
+ "sonnet-free/T7": {
+  "pass": null,
+  "label_line": true
+ },
+ "sonnet-free/T8": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false
+ }
+}

@@ -1,0 +1,752 @@
+{
+ "haiku-bare/T1": {
+  "cost_usd": 0.0038,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 10656,
+  "tool_tokens": 20593,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 10,
+    "out": 1023,
+    "cache_read": 71108,
+    "cache_write": 20328,
+    "cost": 0.00376458,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-bare/T2": {
+  "cost_usd": 0.0027,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 5306,
+  "tool_tokens": 19316,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 495,
+    "cache_read": 12397,
+    "cache_write": 18947,
+    "cost": 0.002740245,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-bare/T3": {
+  "cost_usd": 0.0042,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 13254,
+  "tool_tokens": 21702,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 10,
+    "out": 1672,
+    "cache_read": 72116,
+    "cache_write": 21397,
+    "cost": 0.004232785,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-bare/T4": {
+  "cost_usd": 0.0039,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 10767,
+  "tool_tokens": 21744,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 1466,
+    "cache_read": 51937,
+    "cache_write": 21265,
+    "cost": 0.003911295,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-bare/T5": {
+  "cost_usd": 0.0033,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 11399,
+  "tool_tokens": 20566,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 1671,
+    "cache_read": 12397,
+    "cache_write": 19021,
+    "cost": 0.003337495,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-bare/T6": {
+  "cost_usd": 0.0036,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 12102,
+  "tool_tokens": 21089,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 2211,
+    "cache_read": 12397,
+    "cache_write": 19004,
+    "cost": 0.00360537,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-bare/T7": {
+  "cost_usd": 0.0047,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 16594,
+  "tool_tokens": 22755,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 12,
+    "out": 2356,
+    "cache_read": 73879,
+    "cache_write": 22375,
+    "cost": 0.0047148649999999995,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-bare/T8": {
+  "cost_usd": 0.004,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 11385,
+  "tool_tokens": 21859,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 1619,
+    "cache_read": 52215,
+    "cache_write": 21589,
+    "cost": 0.004031074999999999,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-spick/T1": {
+  "cost_usd": 0.0182,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 17918,
+  "tool_tokens": 100317,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 12,
+    "out": 1814,
+    "cache_read": 480995,
+    "cache_write": 100241,
+    "cost": 0.018248275,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-spick/T2": {
+  "cost_usd": 0.0101,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 8931,
+  "tool_tokens": 98591,
+  "by_model": {
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 901,
+    "cache_read": 222110,
+    "cache_write": 59566,
+    "cost": 0.01011795,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T1": {
+  "cost_usd": 0.0652,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 9221,
+  "tool_tokens": 19713,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 595,
+    "cache_read": 50724,
+    "cache_write": 19643,
+    "cost": 0.0652183,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T2": {
+  "cost_usd": 0.0535,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 4887,
+  "tool_tokens": 19194,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 360,
+    "cache_read": 12401,
+    "cache_write": 18953,
+    "cost": 0.053470699999999996,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T3": {
+  "cost_usd": 0.0694,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 10632,
+  "tool_tokens": 20376,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 848,
+    "cache_read": 51417,
+    "cache_write": 20246,
+    "cost": 0.0693944,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T4": {
+  "cost_usd": 0.0657,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 10209,
+  "tool_tokens": 20689,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 896,
+    "cache_read": 31564,
+    "cache_write": 20147,
+    "cost": 0.0656523,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T5": {
+  "cost_usd": 0.0609,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 12882,
+  "tool_tokens": 19984,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 1084,
+    "cache_read": 12401,
+    "cache_write": 19027,
+    "cost": 0.0608957,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T6": {
+  "cost_usd": 0.0685,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 12083,
+  "tool_tokens": 20180,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 1245,
+    "cache_read": 31411,
+    "cache_write": 19901,
+    "cost": 0.0685007,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T7": {
+  "cost_usd": 0.0863,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 18952,
+  "tool_tokens": 21978,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 12,
+    "out": 1852,
+    "cache_read": 71656,
+    "cache_write": 21353,
+    "cost": 0.08625769999999999,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-bare/T8": {
+  "cost_usd": 0.0661,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 10003,
+  "tool_tokens": 20577,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 1003,
+    "cache_read": 31779,
+    "cache_write": 19874,
+    "cost": 0.0660828,
+    "lanes": [
+     "coder"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-spick/T3": {
+  "cost_usd": 0.07,
+  "unpriced_rows": 0,
+  "rows": 3,
+  "wall_ms": 28246,
+  "tool_tokens": 102217,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 598,
+    "cache_read": 35827,
+    "cache_write": 15898,
+    "cost": 0.0529024,
+    "lanes": [
+     "coder"
+    ]
+   },
+   "claude-haiku-5-5": {
+    "rows": 2,
+    "in": 18,
+    "out": 3768,
+    "cache_read": 724038,
+    "cache_write": 63983,
+    "cost": 0.017124055,
+    "lanes": [
+     "agent",
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 2
+ },
+ "haiku-spick/T4": {
+  "cost_usd": 0.2012,
+  "unpriced_rows": 0,
+  "rows": 3,
+  "wall_ms": 47481,
+  "tool_tokens": 104328,
+  "by_model": {
+   "claude-opus-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 987,
+    "cache_read": 13063,
+    "cache_write": 20610,
+    "cost": 0.12541860000000002,
+    "lanes": [
+     "deep"
+    ]
+   },
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 1037,
+    "cache_read": 36856,
+    "cache_write": 17145,
+    "cost": 0.060615699999999995,
+    "lanes": [
+     "coder"
+    ]
+   },
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 12,
+    "out": 3523,
+    "cache_read": 526204,
+    "cache_write": 64988,
+    "cost": 0.01514824,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-spick/T5": {
+  "cost_usd": 0.2193,
+  "unpriced_rows": 0,
+  "rows": 2,
+  "wall_ms": 61410,
+  "tool_tokens": 101770,
+  "by_model": {
+   "claude-opus-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 4352,
+    "cache_read": 52122,
+    "cache_write": 22114,
+    "cost": 0.20806639999999998,
+    "lanes": [
+     "planner"
+    ]
+   },
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 2712,
+    "cache_read": 222325,
+    "cache_write": 61481,
+    "cost": 0.011264975,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-spick/T6": {
+  "cost_usd": 0.1153,
+  "unpriced_rows": 0,
+  "rows": 2,
+  "wall_ms": 27341,
+  "tool_tokens": 100998,
+  "by_model": {
+   "claude-opus-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 1071,
+    "cache_read": 16771,
+    "cache_write": 15686,
+    "cost": 0.1032202,
+    "lanes": [
+     "deep"
+    ]
+   },
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 10,
+    "out": 2330,
+    "cache_read": 321817,
+    "cache_write": 61576,
+    "cost": 0.01208117,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-spick/T7": {
+  "cost_usd": 0.2972,
+  "unpriced_rows": 0,
+  "rows": 2,
+  "wall_ms": 87597,
+  "tool_tokens": 103359,
+  "by_model": {
+   "claude-opus-5-5": {
+    "rows": 1,
+    "in": 20,
+    "out": 6449,
+    "cache_read": 207330,
+    "cache_write": 22764,
+    "cost": 0.284346,
+    "lanes": [
+     "deep"
+    ]
+   },
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 3509,
+    "cache_read": 322623,
+    "cache_write": 62941,
+    "cost": 0.012849155,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "haiku-spick/T8": {
+  "cost_usd": 0.0768,
+  "unpriced_rows": 0,
+  "rows": 2,
+  "wall_ms": 39534,
+  "tool_tokens": 103860,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 1171,
+    "cache_read": 36373,
+    "cache_write": 16583,
+    "cost": 0.0604541,
+    "lanes": [
+     "coder"
+    ]
+   },
+   "claude-haiku-5-5": {
+    "rows": 1,
+    "in": 16,
+    "out": 3914,
+    "cache_read": 629878,
+    "cache_write": 64551,
+    "cost": 0.016326254999999998,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T1": {
+  "cost_usd": 0.3277,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 12890,
+  "tool_tokens": 98130,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 10,
+    "out": 697,
+    "cache_read": 377722,
+    "cache_write": 98076,
+    "cost": 0.3277244,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T2": {
+  "cost_usd": 0.1921,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 6964,
+  "tool_tokens": 97128,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 252,
+    "cache_read": 221276,
+    "cache_write": 58125,
+    "cost": 0.1920997,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T3": {
+  "cost_usd": 0.2417,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 17556,
+  "tool_tokens": 98525,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 10,
+    "out": 954,
+    "cache_read": 417256,
+    "cache_write": 59457,
+    "cost": 0.2416537,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T4": {
+  "cost_usd": 0.2014,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 13057,
+  "tool_tokens": 98716,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 910,
+    "cache_read": 221486,
+    "cache_write": 59210,
+    "cost": 0.2014342,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T5": {
+  "cost_usd": 0.1852,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 22587,
+  "tool_tokens": 98422,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 4,
+    "out": 1506,
+    "cache_read": 124308,
+    "cache_write": 58094,
+    "cost": 0.1851646,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T6": {
+  "cost_usd": 0.2013,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 14347,
+  "tool_tokens": 97974,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 1023,
+    "cache_read": 221333,
+    "cache_write": 58715,
+    "cost": 0.2013001,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T7": {
+  "cost_usd": 0.2108,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 18162,
+  "tool_tokens": 99863,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 6,
+    "out": 1804,
+    "cache_read": 221353,
+    "cache_write": 59403,
+    "cost": 0.2108301,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ },
+ "sonnet-free/T8": {
+  "cost_usd": 0.2233,
+  "unpriced_rows": 0,
+  "rows": 1,
+  "wall_ms": 13331,
+  "tool_tokens": 98674,
+  "by_model": {
+   "claude-sonnet-5-5": {
+    "rows": 1,
+    "in": 8,
+    "out": 1033,
+    "cache_read": 319582,
+    "cache_write": 59606,
+    "cost": 0.2232774,
+    "lanes": [
+     "general-purpose"
+    ]
+   }
+  },
+  "top_agent_rows": 1
+ }
+}
