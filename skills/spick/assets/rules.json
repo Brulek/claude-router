@@ -1,5 +1,5 @@
 {
-  "_": "The routing policy, the single source. scripts/render_rules.py renders assets/checklist.txt, the rules:start block of mod/spick-dashboard/hooks/checklist.ts, the hints:start block of hooks/hint.ts, and the rules:start blocks of SKILL.md and assets/claude-md-snippet.md; `render_rules.py --check` fails on drift. Edit here, then run render_rules.py.",
+  "_": "The routing policy, the single source. scripts/render_rules.py renders assets/checklist.txt, the rules:start block of mod/spick-dashboard/hooks/checklist.ts, the hints:start block of hooks/hint.ts, and the rules:start blocks of SKILL.md and assets/claude-md-snippet.md; `render_rules.py --check` fails on drift. Edit here, then run render_rules.py. A bullet's optional verdicts_deep and the phrases_verdicts_deep map are the text used while the mod's /spick verdicts switch is deep; the hook and the Markdown copies carry the default only.",
   "version": 2,
   "kinds": [
     {
@@ -270,6 +270,9 @@
     "web": "web signs ({t}) -> the search lane fetches, judging what it finds is still deep's",
     "x": "X words ({t}) -> the x-data lane"
   },
+  "phrases_verdicts_deep": {
+    "judgement": "judgement words ({t}) -> Agent(deep), whatever the size: verdicts go to deep this session and a `Kept:` line does not excuse one"
+  },
   "checklist": {
     "title": "[spick triage - answer all three before any tool call]",
     "plan": "1. Plan mode? 3+ files, irreversible or wide action, ambiguous ask, new build, or a requested plan -> EnterPlanMode, then planner inside it (headless: plan inline, stop before editing unless told to go ahead).",
@@ -292,7 +295,8 @@
         "kinds": [
           "verdict"
         ],
-        "text": "   - a verdict (compare, evaluate, diagnose, review, recommend, formal writing): small material (a few files, under ~200 lines) -> you, with a `Kept:` line; large material, high stakes, a second failure or unsure -> Agent(deep)."
+        "text": "   - a verdict (compare, evaluate, diagnose, review, recommend, formal writing): small material (a few files, under ~200 lines) -> you, with a `Kept:` line; large material, high stakes, a second failure or unsure -> Agent(deep).",
+        "verdicts_deep": "   - a verdict (compare, evaluate, diagnose, review, recommend, formal writing), small material too -> Agent(deep): this session sends every verdict to deep; a `Kept:` line does not excuse one."
       },
       {
         "name": "PLANNER",
@@ -322,7 +326,8 @@
         "kinds": [
           "lookup"
         ],
-        "text": "   - the answer is in a file, a command's output or your knowledge, or a one-file edit or fix -> you; a kept verdict needs a `Kept:` line."
+        "text": "   - the answer is in a file, a command's output or your knowledge, or a one-file edit or fix -> you; a kept verdict needs a `Kept:` line.",
+        "verdicts_deep": "   - the answer is in a file, a command's output or your knowledge, or a one-file edit or fix -> you."
       }
     ],
     "tail": "   A prompt that mixes kinds is split by kind. Effort for every delegate. A brief is a handoff packet, not your trail; one saying how is a design: planner. A check failing twice: Agent(coder) at high, or Agent(deep) if the cause is unknown.",

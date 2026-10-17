@@ -186,6 +186,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 | `spick quota` | 显示额度信息 |
 | `/spick on\|force\|off` | 分流开关：`on` 只在 Haiku 会话里分流，`force` 任何模型都分流 |
 | `/spick review on\|off` | Codex 审核步骤开关 |
+| `/spick verdicts keep\|deep` | 结论类任务去哪儿，会被记住。`keep`（默认）按体量规则：小材料（几个文件、约 200 行以内）的结论留在主会话，附一行 `Kept:`；`deep` 把所有结论都交给 `deep`，小材料也一样：清单里的结论条目和 judgement 的 Hint 措辞随之改变（都来自 `rules.json`），拦截也不再接受 judgement 提示下的 `Kept:` 行。2026-10-17 的真实 harness 跑分给这笔账定了价：小结论上差一分评审分，每条约 0.30 美元（`docs/reviews/2026-10-17-real-harness-ab.md` 第 6 节）。只装 bash hook 不装 Mod 时没有会话状态，保持默认 |
 | `/spick gate on\|off` | 拦截开关：主会话自己答了带 Hint 的结论类任务，收工时退回一次 |
 | `/spick guard on\|off` | 守卫开关：主会话每轮最多亲自改 1 个源码文件（第二个会被拒绝，交给 `coder`）；改了源码却没有通过检查的一轮，收工时退回一次。这个上限是工具层面的软约束：经 Bash 做的修改（`sed -i`、重定向）不计入 |
 | `/spick lane <id>` | 显示单个 lane 的记录 |
@@ -198,7 +199,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 
 `/spick spend` 和 `/spick audit` 的数据从哪来：mod 为每个会话写一份回合记录 `~/.claude/spick/turns/<sessionId>.jsonl`，每个主回合一行，记下谁干了活、用量、拦截和检查。旧版本的会话从原来的逐会话花费文件读取。没有 mod 就没有记录：bash 钩子拿不到用量。
 
-面板快捷键：`r` 分流，`v` 审核，`e` 拦截，`d` 守卫，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
+面板快捷键：`r` 分流，`v` 审核，`j` 结论去向，`e` 拦截，`d` 守卫，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
 
 ## 环境要求
 

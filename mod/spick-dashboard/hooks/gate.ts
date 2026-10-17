@@ -70,11 +70,21 @@ export function roleDone(role: 'deep' | 'review', runs: readonly RoleRun[]): boo
 export type GateFiring = { kinds: HintKind[]; words: string[]; roles: ('deep' | 'review')[]; text: string }
 
 /**
- * The gate's reason to send a stop back, or null when every role the hints require completed (or none is required).
- * The text names what was missing and the two ways out.
+ * What the gate reads of the reply and the session: `kept`, the reply has a `Kept:` line (KEPT_RE); `verdictsDeep`,
+ * `/spick verdicts` is deep this session.
  */
-export function gateFiring(hints: readonly Hint[], runs: readonly RoleRun[]): GateFiring | null {
-  const missing = hints.filter(h => ROLE_OF[h.kind] !== undefined && !roleDone(ROLE_OF[h.kind]!, runs))
+export type GateOptions = { kept?: boolean; verdictsDeep?: boolean }
+
+/**
+ * The gate's reason to send a stop back, or null when every role the hints require completed, or none is required,
+ * or a `Kept:` line excuses what is missing. A `Kept:` line excuses every kind while verdicts are `keep`; under
+ * `verdictsDeep` it excuses a review hint still, a judgement hint no more: then the text offers Agent(deep) alone.
+ * Otherwise the text names what was missing and the two ways out.
+ */
+export function gateFiring(hints: readonly Hint[], runs: readonly RoleRun[], opts: GateOptions = {}): GateFiring | null {
+  const strictKind = (k: HintKind): boolean => opts.verdictsDeep === true && k === 'judgement'
+  const excused = (k: HintKind): boolean => opts.kept === true && !strictKind(k)
+  const missing = hints.filter(h => ROLE_OF[h.kind] !== undefined && !excused(h.kind) && !roleDone(ROLE_OF[h.kind]!, runs))
   if (missing.length === 0) return null
   const kinds = missing.map(h => h.kind)
   const roles = [...new Set(kinds.map(k => ROLE_OF[k]!))]
@@ -85,7 +95,10 @@ export function gateFiring(hints: readonly Hint[], runs: readonly RoleRun[]): Ga
   const fix = isReviewOnly
     ? 'run the review lane on the diff, or dispatch Agent(deep), and relay its findings in place of yours'
     : 'dispatch Agent(deep) with the facts you gathered and relay its answer in place of yours'
-  const text = `spick gate: this prompt was hinted as ${what} (${words.join(', ')}) and ${lacking} this turn, so the ${isReviewOnly ? 'review' : 'verdict'} came from the triage session itself. Do one of two things now: ${fix}; or, if the deliverable really was a plain lookup, reply with one line starting with \`Kept:\` that says why, and stop.`
+  const head = `spick gate: this prompt was hinted as ${what} (${words.join(', ')}) and ${lacking} this turn, so the ${isReviewOnly ? 'review' : 'verdict'} came from the triage session itself.`
+  const text = kinds.some(strictKind)
+    ? `${head} Verdicts go to deep this session (/spick verdicts deep), so a \`Kept:\` line does not excuse it: ${fix}.`
+    : `${head} Do one of two things now: ${fix}; or, if the deliverable really was a plain lookup, reply with one line starting with \`Kept:\` that says why, and stop.`
   return { kinds, words, roles, text }
 }
 
