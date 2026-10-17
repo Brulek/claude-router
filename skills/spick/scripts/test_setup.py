@@ -27,14 +27,15 @@ class Base(unittest.TestCase):
         self.dir = self.tmp.name
         self.env = dict(os.environ, CLAUDE_CONFIG_DIR=self.dir, HOME=self.dir)
 
-    def _run(self, *args):
+    def _run(self, *args, ok=True):
         prefix = tempfile.gettempdir()
         for key in ("CLAUDE_CONFIG_DIR", "HOME"):
             val = self.env[key]
             if not val.startswith(prefix) or os.path.realpath(val).startswith(REAL_CLAUDE):
                 self.fail(f"{key}={val!r} is not under the temp prefix {prefix!r}; refusing to run setup.sh")
         r = subprocess.run(["bash", SETUP, *args], env=self.env, capture_output=True, text=True, timeout=60)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        if ok:
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
     def run_setup(self, *extra):
@@ -373,6 +374,68 @@ class TestState(Base):
             version = f.read().strip()
         self.assertEqual(version, "1.0.0")
         self.assertEqual(json.loads(self.read("spick.json"))["installed_version"], version)
+
+
+class TestSteps(Base):
+    """Every write is checked: invalid JSON stops the run before anything is written; a failing step stops it with
+    a list of what was already changed, and never says done."""
+
+    def everything_untouched(self):
+        self.assertFalse(os.path.exists(self.path("CLAUDE.md")))
+        self.assertFalse(os.path.exists(self.path("agents")))
+        self.assertFalse(os.path.exists(self.path("spick")))
+
+    def test_invalid_settings_json_writes_nothing(self):
+        self.put("settings.json", '{"model": "sonnet",')
+        r = self._run("--install", "--lanes", "gemini", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("settings.json is not valid JSON", r.stderr)
+        self.assertIn("nothing written", r.stderr)
+        self.assertNotIn("done.", r.stdout)
+        self.everything_untouched()
+        self.assertEqual(self.read("settings.json"), '{"model": "sonnet",')
+
+    def test_spick_json_that_is_not_an_object_writes_nothing(self):
+        self.put("spick.json", "[1, 2]")
+        r = self._run("--install", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("spick.json is not a JSON object", r.stderr)
+        self.everything_untouched()
+
+    def test_a_failing_step_lists_what_was_already_changed(self):
+        os.mkdir(self.path("CLAUDE.md"))      # the block cannot be written into a directory
+        r = self._run("--install", "--lanes", "gemini", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("done.", r.stdout)
+        self.assertIn("setup: the CLAUDE.md block failed (exit 1); not done.", r.stderr)
+        self.assertIn("already changed by this run:", r.stderr)
+        self.assertIn(self.path("agents", "coder.md"), r.stderr)
+        self.assertIn("the files as they were: " + self.backups()[0], r.stderr)
+        # the steps after it did not run
+        self.assertFalse(os.path.exists(self.path("spick.json")))
+        self.assertFalse(os.path.exists(self.path("settings.json")))
+
+    def test_uninstall_with_invalid_settings_removes_nothing(self):
+        self.run_setup()
+        self.put("settings.json", "{oops")
+        r = self._run("--uninstall", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not valid JSON", r.stderr)
+        self.assertTrue(os.path.exists(self.path("agents", "coder.md")))
+        self.assertIn(START, self.read("CLAUDE.md"))
+
+    def test_spick_json_carries_the_effort_defaults_from_rules_json(self):
+        self.run_setup()
+        with open(os.path.join(HERE, "..", "assets", "rules.json")) as f:
+            rules = json.load(f)
+        want = {k: v["default"] for k, v in rules["efforts"].items()}
+        self.assertEqual(want, {"coder": "medium", "planner": "high", "deep": "medium"})
+        self.assertEqual(json.loads(self.read("spick.json"))["efforts"], want)
+
+    def test_done_only_when_every_step_passed(self):
+        r = self.run_setup()
+        self.assertIn("\ndone. New sessions pick this up", r.stdout)
+        self.assertEqual(r.stderr, "")
 
 
 class TestUninstallMore(Base):
