@@ -2,7 +2,7 @@
 # spick setup: detect CLIs, install agents + CLAUDE.md block, write config.
 # Usage:
 #   setup.sh --check
-#   setup.sh --install [--lanes gemini,grok,codex] [--model haiku|sonnet|opus] [--effort low|medium|high] [--force]
+#   setup.sh --install [--lanes gemini,grok,codex] [--model haiku|sonnet|opus] [--effort low|medium|high] [--force] [--no-explore]
 #   setup.sh --uninstall [--purge] [--force]
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -131,9 +131,10 @@ check() {
 }
 
 install() {
-  local lanes="" model="" effort="" force=0
+  local lanes="" model="" effort="" force=0 explore=1
   while [ $# -gt 0 ]; do
     case "$1" in
+      --no-explore) explore=0; shift;;
       --lanes) lanes="$2"; shift 2;;
       --model) model="$2"; shift 2;;
       --effort) effort="$2"; shift 2;;
@@ -153,6 +154,8 @@ install() {
   local written=()
   for f in "$SKILL_DIR"/assets/agents/*.md; do
     dst="$CLAUDE_DIR/agents/$(basename "$f")"
+    # Explore.md replaces the built-in Explore (which runs on the main session's model) with a Haiku one
+    if [ "$(basename "$f")" = Explore.md ] && [ "$explore" = 0 ]; then echo "  skip   $dst (--no-explore)"; continue; fi
     if [ -e "$dst" ] && [ "$force" = 0 ]; then echo "  keep   $dst (exists; --force to overwrite)"; else cp "$f" "$dst"; echo "  wrote  $dst"; written+=("$dst"); fi
   done
   if [ -n "$PY" ]; then
@@ -465,5 +468,5 @@ case "${1:-}" in
   --check) check;;
   --install) shift; install "$@";;
   --uninstall) shift; uninstall "$@";;
-  *) echo "usage: setup.sh --check | --install [--lanes a,b] [--model m] [--effort e] [--force] | --uninstall [--purge] [--force]"; exit 2;;
+  *) echo "usage: setup.sh --check | --install [--lanes a,b] [--model m] [--effort e] [--force] [--no-explore] | --uninstall [--purge] [--force]"; exit 2;;
 esac

@@ -132,6 +132,20 @@ class TestBackup(Base):
         self.assertEqual(m2["agents_written"], [])  # agents exist and --force was not given
         self.assertEqual(m2["settings"]["model"], {"before": "haiku", "after": "haiku"})
 
+    def test_explore_is_installed_unless_no_explore(self):
+        self.assertIn("Explore.md", AGENTS)
+        self.run_setup()
+        with open(self.path("agents", "Explore.md")) as f:
+            head = f.read().split("---")[1]
+        self.assertIn("name: Explore", head)
+        self.assertIn("model: haiku", head)
+        self.assertIn("tools: Read, Grep, Glob, Bash", head)
+        os.unlink(self.path("agents", "Explore.md"))
+        r = self.run_setup("--no-explore")
+        self.assertFalse(os.path.exists(self.path("agents", "Explore.md")))
+        self.assertIn("skip   %s (--no-explore)" % self.path("agents", "Explore.md"), r.stdout)
+        self.assertTrue(os.path.exists(self.path("agents", "coder.md")))
+
     def test_hook_entry_exactly_once_next_to_other_hooks(self):
         other = {"hooks": [{"type": "command", "command": "echo mine"}]}
         self.put("settings.json", json.dumps({"hooks": {"UserPromptSubmit": [other]}}))

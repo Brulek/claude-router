@@ -84,15 +84,18 @@ flowchart TD
 
 | Task | Assigned to |
 |---|---|
-| Lookups: Q&A, file lookup, summaries | Main session (Haiku) |
-| Code changes | `coder` subagent (Sonnet) |
-| Planning and design | `planner` subagent (Opus) |
+| Lookups (Q&A, file lookup, summaries) and one-file edits with a clear goal | Main session (Haiku) |
+| Code changes beyond one file | `coder` subagent (Sonnet) |
+| Decisions on architecture, a public interface, a data format or a cross-module trade-off | `planner` subagent (Opus), then `coder` |
 | Judgements: comparisons, evaluations, diagnoses, complex reasoning, decisions, formal writing | `deep` subagent (Opus) |
+| Searching a repository for files and symbols | `Explore` subagent (Haiku) |
 | Web search, fact checking, long media | Gemini (`agy`) |
 | X / Twitter data | Grok (`grok`) |
 | Independent code review, image generation | Codex (`codex`) |
 
-Default effort: `coder` medium, `planner` high, `deep` medium (raised per task: high for hard or multi-file problems, xhigh for key decisions).
+Default effort: `coder` medium, `planner` high, `deep` medium (raised per task: high for hard or multi-file problems, xhigh for key decisions). The table, the efforts and the checklist text all come from one file, `skills/spick/assets/rules.json`.
+
+**Explore on Haiku.** Claude Code's built-in Explore subagent runs on the main session's model, so an Opus session greps on Opus. Setup installs `~/.claude/agents/Explore.md` (`model: haiku`, `effort: low`, tools Read, Grep, Glob, Bash); `--no-explore` skips it. The Claude Code subagent docs say a user or project subagent named `Explore` overrides the built-in and keeps its own model. That is the documented behaviour, checked against the docs on 2026-10-17, not observed at runtime: `claude agents` lists background sessions, not subagent definitions. "Read-only" is the tool list and the agent's instructions, a tool-level soft bound, not a permission: a Bash command can still write.
 
 ## Dashboard (optional)
 

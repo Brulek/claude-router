@@ -84,15 +84,18 @@ flowchart TD
 
 | 任务 | 执行者 |
 |---|---|
-| 查阅类：问答、文件查阅、摘要 | 主会话（Haiku） |
-| 代码修改 | `coder` 子代理（Sonnet） |
-| 规划与设计 | `planner` 子代理（Opus） |
+| 查阅类（问答、文件查阅、摘要），以及目标明确的单文件修改 | 主会话（Haiku） |
+| 跨文件的代码修改 | `coder` 子代理（Sonnet） |
+| 架构、公共接口、数据格式或跨模块取舍的决策 | `planner` 子代理（Opus），再交 `coder` |
 | 判断类：对比、评估、诊断、复杂推理、关键决策、正式文稿 | `deep` 子代理（Opus） |
+| 在代码库里找文件和符号 | `Explore` 子代理（Haiku） |
 | 联网搜索、事实核查、长媒体 | Gemini（`agy`） |
 | X / Twitter 数据 | Grok（`grok`） |
 | 独立代码审核、图像生成 | Codex（`codex`） |
 
-默认推理强度：`coder` medium，`planner` high，`deep` medium（按任务上调：难题或跨文件问题用 high，关键决策用 xhigh）。
+默认推理强度：`coder` medium，`planner` high，`deep` medium（按任务上调：难题或跨文件问题用 high，关键决策用 xhigh）。这张表、推理强度和检查清单的文字都出自同一个文件 `skills/spick/assets/rules.json`。
+
+**Explore 跑在 Haiku 上。** Claude Code 内置的 Explore 子代理沿用主会话的模型，Opus 会话里连 grep 也是 Opus 在跑。安装时会写入 `~/.claude/agents/Explore.md`（`model: haiku`、`effort: low`，工具为 Read、Grep、Glob、Bash）；加 `--no-explore` 则跳过。Claude Code 的子代理文档写明：用户级或项目级名为 `Explore` 的子代理会覆盖内置版本，并使用自己的模型。这是 2026-10-17 对照文档确认的行为，没有在运行时实测：`claude agents` 列出的是后台会话，不列子代理定义。所谓"只读"指工具列表和代理自己的指令，是工具层面的软约束，不是权限：Bash 命令照样能写文件。
 
 ## 仪表盘（可选）
 
