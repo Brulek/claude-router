@@ -364,11 +364,19 @@ class Relane(Base):
         self.assertFalse(quota.relane())
         self.assertFalse(os.path.exists(os.path.join(self.dir, "spick", "quota.json")))
 
-    def test_relane_drops_lanes_when_there_is_no_registry(self):
+    def test_relane_without_a_registry_says_so(self):
         self.write({"version": 1})
         self.cache()
         quota.relane()
-        self.assertNotIn("lanes", self.read_cache())
+        doc = self.read_cache()
+        self.assertEqual((doc["registry"], doc["lanes"]), (False, []))
+
+    def test_relane_with_every_lane_off_keeps_registry_true(self):
+        self.write({"version": 1, "lane_registry": {k: {"enabled": False} for k in ("gemini", "grok", "codex")}})
+        self.cache()
+        quota.relane()
+        doc = self.read_cache()
+        self.assertEqual((doc["registry"], doc["lanes"]), (True, []))
 
     def test_a_write_refreshes_the_cache_lanes_and_asks_for_a_background_refresh(self):
         self.base()

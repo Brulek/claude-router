@@ -255,9 +255,16 @@ class Line(unittest.TestCase):
             line = quota.build_line(doc, quota.parse_iso("2026-10-13T15:34:00Z"))
             self.assertEqual(line, "Quota (cache 4m old): deepseek: unknown (no data).", facts)
 
-    def test_collect_all_without_registry_adds_no_new_keys(self):
+    def test_collect_all_without_registry_says_so(self):
         doc = quota.collect_all({})
-        self.assertEqual(sorted(doc), ["providers", "written_at"])
+        self.assertEqual(sorted(doc), ["lanes", "providers", "registry", "written_at"])
+        self.assertEqual((doc["registry"], doc["lanes"]), (False, []))
+
+    def test_a_registry_with_every_lane_off_is_registry_true_and_no_lanes(self):
+        # the mod reads this as "no outside lane is enabled" (not as "no registry")
+        cfg = {"lane_registry": {k: {"enabled": False} for k in ("gemini", "grok", "codex")}}
+        doc = quota.collect_all({}, registry_lanes=lanes.load_effective(cfg))
+        self.assertEqual((doc["registry"], doc["lanes"]), (True, []))
 
     def test_collect_all_with_registry_adds_facts_and_lanes(self):
         reg = lanes.load_effective({"lane_registry": {"glm": {"kind": "api-key", "data": "text", "meter": {"type": "none"}}}})
@@ -265,6 +272,7 @@ class Line(unittest.TestCase):
         self.assertEqual([e["provider"] for e in doc["providers"]], ["glm"])
         self.assertEqual(doc["providers"][0]["facts"], ["no meter (declared plan only)"])
         self.assertEqual([ln["id"] for ln in doc["lanes"]], ["gemini", "grok", "codex", "glm"])
+        self.assertTrue(doc["registry"])
         self.assertNotIn("meter", doc["lanes"][0])
 
     def test_collect_all_lanes_carry_no_prefer(self):

@@ -80,17 +80,15 @@ export type LaneVariant = 'builtin' | 'registry' | 'none'
 const isLanesState = (x: unknown): x is LanesState => typeof x === 'object' && x !== null && !Array.isArray(x) && 'registry' in x
 
 /**
- * The variant and the enabled lanes, from either shape: the `{registry, lanes}` object (an empty list is a registry with
- * nothing enabled), or the older bare list, where an empty list or none at all reads as no registry.
+ * The variant and the enabled lanes, from either shape: the `{registry, lanes}` object, or the older bare list of the
+ * declared lanes. Either way an empty list is a registry with nothing enabled; only `registry: false`, null or no
+ * argument reads as no registry.
  */
 export function laneState(l?: readonly LaneInfo[] | LanesState | null): { variant: LaneVariant; lanes: readonly LaneInfo[] } {
-  if (isLanesState(l)) {
-    const lanes = Array.isArray(l.lanes) ? l.lanes : []
-    if (!l.registry) return { variant: 'builtin', lanes: [] }
-    return { variant: lanes.length > 0 ? 'registry' : 'none', lanes }
-  }
-  const lanes = (l ?? []) as readonly LaneInfo[]
-  return lanes.length > 0 ? { variant: 'registry', lanes } : { variant: 'builtin', lanes: [] }
+  if (l === undefined || l === null) return { variant: 'builtin', lanes: [] }
+  if (isLanesState(l) && !l.registry) return { variant: 'builtin', lanes: [] }
+  const lanes: readonly LaneInfo[] = isLanesState(l) ? (Array.isArray(l.lanes) ? l.lanes : []) : (l as readonly LaneInfo[])
+  return { variant: lanes.length > 0 ? 'registry' : 'none', lanes }
 }
 
 const BULLETS: Record<LaneVariant, readonly string[]> = { builtin: LANE_BULLETS_BUILTIN, registry: LANE_BULLETS_REGISTRY, none: LANE_BULLETS_NONE }

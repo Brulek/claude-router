@@ -1,5 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
+import { lanesFromCache } from './quotaline'
 import { CHECKLIST_TEMPLATE, DEFAULT_CONTROLS, EFFORT_DEFAULTS, LANE_BULLET_DEEP, LANE_BULLET_LANES_BUILTIN, LANE_BULLET_LANES_NONE, LANE_BULLET_YOU, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
@@ -204,9 +205,24 @@ test('with declared lanes: capability line 2, the Lanes line before the quota li
   expect(block.at(-1)).toBe('Quota (cache 1m old): x.')
 })
 
-test('without declared lanes the checklist is the old one', () => {
-  expect(checklist(ctl(), HAIKU, true, undefined, undefined)).toBe(checklist(ctl(), HAIKU, true))
-  expect(checklist(ctl(), HAIKU, true, undefined, [])).toBe(checklist(ctl(), HAIKU, true))
+test('without a registry the checklist is the built-in one; an empty registry is not "no registry"', () => {
+  const builtin = checklist(ctl(), HAIKU, true)
+  expect(checklist(ctl(), HAIKU, true, undefined, undefined)).toBe(builtin)
+  expect(checklist(ctl(), HAIKU, true, undefined, null)).toBe(builtin)
+  expect(checklist(ctl(), HAIKU, true, undefined, { registry: false, lanes: [] })).toBe(builtin)
+  // a registry with every lane off, in either shape: no outside lane may be called and nothing reviews by Codex
+  for (const none of [{ registry: true, lanes: [] }, []] as const) {
+    const block = checklist(ctl(), HAIKU, true, 'Quota (cache 1m old): x.', none)
+    expect(block).not.toBe(builtin)
+    expect(block).toContain('   - no outside lane is enabled: do not call Gemini, Grok or Codex')
+    expect(block).toContain('| Review: skipped]')
+    expect(block).toContain('every participant carries its own model and effort')
+    expect(block).not.toContain('Lanes (')
+    expect(block.split('\n').at(-1)).toBe('Quota (cache 1m old): x.')
+  }
+  // what lanesFromCache returns goes straight in
+  expect(checklist(ctl(), HAIKU, true, undefined, lanesFromCache('{"registry":true,"lanes":[]}'))).toContain('no outside lane is enabled')
+  expect(checklist(ctl(), HAIKU, true, undefined, lanesFromCache('{"registry":false,"lanes":[]}'))).toBe(builtin)
 })
 
 test('/spick lane forms: show, on|off maps to enabled, any field with a free-text value', () => {

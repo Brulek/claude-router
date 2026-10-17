@@ -1,9 +1,10 @@
 /**
- * The quota line of the checklist, built from ~/.claude/spick-quota.json (written by
+ * The quota line of the checklist, built from <state>/quota.json, ~/.claude/spick/quota.json by default (written by
  * skills/spick/scripts/quota.py). Plain facts with ages, no rules, no judgement. Mirrors
  * quota.py's build_line: both are tested against the same sample, skills/spick/scripts/testdata/cache_sample.*.
  */
 import type { LaneInfo } from '../types'
+import type { LanesState } from './checklist'
 
 type QWindow = { name: string; used_pct: number | null; resets_at: string | null; reset?: boolean }
 type QProvider = { provider: string; plan?: string | null; price?: string | null; sampled_at?: string | null; windows?: QWindow[]; reason?: string; facts?: string[] }
@@ -66,16 +67,23 @@ export function lanesLine(lanes: readonly LaneInfo[]): string {
   return `Lanes (user-declared; data = most that may be sent): ${segs.join(' \u00b7 ')}`
 }
 
-/** The declared lanes in the cache, or null when it has none (a user without lane_registry) or is unreadable. */
-export function lanesFromCache(text: string): LaneInfo[] | null {
-  let doc: { lanes?: unknown }
+/**
+ * What the cache says about declared lanes: `{registry, lanes}` with the enabled lanes. `registry` false means no
+ * lane_registry (the built-in lanes apply); `registry` true with an empty list means every lane is off, and an empty
+ * list stays empty. A cache written before the `registry` field carried `lanes` only for a registry, so there a lanes
+ * list, even an empty one, means registry true.
+ * Null when the cache cannot be read. checklist() takes this object (or the older bare list).
+ */
+export function lanesFromCache(text: string): LanesState | null {
+  let doc: { lanes?: unknown; registry?: unknown }
   try { doc = JSON.parse(text) } catch { return null }
-  if (!Array.isArray(doc?.lanes)) return null
+  if (!doc || typeof doc !== 'object') return null
   const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   const out: LaneInfo[] = []
-  for (const l of doc.lanes as Record<string, unknown>[]) {
+  for (const l of (Array.isArray(doc.lanes) ? doc.lanes : []) as Record<string, unknown>[]) {
     if (!l || typeof l.id !== 'string') continue
     out.push({ id: l.id, kind: typeof l.kind === 'string' ? l.kind : undefined, tags: strs(l.tags), data: typeof l.data === 'string' ? l.data : null })
   }
-  return out.length > 0 ? out : null
+  const registry = typeof doc.registry === 'boolean' ? doc.registry : Array.isArray(doc.lanes)
+  return { registry, lanes: registry ? out : [] }
 }

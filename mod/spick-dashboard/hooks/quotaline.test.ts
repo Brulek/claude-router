@@ -13,20 +13,27 @@ test('the sample cache gives the same line as quota.py', () => {
 })
 
 test('the sample cache gives the same Lanes line as lanes.py', () => {
-  expect(lanesLine(lanesFromCache(SAMPLE) ?? [])).toBe(LANES_LINE)
+  expect(lanesLine(lanesFromCache(SAMPLE)?.lanes ?? [])).toBe(LANES_LINE)
 })
 
 test('a lane with no declared data level says so; a third-party lane carries the data-leak fact', () => {
-  const line = lanesLine(lanesFromCache(SAMPLE) ?? [])
+  const line = lanesLine(lanesFromCache(SAMPLE)?.lanes ?? [])
   expect(line).toContain('proxy code data:unset')
   expect(line).toContain('glm is a third-party service: sending content to it carries a data-leak risk.')
   expect(line).not.toContain('gemini is a third-party')
 })
 
-test('lanes come from the cache only when it carries them', () => {
-  expect(lanesFromCache('{"written_at":"2026-10-13T15:30:00Z","providers":[]}')).toBeNull()
+test('the cache says whether there is a registry and which lanes are enabled; an empty list stays empty', () => {
+  const glm = { id: 'glm', kind: 'api-key', tags: ['cheap'], data: 'text' }
+  expect(lanesFromCache('{"registry":false,"lanes":[]}')).toEqual({ registry: false, lanes: [] })
+  // every lane switched off: a registry with nothing enabled, not "no registry"
+  expect(lanesFromCache('{"registry":true,"lanes":[]}')).toEqual({ registry: true, lanes: [] })
+  expect(lanesFromCache(`{"registry":true,"lanes":[${JSON.stringify(glm)},{"no":"id"}]}`)).toEqual({ registry: true, lanes: [glm] })
+  // a cache from before the registry field: lanes were written only for a registry, so a list (even empty) means one
+  expect(lanesFromCache('{"lanes":[]}')).toEqual({ registry: true, lanes: [] })
+  expect(lanesFromCache('{"written_at":"2026-10-13T15:30:00Z","providers":[]}')).toEqual({ registry: false, lanes: [] })
   expect(lanesFromCache('{not json')).toBeNull()
-  expect(lanesFromCache('{"lanes":[]}')).toBeNull()
+  expect(lanesFromCache('null')).toBeNull()
 })
 
 test('facts replace the unknown prefix; a provider without facts keeps it', () => {
