@@ -367,6 +367,7 @@ function session(on: Parameters<TestBody>[1], model = 'claude-haiku-5-5', surfac
   const world = { model, isModelBroken: false, writes: [] as { path: string; text: string }[], toasts: [] as string[], submits: [] as unknown[] }
   on('session.model', async () => { if (world.isModelBroken) throw new Error('no model'); return { value: world.model } })
   on('session.surfaces', async () => ({ value: surfaces }))
+  on('session.id', async () => ({ value: 's1' }))
   on('fs.write', async ($, e) => { world.writes.push({ path: e.path, text: e.text }); return { value: undefined } })
   on('ui.toast', async ($, e) => { world.toasts.push(e.text); return { value: undefined } })
   on('prompt.submit', async ($, e) => { world.submits.push(e); return { text: e.text, context: e.context } })
@@ -389,7 +390,7 @@ test('a Haiku session gets the checklist, one block per prompt; /spick off swaps
   const world = session(on)
   await $.session.start(START)
   await until(() => world.writes.length > 0)
-  expect(world.writes).toEqual([{ path: '/h/.claude/.spick-mod-active', text: new Date(1000).toISOString() }])
+  expect(world.writes).toEqual([{ path: '/h/.claude/spick/mod-active/s1', text: new Date(1000).toISOString() }])
 
   expect(isChecklist(await contextOf($))).toBe(true)
   expect((await $.command.run({ command: 'spick', args: 'off', ...RUN })).text).toBe('spick: routing off')
@@ -620,6 +621,23 @@ test('a model change through settings by the user turns routing off; the same va
   expect(await contextOf($)).toEqual([OFF])
 })
 
+test('CLAUDE_CONFIG_DIR moves the marker, the quota cache and spick.json; HOME is then not used for them', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h', CLAUDE_CONFIG_DIR: '/cfg' })
+  const world = session(on)
+  const reads: string[] = []
+  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"codex","plan":"Pro Lite","sampled_at":"2026-10-13T15:29:00Z","windows":[{"name":"7d","used_pct":53,"resets_at":"2026-10-20T05:38:29Z","reset":false}]}]}'
+  on('fs.read', async (_$, e) => { reads.push(e.path); return e.path === '/cfg/spick/quota.json' ? { value: cache } : { deny: 'missing' } })
+  await $.session.start(START)
+  await until(() => world.writes.length > 0)
+  expect(world.writes.map(w => w.path)).toEqual(['/cfg/spick/mod-active/s1'])
+  expect(((await contextOf($))[0] ?? '').split('\n').at(-1)).toBe('Quota (cache 4m old): codex Pro Lite: 7d 53% (resets in 6d).')
+  expect(reads).toContain('/cfg/spick.json')
+  // the legacy spend file is the last HOME path; the turn record replaces it
+  expect(reads.filter(r => r.startsWith('/h/') && !r.includes('/spick-spend/'))).toEqual([])
+})
+
 test('the marker is refreshed at most hourly from prompt.submit', async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   mock.store(on)
@@ -691,7 +709,7 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   mock.env(on, { HOME: '/h' })
   session(on)
   let cache: string | null = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"codex","plan":"Pro Lite","sampled_at":"2026-10-13T15:29:00Z","windows":[{"name":"7d","used_pct":53,"resets_at":"2026-10-20T05:38:29Z","reset":false}]}]}'
-  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' && cache !== null ? { value: cache } : { deny: 'missing' }))
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' && cache !== null ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const withLine = await contextOf($)
   expect(withLine.length).toBe(1)
@@ -709,7 +727,7 @@ test('registry lanes with facts and no windows reach the checklist with their fa
   session(on)
   const lane = (id: string, facts: string) => `{"provider":"${id}","plan":null,"sampled_at":"2026-10-13T15:29:50Z","windows":[],"facts":${facts}}`
   const cache = `{"written_at":"2026-10-13T15:30:00Z","providers":[${lane('deepseek', '["balance 12.40 CNY"]')},${lane('kimi', '["balance 3.00 CNY"]')},${lane('openrouter', '["used 3.20 of 10.00 USD"]')},${lane('proxy', '[]')}]}`
-  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const last = ((await contextOf($))[0] ?? '').split('\n').at(-1) ?? ''
   expect(last).toBe('Quota (cache 4m old): deepseek: balance 12.40 CNY · kimi: balance 3.00 CNY · openrouter: used 3.20 of 10.00 USD · proxy: unknown (no data).')
@@ -724,7 +742,7 @@ test('lanes in the cache switch line 2 to the capability wording and add the Lan
   session(on)
   const lane = (id: string, kind: string, tags: string, data: string) => `{"id":"${id}","kind":"${kind}","tags":["${tags}"],"data":"${data}"}`
   let cache = `{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[${lane('gemini', 'cli-subscription', 'search', 'public')},${lane('glm', 'api-key', 'cheap', 'text')}]}`
-  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const lines = ((await contextOf($))[0] ?? '').split('\n')
   // item 2 is a block of seven lines (head, five bullets, tail); the registry swaps its lane bullet
@@ -915,7 +933,6 @@ test('each gate firing and what became of it is a line in ~/.claude/spick-gate.j
   // the log as last written (session() records every write), a foreign line in it from the start
   const logText = () => world.writes.filter(w => w.path === '/h/.claude/spick-gate.jsonl').at(-1)?.text ?? 'not json\n'
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-gate.jsonl' ? { value: logText() } : { deny: 'missing' }))
-  on('session.id', async () => ({ value: 's1' }))
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))

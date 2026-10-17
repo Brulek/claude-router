@@ -13,6 +13,8 @@ import { readQuota } from './quota'
 import { parseSpendFile, spendFileText, spendPath, spendRow } from './spend'
 import type { SpendFile, SpendRow } from './spend'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
+import { markerPath, spickPaths } from './paths'
+import type { SpickPaths } from './paths'
 
 const P = 'spick-dashboard'
 const current = atom({ plugin: 'spick-dashboard', key: 'current' } as const, null)
@@ -47,24 +49,29 @@ async function refreshQuota($: EngineInterface, force = false): Promise<Quota> {
   return fresh
 }
 
+/** spick's paths (paths.ts): CLAUDE_CONFIG_DIR, else HOME/.claude; null when neither is set */
+async function pathsNow($: EngineInterface): Promise<SpickPaths | null> {
+  return spickPaths(await $.env.get('CLAUDE_CONFIG_DIR'), await $.env.get('HOME'))
+}
+
 /**
- * The quota line, from the cache scripts/quota.py keeps at ~/.claude/spick-quota.json. One read, no run:
+ * The quota line, from the cache scripts/quota.py keeps at <state>/quota.json. One read, no run:
  * a missing, unreadable or empty cache gives null and the line is left out. The bash hook keeps the cache warm.
  */
 async function quotaLineNow($: EngineInterface): Promise<string | null> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return null
-    return quotaLineFromCache(await $.fs.read(`${home}/.claude/spick-quota.json`), await $.clock.now())
+    const p = await pathsNow($)
+    if (!p) return null
+    return quotaLineFromCache(await $.fs.read(p.quota), await $.clock.now())
   } catch { return null }
 }
 
 /** The lanes the user declared (lane_registry), from the same cache; null for a user without one, or when it cannot be read. */
 async function lanesNow($: EngineInterface): Promise<LaneInfo[] | null> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return null
-    return lanesFromCache(await $.fs.read(`${home}/.claude/spick-quota.json`))
+    const p = await pathsNow($)
+    if (!p) return null
+    return lanesFromCache(await $.fs.read(p.quota))
   } catch { return null }
 }
 
@@ -95,15 +102,14 @@ async function setControls($: EngineInterface, change: (c: Controls) => Controls
 // --- lanes: spick.json is written by scripts/set_lane.py only; this module never writes it ---------------------------
 // $.process.run is called from command handlers and onPress closures, never from a render or a hook on the prompt path.
 
-const SET_LANE = '.claude/skills/spick/scripts/set_lane.py'
 const firstLine = (s: string): string => s.split('\n').find(l => l.trim() !== '')?.trim() ?? ''
 
 /** Run set_lane.py with the argv after the script path; ok is exit 0, err the first stderr line. */
 async function runSetLane($: EngineInterface, args: string[]): Promise<{ ok: boolean; stdout: string; err: string }> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return { ok: false, stdout: '', err: 'HOME is not set' }
-    const r = await $.process.run(['python3', `${home}/${SET_LANE}`, ...args])
+    const p = await pathsNow($)
+    if (!p) return { ok: false, stdout: '', err: 'HOME is not set' }
+    const r = await $.process.run(['python3', `${p.scripts}/set_lane.py`, ...args])
     if (r.exitCode === 0) return { ok: true, stdout: r.stdout, err: '' }
     return { ok: false, stdout: r.stdout, err: firstLine(r.stderr) || `set_lane.py failed (exit ${r.exitCode})` }
   } catch {
@@ -254,14 +260,13 @@ function logGate($: EngineInterface, entry: GateLogEntry): Promise<void> {
   return run
 }
 
-const SPEND = '.claude/skills/spick/scripts/spend.py'
 
 /** `/spick spend`: the last seven days as scripts/spend.py sums them, or one line saying why not */
 async function spendReport($: EngineInterface): Promise<string> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return 'spick: HOME is not set'
-    const r = await $.process.run(['python3', `${home}/${SPEND}`, '--days', '7'])
+    const p = await pathsNow($)
+    if (!p) return 'spick: HOME is not set'
+    const r = await $.process.run(['python3', `${p.scripts}/spend.py`, '--days', '7'])
     if (r.exitCode === 0) return r.stdout.trimEnd() || 'spick spend: no records'
     return `spick: ${firstLine(r.stderr) || `spend.py failed (exit ${r.exitCode})`}`
   } catch {
@@ -279,14 +284,15 @@ async function readSessionModel($: EngineInterface): Promise<string> {
 }
 
 /**
- * Tell scripts/triage-hook.sh that the mod owns the checklist: it prints nothing
- * while this marker is younger than 24 hours.
+ * Tell scripts/triage-hook.sh that the mod owns this session's checklist: the hook reads session_id from its stdin and
+ * prints nothing while <state>/mod-active/<sessionId> is younger than 24 hours. Per session, so a session without the
+ * mod (another surface, the mod disabled) still gets the hook's checklist.
  */
 async function writeMarker($: EngineInterface): Promise<void> {
-  // the mod can only see HOME: a CLAUDE_CONFIG_DIR user's marker lives under ~/.claude too (the hook looks in both)
-  const home = await $.env.get('HOME')
-  if (!home) return
-  await $.fs.write(`${home}/.claude/.spick-mod-active`, new Date(await $.clock.now()).toISOString())
+  const p = await pathsNow($)
+  const id = await $.session.id()
+  if (!p || !id) return
+  await $.fs.write(markerPath(p, id), new Date(await $.clock.now()).toISOString())
 }
 
 /**
@@ -553,11 +559,10 @@ export const register: Register = on => {
     try { await loadControls($) } catch {}
     try { await readSessionModel($) } catch {}
     try { await startSpend($, spend, e.cwd) } catch {}
-    // the project's own check commands, once per session; a pattern that does not compile is ignored, with one toast.
-    // The mod sees only HOME, so this is ~/.claude/spick.json whatever CLAUDE_CONFIG_DIR says
+    // the project's own check commands, once per session; a pattern that does not compile is ignored, with one toast
     try {
-      const home = await $.env.get('HOME')
-      const d = declaredChecks(home ? await $.fs.read(`${home}/.claude/spick.json`).catch(() => '') : '')
+      const p = await pathsNow($)
+      const d = declaredChecks(p ? await $.fs.read(p.spickJson).catch(() => '') : '')
       declared = d.patterns
       if (d.bad.length) $.ui.toast(`spick: guard.check_commands — ignored ${d.bad.length} pattern(s) that do not compile: ${d.bad.join(', ')}`)
     } catch {}
