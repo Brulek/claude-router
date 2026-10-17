@@ -374,10 +374,17 @@ const delegateEntry = (d: DelegateRec): DelegateEntry => ({
   ms: d.endedAt === undefined ? null : Math.max(0, d.endedAt - d.startedAt), usage: d.usage, costUsd: d.usage?.costUsd ?? null,
 })
 
-/** a check as the turn record lists it; `editCount` is the turn's source edits at the end */
+/**
+ * Whether a check ran after the last completed source edit of the turn: no edit was in flight or completed while it
+ * ran, and none completed after it. `editCount` is the turn's completed source edits now. What it exercised is not
+ * known: an edit outside the check's scope still reads as checked (a known limit).
+ */
+const isAfterLastEdit = (c: CheckRun, editCount: number): boolean => c.editsDuring === 0 && c.editsAtStart === editCount
+
+/** a check as the turn record lists it; `editCount` is the turn's completed source edits at the end */
 const checkEntry = (c: CheckRun, editCount: number): CheckEntry => ({
   command: c.command, startedAt: new Date(c.startedAt).toISOString(), finishedAt: c.finishedAt === undefined ? null : new Date(c.finishedAt).toISOString(),
-  exitOk: c.exitOk ?? null, editsDuring: c.editsDuring ?? null, coversTurn: c.exitOk === true && c.editsDuring === 0 && c.editsAtStart === editCount,
+  exitOk: c.exitOk ?? null, editsDuring: c.editsDuring ?? null, afterLastEdit: isAfterLastEdit(c, editCount),
   ...(c.agentId ? { agentId: c.agentId } : {}),
 })
 
@@ -443,46 +450,90 @@ async function noteEdit($: EngineInterface, mainModel: string, agentId: string |
 
 /**
  * One check a Bash call ran in the turn, any loop's: the command from its runner on, when it started and finished,
- * whether the tool result came back without an error, and the source-edit count at its start and how many edits
- * landed while it ran. It covers the turn only when it passed and no source edit came after it started.
+ * whether the tool result came back without an error, the completed source edits at its start, the edits in flight
+ * then and the edits started so far (to count those that began while it ran), and `editsDuring`: the edits in flight
+ * or started while it ran. It covers the turn only when it passed and ran after the last completed edit (isAfterLastEdit).
  */
-type CheckRun = { command: string; key: string; startedAt: number; finishedAt?: number; exitOk?: boolean; editsAtStart: number; editsDuring?: number; agentId?: string }
+type CheckRun = {
+  command: string; key: string; startedAt: number; finishedAt?: number; exitOk?: boolean
+  editsAtStart: number; inFlightAtStart: number; startsAtStart: number; editsDuring?: number; agentId?: string
+}
 
 /**
  * the guard's state for the main turn: the source files the main session edited itself, those any loop edited, how
  * many source edits went through, the checks run; `cwd` is the session's, which isSourcePath judges paths against
  */
 type GuardTurn = {
-  mainEdits: Set<string>; agentEdits: Set<string>; sourceEdits: Set<string>; editCount: number; checks: CheckRun[]; cwd: string
+  mainEdits: Set<string>; agentEdits: Set<string>; sourceEdits: Set<string>; checks: CheckRun[]; cwd: string
+  /** source edits whose tool call resolved without an error; those started; those started and not yet resolved */
+  editCount: number; editStarts: number; editsInFlight: number
   /** the main loop's failures per check (checkOf's key), and the escalation they raised: once per turn */
   failures: Map<string, number>; escalation: { command: string; at: number } | null
 }
 
-/** a check that passed after the last source edit of the turn, with none landing while it ran */
-const isChecked = (g: GuardTurn): boolean => g.checks.some(c => checkEntry(c, g.editCount).coversTurn)
+/** a check that passed after the last completed source edit of the turn, with none in flight or landing while it ran */
+const isChecked = (g: GuardTurn): boolean => g.editsInFlight === 0 && g.checks.some(c => c.exitOk === true && isAfterLastEdit(c, g.editCount))
 
 /**
  * The guard's edit cap, in front of an Edit, Write or NotebookEdit: the main session's own edit of a source file past
  * EDIT_CAP distinct ones this turn is refused (a toast, `edit cap` on the band) while the guard is on and routing is in
  * force. Returns the refusal, or null to let the edit through. A file already edited, a subagent's edit, and a path that
- * is not source (notes, data, .claude/) never count against the cap; every source edit that goes through, a subagent's
- * too, counts for the check before the turn ends.
+ * is not source (notes, data, .claude/) never count against the cap. The main session's file takes its place under the
+ * cap when the call starts (two edits in parallel cannot both slip under it) and gives it back if the edit fails.
+ * `source` says whether the call is a source edit, for editDone.
  */
-async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string): Promise<string | null> {
-  if (!isSourcePath(path, g.cwd)) return null
+async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string): Promise<{ deny: string | null; source: boolean; reserved: boolean }> {
+  if (!isSourcePath(path, g.cwd)) return { deny: null, source: false, reserved: false }
   if (!agentId && !g.mainEdits.has(path) && g.mainEdits.size >= EDIT_CAP) {
     const c = await read($, controls)
     if (c.guard === 'on' && effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) {
       $.ui.toast('spick: guard — edit cap: one source file per turn; the next one goes to a coder')
       await setCurrent($, { note: { kind: 'error', text: 'edit cap' } })
-      return editCapReason([...g.mainEdits])
+      return { deny: editCapReason([...g.mainEdits]), source: true, reserved: false }
     }
   }
+  const reserved = !agentId && !g.mainEdits.has(path)
   if (!agentId) g.mainEdits.add(path)
-  else g.agentEdits.add(path)
+  g.editStarts++
+  g.editsInFlight++
+  return { deny: null, source: true, reserved }
+}
+
+/**
+ * A source edit's call resolved: it counts for the check before the turn ends only once it went through (a refused or
+ * failed edit changed nothing), so a check binds to completed edits, not started ones. A main-session file whose
+ * first edit failed leaves the cap again.
+ */
+function editDone(g: GuardTurn, agentId: string | undefined, path: string, ok: boolean, reserved: boolean): void {
+  g.editsInFlight = Math.max(0, g.editsInFlight - 1)
+  if (!ok) {
+    if (reserved) g.mainEdits.delete(path)
+    return
+  }
+  if (agentId) g.agentEdits.add(path)
   g.sourceEdits.add(path)
   g.editCount++
-  return null
+}
+
+/** an edit tool call's result went through: not refused, no error */
+const editWentThrough = (r: { deny?: string; isError?: true } | undefined): boolean => r !== undefined && !r.deny && !r.isError
+
+/**
+ * The edit hooks' shared body: the cap in front, the count once the call resolved (finally: a throw is no edit). A
+ * failure in the cap lets the edit through uncounted.
+ */
+async function guardedEdit<E, R extends { deny?: string; isError?: true }>($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string, e: E, next: (e: E) => Promise<R>, note: () => Promise<void>): Promise<R | { deny: string }> {
+  const gate = await guardEdit($, g, mainModel, agentId, path).catch(() => ({ deny: null, source: false, reserved: false }))
+  if (gate.deny) return { deny: gate.deny }
+  await note()
+  if (!gate.source) return next(e)
+  let r: R | undefined
+  try {
+    r = await next(e)
+    return r
+  } finally {
+    editDone(g, agentId, path, editWentThrough(r), gate.reserved)
+  }
 }
 
 // The .catch on the gating hooks: should one throw past its own try/catch or
@@ -564,7 +615,7 @@ export const register: Register = on => {
   /** the efforts an Agent call of coder, planner or deep gets when it names none (spick.json efforts) */
   let efforts: Efforts = DEFAULT_EFFORTS
   /** the guard's per-turn state, cleared at turn.start */
-  const guardTurn: GuardTurn = { mainEdits: new Set(), agentEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
+  const guardTurn: GuardTurn = { mainEdits: new Set(), agentEdits: new Set(), sourceEdits: new Set(), editCount: 0, editStarts: 0, editsInFlight: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
   let mainModel = ''
   let mainEffort: string | undefined
   /** the main loop's last prompt size in tokens, from its latest step's usage; undefined until one reported it */
@@ -716,6 +767,8 @@ export const register: Register = on => {
       guardTurn.sourceEdits.clear()
       gateEvents = []
       guardTurn.editCount = 0
+      guardTurn.editStarts = 0
+      guardTurn.editsInFlight = 0
       guardTurn.checks = []
       guardTurn.failures.clear()
       guardTurn.escalation = null
@@ -840,7 +893,7 @@ export const register: Register = on => {
     try {
       const check = checkOf(e.command, declared)
       if (check) {
-        run = { ...check, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, ...(e.agentId ? { agentId: e.agentId } : {}) }
+        run = { ...check, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, inFlightAtStart: guardTurn.editsInFlight, startsAtStart: guardTurn.editStarts, ...(e.agentId ? { agentId: e.agentId } : {}) }
         guardTurn.checks.push(run)
       }
     } catch {}
@@ -886,9 +939,12 @@ export const register: Register = on => {
       if (run) {
         try {
           run.finishedAt = await $.clock.now()
-          // the exit status as the tool result carries it: a non-zero exit, a refusal or an interrupt is an error
-          run.exitOk = r !== undefined && !r.deny && !r.isError
-          run.editsDuring = guardTurn.editCount - run.editsAtStart
+          // the exit status as the tool result carries it: a non-zero exit, a refusal or an interrupt is an error; a
+          // command moved to the background has no status yet
+          const out = r !== undefined && !r.deny && !r.isError ? (r.result as { backgroundTaskId?: unknown; interrupted?: unknown } | undefined) : undefined
+          run.exitOk = r !== undefined && !r.deny && !r.isError && !out?.backgroundTaskId && out?.interrupted !== true
+          // the edits in flight when it started, and those started while it ran, whether they completed or not
+          run.editsDuring = run.inFlightAtStart + (guardTurn.editStarts - run.startsAtStart)
         } catch {}
       }
       if (isCli) {
@@ -902,23 +958,13 @@ export const register: Register = on => {
   }).catch(passThrough)
 
   // The guard's edit cap sits in front of each edit tool; a failure in it lets the edit through.
-  on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
-    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
-    if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
-    return next(e)
-  }).catch(passThrough)
-  on('tool.call', { tool: 'Write' }, async ($, e, next) => {
-    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
-    if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
-    return next(e)
-  }).catch(passThrough)
-  on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {
-    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.notebook_path).catch(() => null)
-    if (deny) return { deny }
-    return next(e)
-  }).catch(passThrough)
+  // A source edit counts once its call resolved without an error (guardedEdit).
+  on('tool.call', { tool: 'Edit' }, async ($, e, next) =>
+    guardedEdit($, guardTurn, mainModel, e.agentId, e.file_path, e, next, () => noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd))).catch(passThrough)
+  on('tool.call', { tool: 'Write' }, async ($, e, next) =>
+    guardedEdit($, guardTurn, mainModel, e.agentId, e.file_path, e, next, () => noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd))).catch(passThrough)
+  on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) =>
+    guardedEdit($, guardTurn, mainModel, e.agentId, e.notebook_path, e, next, async () => {})).catch(passThrough)
 
   // Stop time, where the gate and the guard's check intervene (with the guard's edit cap, the only places this module
   // does). They send a turn back at most once between them, with every reason in one block, never while routing is

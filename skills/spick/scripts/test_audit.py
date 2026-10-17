@@ -124,5 +124,15 @@ class TestText(Base):
         self.assertEqual(cm.exception.code, 2)
 
 
+class TestCovered(unittest.TestCase):
+    def test_a_check_covers_only_when_it_passed_and_ran_after_the_last_completed_edit(self):
+        c = lambda **k: {"checks": [dict({"command": "pytest", "editsDuring": 0}, **k)]}  # noqa: E731
+        self.assertTrue(audit._covered(c(exitOk=True, afterLastEdit=True)))
+        self.assertFalse(audit._covered(c(exitOk=False, afterLastEdit=True)))
+        self.assertFalse(audit._covered(c(exitOk=True, afterLastEdit=False)))
+        # records written before the rename carry coversTurn
+        self.assertTrue(audit._covered(c(exitOk=True, coversTurn=True)))
+
+
 if __name__ == "__main__":
     unittest.main()

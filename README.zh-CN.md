@@ -115,7 +115,7 @@ flowchart TD
 **守卫**在分流生效时：
 
 - 编辑上限：主会话每轮只能亲自改 1 个源码文件。第 2 个文件会被拒绝，拒绝信息点名已改的那个文件并要求派 `Agent(coder)`。同一文件反复改、子代理的编辑、笔记（`.md`、`.txt`）、表格（`.csv`、`.tsv`）、日志、锁文件以及开头为 `.claude/` 的路径都不计数；json、yaml、toml 计数，`.claude/worktrees/` 下的 worktree 也计数。这是工具层面的软上限：只看 Edit、Write、NotebookEdit，看不到 `sed -i`、重定向这类 Bash 写入。
-- 收工测试门：本轮任何循环（含子代理）改过源码，而最后一次修改之后没有通过的检查，收工时退回。检查只在三种情况同时满足时才算数：命令本身就是检查工具（可以带 `cd x &&`、`env`、`npx`、`sudo`、`time` 前缀；`echo pytest`、`grep pytest README` 都不算）；退出状态正常（`pytest || true`、`pytest --version` 不算）；检查开始之后没有再改源码。项目有自己的检查命令时，可在 `<config>/spick.json` 的 `guard.check_commands` 里用正则声明（见 `skills/spick/references/providers.md`）。主会话被要求跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。
+- 收工测试门：本轮任何循环（含子代理）改过源码，而最后一次修改之后没有通过的检查，收工时退回。检查只在三种情况同时满足时才算数：整行是一条简单命令，命令词就是检查工具（前面可以有一个 `cd x &&`，以及 `env`、`npx`、`sudo`、`time`、`uv run` 或变量赋值；`2>&1`、`> out.txt` 这类重定向可以有；`echo pytest`、`grep pytest README` 都不算）；退出状态正常；检查在最后一次已完成的源码修改之后才开始，运行期间也没有修改在进行或完成。行里其他位置出现 `|`、`;`、`&&`、`||` 就不算：引擎只报告整行的退出状态，所以 `true || pytest`、`pytest; true`、`pytest | cat`、`npm test | tail -5` 什么也证明不了（`pytest || true`、`pytest --version` 同样不算）。每轮记录保留检查命令本身，因为模组看不到检查实际覆盖了什么：改了检查范围以外的文件，照样显示为已检查，这是已知限制。项目有自己的检查命令时，可在 `<config>/spick.json` 的 `guard.check_commands` 里用正则声明（见 `skills/spick/references/providers.md`）。主会话被要求跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。
 - 升级：同一个检查在一轮里失败两次时，第二次失败的结果后面会附一行，要求主会话改派 `coder`（effort high），原因不明时派 `deep`，不要再自己修第三次。
 - `/spick guard off` 可关闭守卫，选择会被记住。
 

@@ -12,7 +12,7 @@ test('isCheckCommand knows test runners, build checks, linters and type checkers
     'npm test', 'npm run test', 'pnpm run lint', 'yarn typecheck', 'bun test', 'npm run check',
     'claude plugin test mod/spick-dashboard', 'claude plugin validate .', 'npx tsc --noEmit', 'make test', 'make check',
     'swift test', 'xcodebuild -scheme App -destination x test', 'ruff check .', 'eslint src', 'flake8', 'mypy src', 'shellcheck a.sh',
-    'bash -n setup.sh', 'git status\nnpm test 2>&1 | tail -5',
+    'bash -n setup.sh', 'pytest -q 2>&1', 'npm test > out.txt 2>&1', 'cd x && cargo test &> log.txt',
   ]) expect(isCheckCommand(c)).toBe(true)
 })
 
@@ -52,9 +52,15 @@ test('the command word is found after env, npx, sudo, time, assignments, uv run 
 
 test('a check whose exit status is thrown away, or that only asks the runner about itself, does not count', () => {
   for (const c of ['pytest || true', 'pytest 2>&1 || true', 'npm test &>/dev/null || :', 'npm test || echo failed', 'pytest --version', 'cargo --version', 'ruff --help', 'python3 -m pytest -V']) expect(isCheckCommand(c)).toBe(false)
-  // a later command after && still runs only on success; a check reached after || is a check
-  expect(isCheckCommand('pytest && echo ok')).toBe(true)
-  expect(isCheckCommand('false || pytest')).toBe(true)
+})
+
+test('only one simple command counts: a pipe, a list or a second line hides the check\'s own status (the engine reports the line\'s)', () => {
+  for (const c of [
+    'true || pytest', 'false || pytest', 'pytest; true', 'pytest | cat', 'npm test | tail -5', 'npm test 2>&1 | tail -5', 'pytest && echo ok',
+    'git status\nnpm test', 'pytest &', '(pytest)', 'cd a && cd b && pytest', 'cd x; pytest', 'echo `pytest`',
+  ]) expect([c, isCheckCommand(c)]).toEqual([c, false])
+  // the command keeps its redirections, the key leaves them out
+  expect(checkOf('cd pkg && pytest tests/a.py > out.txt 2>&1')).toEqual({ command: 'pytest tests/a.py > out.txt 2>&1', key: 'pkg pytest tests/a.py' })
 })
 
 test('declared check commands: each regex string compiled on its own, a bad one reported and ignored', () => {

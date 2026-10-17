@@ -1080,7 +1080,7 @@ async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claud
   const world = session(on, model)
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' && spickJson !== null ? { value: spickJson } : { deny: 'missing' }))
   const ran: string[] = []
-  /** Bash commands that exit non-zero (an error result), and ones held until the test releases them */
+  /** Bash commands (or tool_use_ids) that end in an error result, and commands (or tool_use_ids) held until the test releases them */
   const failing = new Set<string>()
   const held = new Map<string, Promise<void>>()
   on('classic.Stop', async () => ({}))
@@ -1089,6 +1089,8 @@ async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claud
   on('tool.call', async ($, e) => {
     const p = (e as { file_path?: string; notebook_path?: string }).file_path ?? (e as { notebook_path?: string }).notebook_path
     if (p) ran.push(p)
+    await held.get(e.tool_use_id)
+    if (failing.has(e.tool_use_id)) return { isError: true as const, result: 'String to replace not found', text: 'String to replace not found' }
     const command = (e as { command?: string }).command
     if (command !== undefined) {
       await held.get(command)
@@ -1268,6 +1270,44 @@ test('a check counts only when it passed and came after the last source edit, wi
   await $.turn.complete({ turnId: 't4', ...DONE })
 })
 
+test('a check binds to completed edits: one started while an edit was in flight, or with one finishing while it ran, does not cover the turn', async ($, on) => {
+  const { turn, stop, failing, held } = await guardWorld($, on)
+  const hold = (key: string) => { let release = () => {}; held.set(key, new Promise<void>(r => { release = r })); return () => release() }
+  // the edit is still in flight when the check starts and ends: the check proves nothing about it
+  await turn('t1')
+  const freeE1 = hold('e1')
+  const e1 = $.tool.call(edit('e1', '/repo/a.py'))
+  await tick()
+  await $.tool.call(bash('b1', 'pytest -q'))
+  freeE1()
+  await e1
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // the edit finishes while the check runs
+  await turn('t2')
+  const freeE2 = hold('e2')
+  const e2 = $.tool.call(edit('e2', '/repo/a.py'))
+  await tick()
+  const freeB2 = hold('b2')
+  const b2 = $.tool.call(bash('b2', 'pytest -q'))
+  await tick()
+  freeE2()
+  await e2
+  freeB2()
+  await b2
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  // an edit that failed changed nothing: no check is owed, and its file leaves the cap so another file goes through
+  await turn('t3')
+  failing.add('e3')
+  await $.tool.call(edit('e3', '/repo/a.py'))
+  expect(await stop()).toBeUndefined()
+  expect((await $.tool.call(edit('e4', '/repo/b.py'))).deny).toBeUndefined()
+  await $.tool.call(bash('b4', 'pytest -q'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't3', ...DONE })
+})
+
 test('the main loop\'s second failure of the same check carries one escalation line; a different check, a pass or a subagent\'s does not', async ($, on) => {
   const { turn, failing } = await guardWorld($, on)
   const ESC = 'spick: this check failed 2 times this turn'
@@ -1295,7 +1335,7 @@ test('the main loop\'s second failure of the same check carries one escalation l
 
 test('a runner named in an argument, a masked exit status or a version query is no check at stop', async ($, on) => {
   const { turn, stop } = await guardWorld($, on)
-  for (const [i, c] of ['echo pytest', 'grep pytest README', 'pytest || true', 'pytest --version'].entries()) {
+  for (const [i, c] of ['echo pytest', 'grep pytest README', 'pytest || true', 'pytest --version', 'true || pytest', 'pytest; true', 'pytest | cat', 'npm test | tail -5'].entries()) {
     await turn(`t${i}`)
     await $.tool.call(edit(`e${i}`, '/repo/a.py'))
     await $.tool.call(bash(`b${i}`, c))
@@ -1449,7 +1489,7 @@ test('a main turn writes one line to <state>/turns/<session>.jsonl: delegates wi
     { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
   ])
   expect((line as { agentUsage: { input: number } }).agentUsage.input).toBe(1_000_000)
-  expect((line as { checks: unknown[] }).checks).toEqual([{ command: 'python3 -m pytest -q', startedAt: new Date(1000).toISOString(), finishedAt: new Date(1000).toISOString(), exitOk: true, editsDuring: 0, coversTurn: true }])
+  expect((line as { checks: unknown[] }).checks).toEqual([{ command: 'python3 -m pytest -q', startedAt: new Date(1000).toISOString(), finishedAt: new Date(1000).toISOString(), exitOk: true, editsDuring: 0, afterLastEdit: true }])
   // the pane's totals still count every turn
   expect((await probe($)).totals?.coder?.inputTokens).toBe(1_000_000)
 })
@@ -1482,7 +1522,7 @@ test('a failed check, then the second failure, are in the record with the escala
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'pytest -q' })
   await $.tool.call({ ...agentCall('c1', 'coder'), effort: 'high' })
   await $.turn.complete({ turnId: 't1', ...DONE })
-  expect(lines()[0]).toMatchObject({ check: { ran: true, passed: false, afterLastEdit: false, command: 'pytest -q' }, escalation: { command: 'pytest -q', followed: true } })
+  expect(lines()[0]).toMatchObject({ check: { ran: true, passed: false, afterLastEdit: true, command: 'pytest -q' }, escalation: { command: 'pytest -q', followed: true } })
 })
 
 test('a turn with no usage still writes its line, usage null; a failing write keeps the line for the next; a resumed file is appended to', async ($, on) => {

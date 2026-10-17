@@ -45,10 +45,10 @@ def _done(t):
 
 
 def _covered(t):
-    """an edit turn is covered when a check passed after its last edit"""
+    """an edit turn is covered when a check passed after its last completed edit (records before 2026-10-17 say coversTurn)"""
     checks = [c for c in t.get("checks") or [] if isinstance(c, dict)]
     if checks:
-        return any(c.get("coversTurn") for c in checks)
+        return any(c.get("coversTurn") or (c.get("exitOk") is True and c.get("afterLastEdit") is True) for c in checks)
     c = t.get("check")
     return isinstance(c, dict) and bool(c.get("passed")) and bool(c.get("afterLastEdit"))
 

@@ -38,10 +38,14 @@ export type CheckEntry = {
   startedAt: string
   finishedAt: string | null
   exitOk: boolean | null
-  /** source edits that landed while it ran; null while it runs */
+  /** source edits in flight or started while it ran; null while it runs */
   editsDuring: number | null
-  /** it passed with no source edit after it started: it covers the turn */
-  coversTurn: boolean
+  /**
+   * it ran after the last completed source edit: none in flight or landing while it ran, none after. With exitOk it
+   * covers the turn. The command is kept: the mod cannot see what the check exercised, so an edit outside its scope
+   * still reads as checked.
+   */
+  afterLastEdit: boolean
   agentId?: string
 }
 
@@ -129,7 +133,7 @@ export function turnLine(t: {
     gateEvents: [...t.gateEvents],
     delegates: [...t.delegates],
     edits: { main: t.mainFiles.length, agents: t.agentFiles.length, files: [...t.files] },
-    check: lastCheck ? { ran: true, passed: lastCheck.exitOk === true, afterLastEdit: lastCheck.coversTurn, command: lastCheck.command } : null,
+    check: lastCheck ? { ran: true, passed: lastCheck.exitOk === true, afterLastEdit: lastCheck.afterLastEdit, command: lastCheck.command } : null,
     checks: [...t.checks],
     escalation: esc ? { command: esc.command, followed: t.delegates.some(d => (d.lane === 'coder' || d.lane === 'deep') && Date.parse(d.startedAt) >= esc.at) } : null,
     usage: t.usage,

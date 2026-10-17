@@ -92,7 +92,10 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
   `.claude/worktrees/` counts); a tool-level soft bound, Bash writes are not caught.
 - The gate asks for the role the hint names (judgement: `deep`; review: the review lane or `deep`); one send-back per
   turn carries every reason.
-- A check counts only when it is the command itself, passed, and ran after the last edit.
+- A check counts only when the line is one simple command whose command word is the runner (one leading `cd x &&`
+  and redirections allowed; a pipe, `;`, `&&` or `||` disqualifies it, since only the line's status is reported), it
+  passed, and it started after the last completed source edit with no edit in flight or finishing while it ran. The
+  record's `afterLastEdit` says the latter; the command is kept, as the mod cannot see what a check exercises.
 - The same check failing twice adds an escalation line to the turn.
 - The band shows the main loop's prompt size and warns a Haiku session past 80k tokens.
 - An Agent call of `coder`, `planner` or `deep` without an effort gets the default from `spick.json`.
