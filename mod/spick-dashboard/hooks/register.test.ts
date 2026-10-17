@@ -1066,6 +1066,35 @@ test('the gate asks for the role the hint names: deep that finished or still run
   expect(await stop()).toContain('spick gate')
 })
 
+test('a review lane from the registry, named by a quoted --lane, satisfies a review hint', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[],"registry":true,"lanes":[{"id":"rev","kind":"api-key","tags":["review"],"data":"code"},{"id":"glm","kind":"api-key","tags":["cheap"],"data":"text"}]}'
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' ? { value: cache } : { deny: 'missing' }))
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async () => ANSWERED)
+  await $.session.start(START)
+  const cases: [string, boolean][] = [
+    ['python3 ~/.claude/skills/spick/scripts/invoke.py --lane "rev" --prompt-file /tmp/p.txt', false],
+    ["python3 invoke.py --lane='rev' --prompt-file /tmp/p.txt", false],
+    ['python3 invoke.py --lane rev --prompt-file /tmp/p.txt', false],
+    // a lane without the review tag is no review
+    ['python3 invoke.py --lane "glm" --prompt-file /tmp/p.txt', true],
+  ]
+  for (const [i, [command, gated]] of cases.entries()) {
+    await $.prompt.submit({ ...PROMPT, text: 'review this diff please' })
+    await $.turn.start({ text: 'review this diff please', turnId: `t${i}` })
+    await $.tool.call({ tool: 'Bash', tool_use_id: `b${i}`, command })
+    const block = (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })).block
+    expect([command, block === undefined ? 'quiet' : 'gated']).toEqual([command, gated ? 'gated' : 'quiet'])
+    await $.turn.complete({ turnId: `t${i}`, ...DONE })
+  }
+})
+
 test('each gate firing and what became of it is in the turn record\'s gateEvents; design words are never gated', async ($, on) => {
   mock.clock(on, { now: Date.parse('2026-10-16T10:00:00Z') })
   mock.store(on)

@@ -72,7 +72,8 @@ export function parseCli(command: string): CliLane | null {
     // a flag's value as typed, its quotes taken off: -m "grok-4.7" and --model='x' name the model, not a placeholder
     const value = (t: string) => restored(t).replace(/^(["'])(.*)\1$/s, '$2')
     const text = hit.rest.join(' ')
-    const out: CliLane = { lane: hit.lane, isReview: false }
+    // a quoted lane id (--lane "glm", --lane='glm') is the id itself, as -m "model" is the model
+    const out: CliLane = { lane: value(hit.lane), isReview: false }
     const model = text.match(/(?:^|\s)(?:--model|-m)(?:=|\s+)(\S+)/)
     if (model?.[1]) out.model = value(model[1])
     const flag = text.match(/(?:^|\s)(?:--effort|--reasoning-effort)(?:=|\s+)(\S+)/)
