@@ -46,13 +46,13 @@ From `skills/spick/evals/ab/`:
 
 ```
 python3 run.py --setup                      # creates .venv with pytest (gitignored)
-python3 run.py --arms haiku-spick,haiku-bare,sonnet-bare,opus-bare --runs 3 --parallel 2 --out results/
-python3 grade.py results/                   # hidden tests, rules, and one blind judge call (Codex) per judged task
-python3 grade.py results/ --judges codex,claude   # add a second judge, Opus through `claude -p` with no tools; the first named decides pass
-python3 report.py results/                  # writes results/REPORT-<date>.md
+python3 run.py --arms haiku-spick,haiku-bare,sonnet-bare,opus-bare --runs 3 --parallel 2 --out ~/spick-ab/full
+python3 grade.py ~/spick-ab/full                   # hidden tests, rules, and one blind judge call (Codex) per judged task
+python3 grade.py ~/spick-ab/full --judges codex,claude   # add a second judge, Opus through `claude -p` with no tools; the first named decides pass
+python3 report.py ~/spick-ab/full                  # writes <out>/REPORT-<date>.md
 ```
 
-Add `haiku-hook,sonnet-free,opus-free` to `--arms` for the full seven-arm matrix. Useful flags: `--tasks T1,T2`, `--timeout 900` (seconds per run), `--force` (redo finished runs; without it a rerun skips cells that have a `result.json`), `--dry-run` (print commands only), `--claude-bin` (a stub for pipeline tests), `--allow-unverified` and `--probe-timeout 180` (see the next section). `grade.py` takes `--judges` (default `codex`), `--no-judge` and `--rejudge`. Unit tests, from the repo root: `python3 -m unittest discover -s skills/spick/evals/ab -p 'test_*.py'`.
+The out dir must sit outside any git work tree (the default is `~/spick-ab/results`; `run.py` refuses one inside a repository unless `--allow-in-repo` is given): a session started inside a repository reads its git status and recent commit titles, and on 2026-10-17 the T9 answers quoted the commit that had fixed the very defect they were asked to find. Add `haiku-hook,sonnet-free,opus-free` to `--arms` for the full seven-arm matrix. Useful flags: `--tasks T1,T2`, `--timeout 900` (seconds per run), `--force` (redo finished runs; without it a rerun skips cells that have a `result.json`), `--dry-run` (print commands only), `--claude-bin` (a stub for pipeline tests), `--allow-unverified` and `--probe-timeout 180` (see the next section). `grade.py` takes `--judges` (default `codex`), `--no-judge` and `--rejudge`. Unit tests, from the repo root: `python3 -m unittest discover -s skills/spick/evals/ab -p 'test_*.py'`.
 
 The full default matrix is 8 tasks x 4 arms x 3 runs = 96 runs, and the Opus arm and the judge are the expensive parts. Run `--tasks T1,T2` first to see the shape.
 
@@ -90,3 +90,4 @@ The judge sees every answer of a task at once under shuffled letters, with the `
 - Costs are Claude Code's `total_cost_usd`. Outside-CLI delegates (Gemini, Grok, Codex) are not in it; the report marks such cells `>=`. The judge is priced separately and its cost stays unknown.
 - One judge by default (a second one, Opus through `claude -p`, with `--judges codex,claude`), small n, no cross-session cache effects, no leak testing. The report ends with "What this matrix cannot show".
 - Each run has a 15-minute timeout; the whole process group is killed on expiry.
+- Git context: a work tree inside a repository gives every session that repository's status and recent commits (Claude Code adds them to the context). The first full run on 2026-10-17 had its out dir inside this checkout; T9, whose material is this checkout's own mod, was contaminated from the commit that fixed the turn.start defect onward and was rerun outside the repository. The other tasks only paid the same few hundred tokens in every arm.

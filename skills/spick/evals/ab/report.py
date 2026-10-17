@@ -158,6 +158,7 @@ CAVEATS = """\
 - The mod arm (`haiku-spick`) leaves hooks on: `disableAllHooks` would disable the mod itself (measured on 2026-10-17). The `enabledPlugins` key keeps the globally installed copy out, and the mod's per-session marker silences the user's global spick hook. The start-up probe above is the check; the Explore and turn-record columns below are further runtime evidence.
 - `haiku-hook` is a best-effort ablation arm: with a symlinked install the user's global hook is this checkout's hook and is not added twice; on a machine with a different global hook both would print, and a stale per-session marker could silence it.
 - Global agents in `~/.claude/agents` exist in every arm; `*-free` arms can use them.
+- The out dir must be outside any git work tree: a session inside one carries that repository's git status and recent commit titles (for a task about the repository itself, that can name the answer). `run.py` refuses such an out dir; a report over one made with `--allow-in-repo` is contaminated for such tasks.
 - Sessions were run with the user's real settings otherwise (permissions, MCP servers, plugins other than the mod), which adds the same fixed context to every arm.
 """
 

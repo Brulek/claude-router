@@ -2,9 +2,11 @@
 """Run the A/B matrix: each (arm, task, run) gets a fresh copy of the task template and one `claude -p` call.
 
     python3 run.py --setup
-    python3 run.py --arms haiku-spick,haiku-bare,sonnet-bare,opus-bare --runs 3 --parallel 2 --out results/
+    python3 run.py --arms haiku-spick,haiku-bare,sonnet-bare,opus-bare --runs 3 --parallel 2 --out ~/spick-ab/full
 
-Results land in <out>/<arm>/<task>/run-<n>/{work/, result.json}; grade.py and report.py read them from there.
+Results land in <out>/<arm>/<task>/run-<n>/{work/, result.json}; grade.py and report.py read them from there. The out
+dir must sit outside any git work tree (default ~/spick-ab/results): a session started inside a repository reads its
+git status and recent commits.
 """
 import argparse
 import json
@@ -130,6 +132,29 @@ def run_claude(cmd, cwd, env, timeout):
 
 PROBE_PROMPT = "Reply with exactly OK."
 PROBE_SETTLE = 3.0  # seconds the mod gets to write its turn record after claude exits
+
+
+DEFAULT_OUT = Path.home() / "spick-ab" / "results"
+
+
+def inside_git_work_tree(path):
+    """Whether `path` (or its nearest existing ancestor) lies in a git work tree. A session started there carries that
+    repository's status and recent commit titles in its context; for a task whose material is this repository, that
+    leaks the answer (measured on 2026-10-17: T9 answers quoted the commit that fixed the defect they had to find)."""
+    p = Path(path).resolve()
+    while not p.exists() and p.parent != p:
+        p = p.parent
+    r = subprocess.run(["git", "-C", str(p), "rev-parse", "--is-inside-work-tree"], capture_output=True, text=True)
+    return r.returncode == 0 and r.stdout.strip() == "true"
+
+
+def check_out_dir(out, allow_in_repo=False):
+    """None when `out` may be used, else the refusal text."""
+    if allow_in_repo or not inside_git_work_tree(out):
+        return None
+    return (f"{out} is inside a git work tree: every run there would read that repository's git status and recent "
+            "commits into its context (and its CLAUDE.md, if any). Use an out dir outside any repository, for example "
+            f"the default {DEFAULT_OUT}, or pass --allow-in-repo to accept the contamination.")
 
 
 def checkout_head():
@@ -263,7 +288,10 @@ def main():
     ap.add_argument("--tasks", default=",".join(common.load_tasks()))
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--parallel", type=int, default=2)
-    ap.add_argument("--out", default="results")
+    ap.add_argument("--out", default=str(DEFAULT_OUT),
+                    help="where runs land; must be outside any git work tree (default: ~/spick-ab/results)")
+    ap.add_argument("--allow-in-repo", action="store_true", help="use an out dir inside a git work tree anyway (see README: the "
+                    "repository's git status and recent commits enter every session's context)")
     ap.add_argument("--timeout", type=int, default=900, help="seconds per run (default 15 minutes)")
     ap.add_argument("--force", action="store_true", help="redo runs that already have a result.json")
     ap.add_argument("--claude-bin", default="claude", help="the claude executable (a stub for pipeline tests)")
@@ -289,6 +317,9 @@ def main():
         sys.exit("no venv yet: run `python3 run.py --setup` first")
 
     out = Path(args.out).resolve()
+    refusal = check_out_dir(out, args.allow_in_repo)
+    if refusal:
+        sys.exit(refusal)
     args.out = str(out)
     arms_dir = out / "_arms"
     arms_dir.mkdir(parents=True, exist_ok=True)

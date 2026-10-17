@@ -148,3 +148,7 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
   with `delegates: []` and `hint: []` (seen in the first real harness runs) and the gate could send back a turn
   whose deep delegate was still running. Regression test added; three checklist tests that still quoted
   pre-v2.1 wording were brought up to date.
+- The harness refuses an out dir inside a git work tree (default now `~/spick-ab/results`): a session started inside
+  a repository carries its git status and recent commit titles, and the first full run's T9 answers quoted the
+  commit that had fixed the defect they were asked to find. T9's key gains that defect as K5. The Claude judge gets
+  absolute paths, a failed verdict is never reused from the cache, and every judged task must carry a pass threshold.

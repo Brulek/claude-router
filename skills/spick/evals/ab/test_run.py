@@ -295,6 +295,18 @@ class Probe(unittest.TestCase):
         self.assertIsNone(grade.run_metrics(rec, common.load_tasks()["T2"])["probe"])
 
 
+class OutDir(unittest.TestCase):
+    def test_a_dir_inside_a_work_tree_is_refused_and_one_outside_is_not(self):
+        here = Path(__file__).resolve().parent  # this checkout
+        self.assertTrue(run.inside_git_work_tree(here / "results" / "new"))  # a not-yet-existing child counts too
+        self.assertIn("inside a git work tree", run.check_out_dir(here / "results"))
+        self.assertIsNone(run.check_out_dir(here / "results", allow_in_repo=True))
+        with tempfile.TemporaryDirectory() as d:
+            if not run.inside_git_work_tree(d):  # a temp dir under a repository would make this vacuous
+                self.assertIsNone(run.check_out_dir(Path(d) / "out"))
+        self.assertFalse(str(run.DEFAULT_OUT).startswith(str(here)))
+
+
 class ParseResult(unittest.TestCase):
     clean = '{"session_id": "s1", "result": "OK", "total_cost_usd": 0.01}'
 
