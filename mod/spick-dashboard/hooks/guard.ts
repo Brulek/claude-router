@@ -69,20 +69,46 @@ function commandText(seg: string): { text: string; raw: string; isTestScript: bo
  * exit status is then the last command's, a known blind spot.
  */
 export function checkCommand(command: string, declared: readonly RegExp[] = []): string | null {
+  return checkOf(command, declared)?.command ?? null
+}
+
+/**
+ * The check a Bash command runs and its identity: `key` is the directory a `cd` before it moved to, the runner's
+ * command word and its targets (the arguments that are not flags), so `pytest -q tests/a.py` and
+ * `pytest tests/a.py -x` are the same check and `pytest tests/b.py` another.
+ */
+export function checkOf(command: string, declared: readonly RegExp[] = []): { command: string; key: string } | null {
   const quoted: string[] = []
   const masked = (command ?? '').replace(QUOTED, m => `"${quoted.push(m) - 1}"`).replace(/\\\n/g, ' ')
     // redirections are not command separators: 2>&1, >&2, &> and &>> must not split on their &
     .replace(/\d*>&\d*-?|&>>?/g, ' ')
   const parts = masked.split(/(\|\||&&|;|\||\n|&|\(|\))/)
+  let dir = ''
   for (let k = 0; k < parts.length; k += 2) {
+    const cd = (parts[k] ?? '').trim().match(/^cd\s+(\S+)/)
+    if (cd) { dir = cd[1]!; continue }
     const { text, raw, isTestScript } = commandText(parts[k] ?? '')
     if (!text || NOT_A_RUN.test(` ${text}`)) continue
     // the project's own patterns see the command word as typed, path included (bin/verify)
     if (!isTestScript && !RUNNERS.some(re => re.test(text)) && !declared.some(re => re.test(raw))) continue
     if (parts[k + 1] === '||') continue
-    return raw.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
+    const restore = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
+    const [word, ...args] = text.split(' ')
+    return { command: restore(raw), key: restore([dir, word, ...args.filter(a => !a.startsWith('-'))].join(' ')) }
   }
   return null
+}
+
+/** the failures of one check in a turn after which the main session is told to escalate */
+export const ESCALATE_AFTER = 2
+
+/**
+ * The line appended to the second failing result of the same check: escalate on the fact, not on confidence (a
+ * small model that keeps fixing either loops or stops on the calls it gets wrong). What the model reads beside the
+ * tool's own result.
+ */
+export function escalationLine(command: string): string {
+  return `spick: this check failed ${ESCALATE_AFTER} times this turn (${command}). Escalate on that fact instead of a third fix of your own: dispatch Agent(coder) at effort high with the failing output, what was tried and what is left; or Agent(deep) if the cause is unknown.`
 }
 
 /** whether a Bash command runs a check (tests, a build, a linter, a type checker), the project's declared ones included */

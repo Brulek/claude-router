@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { EDIT_CAP, UNCHECKED_RE, checkCommand, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
+import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkCommand, checkOf, declaredChecks, escalationLine, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 
 test('the edit cap is one source file per turn', () => {
   expect(EDIT_CAP).toBe(1)
@@ -89,4 +89,20 @@ test('uncheckedReason names the three ways out, the Unchecked: line among them, 
   expect(r).toContain('`/goal <check command>; stop after 10 attempts`')
   expect(r).toContain('`Unchecked:`')
   expect(uncheckedReason(['1.py', '2.py', '3.py', '4.py', '5.py', '6.py', '7.py'])).toContain('(1.py, 2.py, 3.py, 4.py, 5.py and 2 more)')
+})
+
+test('checkOf names a check by the cd before it, its runner and its targets, flags left out', () => {
+  expect(checkOf('pytest -q tests/a.py')?.key).toBe(checkOf('pytest tests/a.py -x')?.key)
+  expect(checkOf('pytest tests/a.py')?.key).not.toBe(checkOf('pytest tests/b.py')?.key)
+  expect(checkOf('cd pkg && pytest')?.key).not.toBe(checkOf('pytest')?.key)
+  expect(checkOf('cd pkg && npm test')).toEqual({ command: 'npm test', key: 'pkg npm test' })
+  expect(checkOf('echo pytest')).toBeNull()
+})
+
+test('the escalation line names the check and the two ways up', () => {
+  expect(ESCALATE_AFTER).toBe(2)
+  const t = escalationLine('pytest -q')
+  expect(t).toContain('failed 2 times this turn (pytest -q)')
+  expect(t).toContain('Agent(coder) at effort high')
+  expect(t).toContain('Agent(deep) if the cause is unknown')
 })

@@ -1247,6 +1247,31 @@ test('a check counts only when it passed and came after the last source edit, wi
   await $.turn.complete({ turnId: 't4', ...DONE })
 })
 
+test('the main loop\'s second failure of the same check carries one escalation line; a different check, a pass or a subagent\'s does not', async ($, on) => {
+  const { turn, failing } = await guardWorld($, on)
+  const ESC = 'spick: this check failed 2 times this turn'
+  const ctx = async (id: string, command: string, agentId?: string) => ((await $.tool.call(bash(id, command, agentId))) as { context?: readonly string[] }).context ?? []
+  failing.add('pytest -q tests/a.py')
+  failing.add('pytest tests/a.py -x')
+  failing.add('pytest tests/b.py')
+  await turn('t1')
+  expect(await ctx('b1', 'pytest -q tests/a.py')).toEqual([])
+  // another target fails once: no line
+  expect(await ctx('b2', 'pytest tests/b.py')).toEqual([])
+  // a subagent's failures of the same check do not count for the main session
+  expect(await ctx('b3', 'pytest -q tests/a.py', 'a1')).toEqual([])
+  // the same check (flags aside) fails a second time: the line rides on that result
+  const second = await ctx('b4', 'pytest tests/a.py -x')
+  expect(second.length).toBe(1)
+  expect(second[0]).toContain(`${ESC} (pytest tests/a.py -x)`)
+  // once per turn
+  expect(await ctx('b5', 'pytest -q tests/a.py')).toEqual([])
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // a new turn counts from zero
+  await turn('t2')
+  expect(await ctx('b6', 'pytest -q tests/a.py')).toEqual([])
+})
+
 test('a runner named in an argument, a masked exit status or a version query is no check at stop', async ($, on) => {
   const { turn, stop } = await guardWorld($, on)
   for (const [i, c] of ['echo pytest', 'grep pytest README', 'pytest || true', 'pytest --version'].entries()) {

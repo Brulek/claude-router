@@ -4,7 +4,7 @@ import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, Quota
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
-import { EDIT_CAP, UNCHECKED_RE, checkCommand, declaredChecks, editCapReason, uncheckedReason } from './guard'
+import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkOf, declaredChecks, editCapReason, escalationLine, uncheckedReason } from './guard'
 import { appendGateLog, gateLogPath } from './gatelog'
 import { KEPT_RE, gateFiring, gateOutcome, roleDone, sendBackText } from './gate'
 import type { DelegateStatus } from './gate'
@@ -449,13 +449,17 @@ async function noteEdit($: EngineInterface, mainModel: string, agentId: string |
  * whether the tool result came back without an error, and the source-edit count at its start and how many edits
  * landed while it ran. It covers the turn only when it passed and no source edit came after it started.
  */
-type CheckRun = { command: string; startedAt: number; finishedAt?: number; exitOk?: boolean; editsAtStart: number; editsDuring?: number; agentId?: string }
+type CheckRun = { command: string; key: string; startedAt: number; finishedAt?: number; exitOk?: boolean; editsAtStart: number; editsDuring?: number; agentId?: string }
 
 /**
  * the guard's state for the main turn: the source files the main session edited itself, those any loop edited, how
  * many source edits went through, the checks run; `cwd` is the session's, which isSourcePath judges paths against
  */
-type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; editCount: number; checks: CheckRun[]; cwd: string }
+type GuardTurn = {
+  mainEdits: Set<string>; sourceEdits: Set<string>; editCount: number; checks: CheckRun[]; cwd: string
+  /** the main loop's failures per check (checkOf's key), and the escalation they raised: once per turn */
+  failures: Map<string, number>; escalation: { command: string; at: number } | null
+}
 
 /** a check that passed after the last source edit of the turn, with none landing while it ran */
 const isChecked = (g: GuardTurn): boolean => g.checks.some(c => c.exitOk === true && c.editsDuring === 0 && c.editsAtStart === g.editCount)
@@ -557,7 +561,7 @@ export const register: Register = on => {
   /** the project's own check commands (spick.json guard.check_commands), read once at session.start */
   let declared: RegExp[] = []
   /** the guard's per-turn state, cleared at turn.start */
-  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '' }
+  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
   let mainModel = ''
   let mainEffort: string | undefined
   /** the last elapsed-time stamp written to `current` */
@@ -703,6 +707,8 @@ export const register: Register = on => {
       guardTurn.sourceEdits.clear()
       guardTurn.editCount = 0
       guardTurn.checks = []
+      guardTurn.failures.clear()
+      guardTurn.escalation = null
       // a mod loaded mid-session saw no session.start: ask for the cwd once
       if (!guardTurn.cwd) guardTurn.cwd = await $.session.cwd().catch(() => '')
       lastTickMs = startedAt
@@ -807,9 +813,9 @@ export const register: Register = on => {
     // result is in: bound to the edit count at its start, so an edit while it ran or after it leaves the turn unchecked
     let run: CheckRun | null = null
     try {
-      const command = checkCommand(e.command, declared)
-      if (command) {
-        run = { command, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, ...(e.agentId ? { agentId: e.agentId } : {}) }
+      const check = checkOf(e.command, declared)
+      if (check) {
+        run = { ...check, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, ...(e.agentId ? { agentId: e.agentId } : {}) }
         guardTurn.checks.push(run)
       }
     } catch {}
@@ -840,6 +846,18 @@ export const register: Register = on => {
     let r: Awaited<ReturnType<typeof next>> | undefined
     try {
       r = await next(e)
+      // the main loop's second failure of the same check: the escalation line rides on that result itself, so the
+      // model reads it before its next step (once per turn)
+      try {
+        if (run && !e.agentId && r.isError && !guardTurn.escalation) {
+          const n = (guardTurn.failures.get(run.key) ?? 0) + 1
+          guardTurn.failures.set(run.key, n)
+          if (n >= ESCALATE_AFTER) {
+            guardTurn.escalation = { command: run.command, at: await $.clock.now() }
+            return { ...r, context: [...(r.context ?? []), escalationLine(run.command)] }
+          }
+        }
+      } catch {}
       return r
     } finally {
       if (run) {
