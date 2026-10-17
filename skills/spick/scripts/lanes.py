@@ -14,6 +14,8 @@ Usage:
   lanes.py --validate   problems, one per line (exit 1 if any), else "ok"
   lanes.py --line       the Lanes line for the checklist
   lanes.py --json       the effective enabled lanes as JSON
+  lanes.py --variant    the checklist variant (builtin, registry or none) on the first line; for registry the
+                        Lanes line on the second (triage-hook.sh reads both from one call)
   (--config PATH reads that spick.json instead of $CLAUDE_CONFIG_DIR/spick.json)
 """
 import json
@@ -115,6 +117,19 @@ def load_effective(cfg, include_disabled=False):
         if include_disabled or r.get("enabled", True):
             out.append(r)
     return out
+
+
+def variant(cfg):
+    """The checklist variant and the enabled lanes, as (name, lanes). "builtin" only when there is no lane_registry
+    and no built-in is switched off ("lanes".<id> false): its wording names all three built-ins, so it must not be
+    shown with one of them off. Otherwise "registry" with the enabled lanes, or "none" when nothing is enabled.
+    The same rule as quota.py set_lanes (the cache's registry flag) and quotaline.ts lanesFromConfig."""
+    cfg = cfg if isinstance(cfg, dict) else {}
+    lanes = load_effective(cfg)
+    switches = cfg.get("lanes") if isinstance(cfg.get("lanes"), dict) else {}
+    if not has_registry(cfg) and not any(switches.get(lid) is False for lid in builtins()):
+        return "builtin", lanes
+    return ("registry" if lanes else "none"), lanes
 
 
 def _walk_strings(v, path):
@@ -253,6 +268,12 @@ def main(argv):
         errs = validate(cfg)
         print("\n".join(errs) if errs else "ok")
         return 1 if errs else 0
+    if "--variant" in argv:
+        name, lanes = variant(cfg)
+        print(name)
+        if name == "registry":
+            print(build_line(lanes))
+        return 0
     lanes = load_effective(cfg)
     if "--json" in argv:
         print(json.dumps(lanes, indent=1, ensure_ascii=False))

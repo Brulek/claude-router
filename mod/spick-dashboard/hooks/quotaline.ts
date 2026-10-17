@@ -68,9 +68,9 @@ export function lanesLine(lanes: readonly LaneInfo[]): string {
 }
 
 /**
- * What the cache says about declared lanes: `{registry, lanes}` with the enabled lanes. `registry` false means no
- * lane_registry (the built-in lanes apply); `registry` true with an empty list means every lane is off, and an empty
- * list stays empty. A cache written before the `registry` field carried `lanes` only for a registry, so there a lanes
+ * What the cache says about declared lanes: `{registry, lanes}` with the enabled lanes. `registry` false means the
+ * built-in lanes apply, all three on (no lane_registry, no built-in switched off); `registry` true with an empty
+ * list means every lane is off, and an empty list stays empty. A cache written before the `registry` field carried `lanes` only for a registry, so there a lanes
  * list, even an empty one, means registry true.
  * Null when the cache cannot be read or says nothing about lanes (neither field): then spick.json decides
  * (lanesFromConfig). checklist() takes this object (or the older bare list).
@@ -106,17 +106,18 @@ const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 
 
 /**
  * What spick.json says about lanes when the quota cache is cold (missing, unreadable, or silent on lanes): the config
- * is the authority. Mirrors scripts/lanes.py load_effective: `registry` is whether `lane_registry` is there; each
- * built-in lane is enabled unless `lanes.<id>` is false, a `lane_registry.<id>` record overrides its fields (its
- * `enabled` wins), registry ids that are not built-in follow, enabled unless they say otherwise. A registry with
- * nothing enabled is `{registry: true, lanes: []}`. Null when the text is not a JSON object (no config to go by).
+ * is the authority. Mirrors scripts/lanes.py variant and load_effective: `registry` is false (the built-in wording)
+ * only when there is no `lane_registry` and no built-in is switched off (`lanes.<id>` false), since that wording
+ * names all three; each built-in lane is enabled unless `lanes.<id>` is false, a `lane_registry.<id>` record
+ * overrides its fields (its `enabled` wins), registry ids that are not built-in follow, enabled unless they say
+ * otherwise. Nothing enabled is `{registry: true, lanes: []}`. Null when the text is not a JSON object.
  */
 export function lanesFromConfig(text: string): LanesState | null {
   let cfg: unknown
   try { cfg = JSON.parse(text) } catch { return null }
   if (!isObj(cfg)) return null
-  if (!('lane_registry' in cfg)) return { registry: false, lanes: [] }
   const switches = isObj(cfg.lanes) ? cfg.lanes : {}
+  if (!('lane_registry' in cfg) && !BUILTIN_LANES.some(b => switches[b.id] === false)) return { registry: false, lanes: [] }
   const reg = isObj(cfg.lane_registry) ? cfg.lane_registry : {}
   const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   const out: LaneInfo[] = []

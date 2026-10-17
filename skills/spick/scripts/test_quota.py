@@ -406,6 +406,24 @@ class RegistryFactsSurvive(unittest.TestCase):
         self.assertEqual(self.facts(doc), {k: [v] for k, v in self.FACTS.items()})
         self.assertIn("glm", [ln["id"] for ln in doc["lanes"]])
 
+    def test_relane_with_builtins_switched_off_and_no_registry_is_not_no_registry(self):
+        # the mod reads registry false as the built-in wording, which recommends all three
+        self.seed()
+        with open(self.cfg, "w") as f:
+            json.dump({"lanes": {"gemini": False, "grok": False, "codex": False}}, f)
+        self.assertTrue(quota.relane())
+        doc = quota.read_cache()
+        self.assertEqual((doc["registry"], doc["lanes"]), (True, []))
+        with open(self.cfg, "w") as f:
+            json.dump({"lanes": {"codex": False}}, f)
+        self.assertTrue(quota.relane())
+        doc = quota.read_cache()
+        self.assertEqual((doc["registry"], [ln["id"] for ln in doc["lanes"]]), (True, ["gemini", "grok"]))
+        with open(self.cfg, "w") as f:
+            json.dump({"lanes": {"codex": True}}, f)
+        self.assertTrue(quota.relane())
+        self.assertEqual((quota.read_cache()["registry"], quota.read_cache()["lanes"]), (False, []))
+
     def test_relane_and_refresh_do_nothing_while_spick_json_is_unreadable(self):
         self.seed()
         before = quota.read_cache()

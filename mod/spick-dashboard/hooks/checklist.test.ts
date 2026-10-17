@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 import type { Controls } from '../types'
-import { lanesFromCache } from './quotaline'
+import { lanesFromCache, lanesFromConfig } from './quotaline'
 import { CHECKLIST_TEMPLATE, DEFAULT_CONTROLS, EFFORT_DEFAULTS, LANE_BULLET_DEEP, LANE_BULLET_LANES_BUILTIN, LANE_BULLET_LANES_NONE, LANE_BULLET_YOU, LANE_HEAD, LANE_TAIL, NO_LABEL_LINE, REGISTRY_LANE_LINE, checklist, drawsBand, isDelivery, laneBullets, offSentence, reviewOffNote, effectiveRouting, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick, ARGUMENT_HINT, USAGE } from './checklist'
 
 const HAIKU = 'claude-haiku-5-5'
@@ -223,6 +223,14 @@ test('without a registry the checklist is the built-in one; an empty registry is
   // what lanesFromCache returns goes straight in
   expect(checklist(ctl(), HAIKU, true, undefined, lanesFromCache('{"registry":true,"lanes":[]}'))).toContain('no outside lane is enabled')
   expect(checklist(ctl(), HAIKU, true, undefined, lanesFromCache('{"registry":false,"lanes":[]}'))).toBe(builtin)
+  // a cold cache: spick.json with every built-in switched off and no registry is none, not the built-in bullet
+  const allOff = checklist(ctl(), HAIKU, true, undefined, lanesFromConfig('{"lanes":{"gemini":false,"grok":false,"codex":false}}'))
+  expect(allOff).toBe(hookText('none').join('\n'))
+  expect(allOff).not.toContain(LANE_BULLET_LANES_BUILTIN)
+  // one switched off: the registry wording with the other two on the Lanes line
+  const oneOff = checklist(ctl(), HAIKU, true, undefined, lanesFromConfig('{"lanes":{"gemini":false}}')).split('\n')
+  expect(oneOff.slice(0, -1)).toEqual(hookText('registry'))
+  expect(oneOff.at(-1)).toBe('Lanes (user-declared; data = most that may be sent): grok x-data data:code · codex code,review,image data:code')
 })
 
 test('/spick lane forms: show, on|off maps to enabled, any field with a free-text value', () => {
