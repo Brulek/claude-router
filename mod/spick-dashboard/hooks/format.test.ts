@@ -23,6 +23,9 @@ test('parseCli recognises the three CLIs and their model/effort flags', () => {
     { lane: 'Codex', effort: 'high', isReview: true })
   expect(parseCli('codex exec --sandbox workspace-write "fix it" < /dev/null')).toEqual(
     { lane: 'Codex', isReview: false })
+  // a review prompt in Chinese is a review prompt
+  expect(parseCli('codex exec "审查这个改动" < /dev/null')?.isReview).toBe(true)
+  expect(parseCli('codex exec "请评审 diff" < /dev/null')?.isReview).toBe(true)
 })
 
 test('parseCli takes the lane id from invoke.py --lane', () => {
@@ -31,6 +34,10 @@ test('parseCli takes the lane id from invoke.py --lane', () => {
   expect(parseCli('cd x && python3 invoke.py --prompt-file p.txt --lane=qwen-local')).toEqual(
     { lane: 'qwen-local', isReview: false })
   expect(parseCli('python3 invoke.py --prompt-file p.txt')).toBeNull()
+  // a quoted id is restored, not read as the placeholder of the masked quote
+  expect(parseCli('python3 invoke.py --lane "glm" --prompt-file p.txt')?.lane).toBe('glm')
+  expect(parseCli("python3 invoke.py --lane='qwen-local' --prompt-file p.txt")?.lane).toBe('qwen-local')
+  expect(parseCli('python3 invoke.py --lane="glm" --prompt-file "my prompt.txt" -m "glm-5"')).toEqual({ lane: 'glm', model: 'glm-5', isReview: false })
 })
 
 test('parseCli ignores CLI names inside quoted strings and ordinary words', () => {

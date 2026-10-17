@@ -13,7 +13,7 @@ Commands and the file list: `references/commands.md`. Router mod, adding an outs
 
 ## Step 0 - is this machine set up?
 
-Once per session: `test -f ~/.claude/spick.json`. Missing means a first run: stop routing and follow `references/onboarding.md` (also on `spick setup`; `spick doctor` re-runs detection). Else read it; never use a disabled lane. A checklist line `spick: skill X installed Y, run spick setup` means the install is stale: tell the user once.
+Once per session: `test -f <config>/spick.json` (`<config>` is `$CLAUDE_CONFIG_DIR`, else `~/.claude`). Missing means a first run: stop routing and follow `references/onboarding.md` (also on `spick setup`; `spick doctor` re-runs detection). Else read it; never use a disabled lane. A checklist line `spick: skill X installed Y, run spick setup` means the install is stale: tell the user once.
 
 ## Step 1 - pick the lane
 
@@ -45,7 +45,7 @@ Once per session: `test -f ~/.claude/spick.json`. Missing means a first run: sto
 
 **The Hint line** names prompt keywords and the route they imply (words in paths, URLs, code blocks or after a negation such as 不要 / don't do not count). Follow it, or keep the task with a `Kept:` line. With the dashboard mod, a hinted verdict kept without that line is sent back once at stop time.
 
-**Outside lanes.** Among lanes tagged for the task: one whose `data:` is below what the task sends (`public` < `text` < `code`) is out; `scripts/invoke.py` refuses it (exit 6) unless you pass `--override-data "<reason>"`, which is logged - a declared limit, not a detector. Prefer matching tags, then weigh Quota and notes; a `web-only` lane gets a paste-ready prompt, never a call. A failed or over-quota lane: choose again. "Extremely important", or beyond Opus: `deep`, then suggest switching the session to Fable.
+**Outside lanes.** Among lanes tagged for the task: one whose `data:` is below what the task sends (`public` < `text` < `code`) is out; `scripts/invoke.py` refuses it (exit 6) unless you pass `--override-data "<reason>"`, only on the user's explicit say-so; every call and override is logged (`<config>/spick/invoke.jsonl`, listed by `/spick audit`) - a declared limit, not a detector. Prefer matching tags, then weigh Quota and notes; a `web-only` lane gets a paste-ready prompt, never a call. A failed or over-quota lane: choose again. "Extremely important", or beyond Opus: `deep`, then suggest switching the session to Fable.
 
 A mixed prompt is split by kind: a lane searches, `coder` codes with the result in its brief, `deep` judges.
 

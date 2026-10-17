@@ -4,11 +4,27 @@
 // the gate on, a substantive turn, no Kept: line). The Hint findings come from hint.ts.
 import type { Hint, HintKind } from './hint'
 
-/** how a delegate (an Agent call or an outside CLI call) stands */
-export type DelegateStatus = 'completed' | 'running' | 'failed' | 'refused'
+/**
+ * how a delegate (an Agent call or an outside CLI call) stands; timed-out: no completion signal for 30 minutes (a
+ * later completion still updates it, and the record gets a late line)
+ */
+export type DelegateStatus = 'completed' | 'running' | 'failed' | 'refused' | 'timed-out'
 
-/** what the gate reads of a delegate: its lane (a subagent type or a CLI lane), whether it is a review call, how it stands */
-export type RoleRun = { lane: string; isReview?: boolean; status: DelegateStatus }
+/**
+ * What confirmed a completed Agent call: its subagent's turn.complete without failure, or, when the call returned before
+ * any completion event, the call's own non-empty result (the engine does not guarantee a foreground subagent's events
+ * reach the hooks before the call returns, so this is the honest fallback).
+ */
+export type ConfirmedBy = 'turn.complete' | 'tool.result'
+
+/**
+ * What the gate reads of a delegate: its lane (a subagent type or a CLI lane), whether it is a review call (a single
+ * `codex exec` or review-lane command with a review prompt), how it stands, and for a CLI call how much it printed.
+ */
+export type RoleRun = { lane: string; isReview?: boolean; status: DelegateStatus; confirmedBy?: ConfirmedBy; outputChars?: number }
+
+/** the least a review call must print to count as a review: an error line or a usage text is shorter */
+export const MIN_REVIEW_CHARS = 200
 
 /** a reply with one line starting with Kept: states why a hinted task stayed with the main session */
 export const KEPT_RE = /(^|\n)\s*(Kept|自留)[:：]/
@@ -25,13 +41,13 @@ const MAX_SHOWN = 3
 
 /**
  * Whether a role completed: deep when a deep subagent finished without failure, or is still running in the background
- * (its relay comes in a later turn); review when a review call returned cleanly, or deep did. A refused, failed or
- * timed-out call does not count.
+ * (its relay comes in a later turn); review when a review call returned cleanly with at least MIN_REVIEW_CHARS of
+ * output, or deep did. A refused, failed or timed-out call does not count.
  */
 export function roleDone(role: 'deep' | 'review', runs: readonly RoleRun[]): boolean {
   const deep = runs.some(r => r.lane === 'deep' && (r.status === 'completed' || r.status === 'running'))
   if (role === 'deep') return deep
-  return deep || runs.some(r => r.isReview === true && r.status === 'completed')
+  return deep || runs.some(r => r.isReview === true && r.status === 'completed' && (r.outputChars ?? 0) >= MIN_REVIEW_CHARS)
 }
 
 /** `kinds` and `words` are what the gate fired on, `roles` what it asked for; `text` is what the model reads */

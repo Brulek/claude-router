@@ -96,7 +96,7 @@ Pitfalls (all hit in practice):
 
 ## Lane registry
 
-Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`. The user may override any field of them, and add lanes of their own, under `lane_registry` in `~/.claude/spick.json`, keyed by lane id (lowercase letters, digits, hyphens). The one on/off switch is `lane_registry.<id>.enabled`; the older `lanes` booleans are still read for built-ins, and `enabled` wins when both exist. `scripts/set_lane.py` edits any field of any lane (and creates `lane_registry` on the first edit). If `lane_registry` is absent, nothing below applies and all output stays as before. `python3 scripts/lanes.py --validate` checks the file; secret-looking values are reported by field name, never echoed.
+Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`. The user may override any field of them, and add lanes of their own, under `lane_registry` in `<config>/spick.json`, keyed by lane id (lowercase letters, digits, hyphens). The one on/off switch is `lane_registry.<id>.enabled`; the older `lanes` booleans are still read for built-ins, and `enabled` wins when both exist. `scripts/set_lane.py` edits any field of any lane (and creates `lane_registry` on the first edit). If `lane_registry` is absent, nothing below applies and all output stays as before. `python3 scripts/lanes.py --validate` checks the file; secret-looking values are reported by field name, never echoed.
 
 | Field | Meaning |
 |---|---|
@@ -161,7 +161,7 @@ python3 scripts/invoke.py --lane <id> --prompt-file <path> [--system-file <path>
 
 Write the brief to a scratchpad file first and pass only the path; never put the brief on the command line and never pass secrets. `invoke` in the lane record is one of: `{"api": "openai-chat" | "anthropic-messages", "base_url": ..., "model": ...}` (POST `{base_url}/chat/completions`, or `{base_url}/v1/messages`) or `{"cli": "<command with {prompt_file}>"}` (run as argv without a shell; without `{prompt_file}` the prompt goes on stdin). `key_ref` sits at the top level of the lane record, next to `invoke`, never inside it (example: `{"kind": "api-key", "key_ref": "keychain:kimi", "invoke": {"api": "openai-chat", "base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2.6"}}`). A `key_ref` is required for an api lane except `kind: local`; `keychain:<name>` is read as service `<name>`, account `spick`. stdout is the answer only (every text block, in order); stderr holds fact lines (`spick-invoke: <id> <model> <in> in / <out> out tokens, <s>s`).
 
-The data level is a declared limit, enforced fail-closed; it is not sensitive-data detection. `--contains` says the most this prompt holds (`public` < `text` < `code`); without it the prompt counts as `code`. A lane whose declared `data` is below that is refused with exit 6 and nothing is sent, so a `text` or `public` lane needs an explicit `--contains` at or below its level. Under such a declaration, a fenced block or three or more code-looking lines in the prompt or the `--system-file` is refused too. A lane without `data` takes anything. `--override-data "<reason>"` sends anyway, only when the user agreed, and prints `data override: ...; reason: <reason>` as a fact line.
+The data level is a declared limit, enforced fail-closed; it is not sensitive-data detection. `--contains` says the most this prompt holds (`public` < `text` < `code`); without it the prompt counts as `code`. A lane whose declared `data` is below that is refused with exit 6 and nothing is sent, so a `text` or `public` lane needs an explicit `--contains` at or below its level. Under such a declaration, a fenced block or three or more code-looking lines in the prompt or the `--system-file` is refused too. A lane without `data` takes anything. `--override-data "<reason>"` sends anyway, only on the user's explicit say-so, and prints `data override: ...; reason: <reason>` as a fact line. Every prompt call appends one JSON line to `<config>/spick/invoke.jsonl`: lane, model, the lane's declared level, the level the call holds (`--contains`, or `code` by default or by the heuristic), the override reason (null when none), exit code, tokens and seconds; never the key or the prompt. `scripts/audit.py` (`/spick audit`) lists the period's overrides with their reasons.
 
 Exit codes: 0 ok, 2 usage error or unknown lane, 3 web-only lane or missing key or auth 401/403, 4 quota or rate 402/429, 5 anything else, 6 data level refused (nothing sent), 7 the answer stopped at the token limit (`finish_reason=length` or `stop_reason=max_tokens`): the partial text is on stdout and `INCOMPLETE` on stderr; rerun with a larger `--max-tokens` rather than relaying a stub. No retries, no streaming. Step 6 checks the answer as usual.
 
@@ -177,7 +177,7 @@ Called end to end with a user key on 2026-10-14:
 
 ## Subscriptions and the quota cache
 
-`~/.claude/spick.json` may carry a `subscriptions` object. Only the providers listed in it are collected and shown; a missing key means not subscribed. Write it with `scripts/set_subscription.py` (`--provider claude|codex|gemini|grok --plan "<text>" [--price "<text>"]`, `--remove`, `--list`, `--dry-run`; it backs up to `spick.json.bak` and validates), never by hand. The result looks like:
+`<config>/spick.json` may carry a `subscriptions` object. Only the providers listed in it are collected and shown; a missing key means not subscribed. Write it with `scripts/set_subscription.py` (`--provider claude|codex|gemini|grok --plan "<text>" [--price "<text>"]`, `--remove`, `--list`, `--dry-run`; it backs up to `spick.json.bak` and validates), never by hand. The result looks like:
 
 ```json
 "subscriptions": {
@@ -192,7 +192,7 @@ Called end to end with a user key on 2026-10-14:
 
 ## The guard's check commands
 
-The dashboard mod's guard sends back a turn that edited source and ran no check. It knows the common checks (test runners, builds such as `cargo build`, `go build`, `npm run build`, `xcodebuild`, `mvn package`, `gradle build`, `dotnet build`, linters, type checkers, `node --test`, a `*_test.py` script, a `./run-tests.sh`). A project whose check is something else declares it in `~/.claude/spick.json`:
+The dashboard mod's guard sends back a turn that edited source and ran no check. It knows the common checks (test runners, builds such as `cargo build`, `go build`, `npm run build`, `xcodebuild`, `mvn package`, `gradle build`, `dotnet build`, linters, type checkers, `node --test`, a `*_test.py` script, a `./run-tests.sh`). A project whose check is something else declares it in `<config>/spick.json`:
 
 ```json
 "guard": {"check_commands": ["^just check\\b", "bin/verify"]}

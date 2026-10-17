@@ -9,8 +9,12 @@ spend.py reads the same files for cost). This report answers the questions the r
   - gate firings and their outcomes; a `kept` after a `sent-back` is a false positive candidate;
   - turns that edited source with no passing check after the last edit;
   - escalations on a twice-failed check, and whether a coder or deep followed;
+  - delegates: how many, how many were started inside a subagent (nested), ended after their turn's line (late)
+    or still read timed-out;
   - cost by lane and by hint kind (outside CLI calls report no usage: counted, unpriced);
-  - the longest sessions by context size (the main loop's largest prompt).
+  - the longest sessions by context size (the main loop's largest prompt);
+  - the data-level overrides of the period, from invoke.py's call log <config>/spick/invoke.jsonl: how many, and the
+    reason each one gave.
 
 Usage:
   audit.py [--days N] [--json]
@@ -36,7 +40,8 @@ def _done(t):
     ds = t.get("delegates") or []
     live = ("completed", "running")
     deep = any(d.get("lane") == "deep" and d.get("status") in live for d in ds)
-    review = any(d.get("isReview") and d.get("status") == "completed" for d in ds)
+    # a review call counts from 200 characters of output (gate.ts MIN_REVIEW_CHARS); records before it lack the field
+    review = any(d.get("isReview") and d.get("status") == "completed" and (spend._num(d.get("outputChars")) is None or d["outputChars"] >= 200) for d in ds)
     hint = t.get("hint") or []
     needs_deep = "judgement" in hint
     if deep or (not needs_deep and review):
@@ -45,10 +50,10 @@ def _done(t):
 
 
 def _covered(t):
-    """an edit turn is covered when a check passed after its last edit"""
+    """an edit turn is covered when a check passed after its last completed edit (records before 2026-10-17 say coversTurn)"""
     checks = [c for c in t.get("checks") or [] if isinstance(c, dict)]
     if checks:
-        return any(c.get("coversTurn") for c in checks)
+        return any(c.get("coversTurn") or (c.get("exitOk") is True and c.get("afterLastEdit") is True) for c in checks)
     c = t.get("check")
     return isinstance(c, dict) and bool(c.get("passed")) and bool(c.get("afterLastEdit"))
 
@@ -66,8 +71,44 @@ def _add_cost(bucket, key, cost):
         b["costUsd"] = (b["costUsd"] or 0) + cost
 
 
-def figures(turns, days, now):
-    """the audit's figures for the turns of the last `days` days (late-only stubs are cost, not turns)"""
+def load_invokes(config):
+    """(calls, skipped): invoke.py's audit lines; a missing file is no calls, a line that is not a JSON object is counted"""
+    calls, skipped = [], 0
+    try:
+        with open(os.path.join(config, "spick", "invoke.jsonl"), encoding="utf-8") as f:
+            text = f.read()
+    except OSError:
+        return calls, skipped
+    for raw in text.splitlines():
+        if not raw.strip():
+            continue
+        try:
+            line = json.loads(raw)
+        except ValueError:
+            skipped += 1
+            continue
+        if isinstance(line, dict):
+            calls.append(line)
+        else:
+            skipped += 1
+    return calls, skipped
+
+
+def overrides(calls, days, now):
+    """the period's calls that passed --override-data: how many, and each one's time, lane, exit code and reason"""
+    since = now - dt.timedelta(days=days)
+    out = []
+    for c in calls:
+        at = spend.parse_at(c.get("at"))
+        if at is None or at < since or not isinstance(c.get("override"), str):
+            continue
+        out.append({"at": c.get("at"), "lane": str(c.get("lane") or "?"), "exit": c.get("exit"), "reason": c["override"]})
+    return {"count": len(out), "calls": out}
+
+
+def figures(turns, days, now, calls=()):
+    """the audit's figures for the turns of the last `days` days (late-only stubs are cost, not turns), with the data
+    overrides of invoke.py's calls in the same window"""
     since = now - dt.timedelta(days=days)
     win = []
     for t in turns:
@@ -107,6 +148,14 @@ def figures(turns, days, now):
     edit_turns = [t for t in real if (t.get("edits") or {}).get("files")]
     unchecked = [{"sessionId": t.get("sessionId"), "turnId": t.get("turnId"), "files": t["edits"]["files"]} for t in edit_turns if not _covered(t)]
 
+    ds = [d for t in win for d in t.get("delegates") or [] if isinstance(d, dict)]
+    delegates = {
+        "total": len(ds),
+        "nested": sum(1 for d in ds if d.get("parent")),
+        "late": sum(1 for d in ds if d.get("late")),
+        "timedOut": sum(1 for d in ds if d.get("status") == "timed-out"),
+    }
+
     esc = [t["escalation"] for t in real if isinstance(t.get("escalation"), dict)]
     escalations = {"count": len(esc), "followed": sum(1 for e in esc if e.get("followed"))}
 
@@ -139,9 +188,10 @@ def figures(turns, days, now):
         "days": days, "turns": len(real), "sessions": len(sessions),
         "byHint": by_kind, "verdicts": verdicts, "gate": gate,
         "edits": {"turns": len(edit_turns), "unchecked": len(unchecked), "uncheckedTurns": unchecked},
-        "escalations": escalations,
+        "escalations": escalations, "delegates": delegates,
         "costByLane": by_lane, "costByKind": by_kind_cost,
         "longestSessions": longest,
+        "overrides": overrides(calls, days, now),
     }
 
 
@@ -169,11 +219,17 @@ def text(f):
     out.append(f"edits: {e['turns']} turn{'s' if e['turns'] != 1 else ''} edited source; {e['unchecked']} with no passing check after the last edit")
     x = f["escalations"]
     out.append(f"escalations: {x['count']}; a coder or deep followed {x['followed']}")
+    d = f["delegates"]
+    out.append(f"delegates: {d['total']}; started inside a subagent {d['nested']}, ended after their turn's line {d['late']}, timed out {d['timedOut']}")
     out.append("cost by lane: " + ", ".join(f"{lane} {_money(b)}" for lane, b in sorted(f["costByLane"].items(), key=lambda kv: (-(kv[1]["costUsd"] or 0), kv[0]))))
     out.append("cost by hint kind: " + ", ".join(f"{kind} {_money(b)}" for kind, b in sorted(f["costByKind"].items(), key=lambda kv: (-(kv[1]["costUsd"] or 0), kv[0]))))
     out.append("longest sessions by context:")
     for s in f["longestSessions"]:
         out.append(f"  {s['sessionId'][:8]}  {s['maxContext'] // 1000}k  {s['turns']} turn{'s' if s['turns'] != 1 else ''}  {s['cwd']}".rstrip())
+    o = f["overrides"]
+    out.append(f"data overrides (invoke.py --override-data): {o['count']}")
+    for c in o["calls"]:
+        out.append(f"  {c['at']}  {c['lane']}  exit {c['exit']}  reason: {c['reason']}")
     return "\n".join(out)
 
 
@@ -185,13 +241,17 @@ def main(argv=None, home=None, now=None):
     if a.days < 1:
         ap.error("--days must be 1 or more")
     now = now or dt.datetime.now(dt.timezone.utc)
-    turns, bad = spend.load_turns(spend.turns_dir(spend.config_dir(home)))
+    config = spend.config_dir(home)
+    turns, bad = spend.load_turns(spend.turns_dir(config))
     if bad:
         print(f"audit.py: skipped {bad} turn record line{'s that do' if bad != 1 else ' that does'} not read", file=sys.stderr)
-    f = figures(turns, a.days, now)
+    calls, bad_calls = load_invokes(config)
+    if bad_calls:
+        print(f"audit.py: skipped {bad_calls} invoke.jsonl line{'s that do' if bad_calls != 1 else ' that does'} not read", file=sys.stderr)
+    f = figures(turns, a.days, now, calls)
     if a.json:
         print(json.dumps(f, indent=2, ensure_ascii=False))
-    elif f["turns"] == 0:
+    elif f["turns"] == 0 and f["overrides"]["count"] == 0:
         print("spick audit: no records")
     else:
         print(text(f))

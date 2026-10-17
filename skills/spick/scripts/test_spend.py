@@ -157,6 +157,17 @@ class TestBadFiles(Base):
         self.assertEqual((g["inputTokens"], g["outputTokens"], g["costUsd"], g["unpriced"]), (0, 0, None, 1))
 
 
+def nested_turn_lines():
+    """one main turn whose coder started a deep (nested, parent set) and a coder that timed out, then its late line"""
+    u = lambda n, c: {"input": n, "output": 0, "cacheRead": 0, "cacheWrite": 0, "costUsd": c}  # noqa: E731
+    d = lambda i, lane, status, usage, **k: dict({"id": i, "lane": lane, "model": "m", "status": status, "ok": status == "completed", "startedAt": "2026-10-13T09:00:00.000Z", "ms": 1, "usage": usage, "costUsd": usage and usage["costUsd"]}, **k)  # noqa: E731
+    main = {"schemaVersion": 2, "at": "2026-10-13T09:00:00.000Z", "sessionId": "nnnn", "turnId": "t1", "hint": ["code"], "delegates": [
+        d("c1", "coder", "completed", u(100, 0.25)), d("d1", "deep", "completed", u(200, 0.5), parent="ag-c1"), d("c2", "coder", "timed-out", None)],
+        "edits": {"main": 0, "agents": 0, "files": []}, "usage": u(10, 0.01)}
+    late = {"schemaVersion": 2, "late": True, "at": "2026-10-13T10:00:00.000Z", "sessionId": "nnnn", "turnId": "t1", "delegate": d("c2", "coder", "completed", u(300, 1.0))}
+    return "\n".join(json.dumps(x) for x in (main, late)) + "\n"
+
+
 class TestTurnRecords(Base):
     """the turn records under <config>/spick/turns/, with the legacy files beside them"""
 
@@ -179,6 +190,17 @@ class TestTurnRecords(Base):
         self.assertEqual((g["Gemini"]["unpriced"], g["Codex"]["unpriced"]), (1, 1))
         self.assertEqual(d["sessions"], 2)
         self.assertAlmostEqual(d["total"]["costUsd"], 1.94)
+
+    def test_nested_delegates_and_a_timed_out_one_finished_late_are_counted(self):
+        d = os.path.join(self.home, ".claude", "spick", "turns")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "nnnn.jsonl"), "w") as f:
+            f.write(nested_turn_lines())
+        g = {x["key"]: x for x in self.run_json()["groups"]}
+        # the nested deep is a row of its own; the timed-out coder's late copy replaces it, with its usage
+        self.assertEqual((g["deep"]["rows"], g["deep"]["inputTokens"]), (1, 200))
+        self.assertEqual((g["coder"]["rows"], g["coder"]["inputTokens"]), (2, 400))
+        self.assertAlmostEqual(g["coder"]["costUsd"], 1.25)
 
     def test_turns_and_legacy_files_add_up(self):
         self.put_turns()

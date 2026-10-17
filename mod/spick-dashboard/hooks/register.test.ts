@@ -68,6 +68,9 @@ test('a subagent turn.complete adds to its lane totals and leaves last alone', {
 })
 
 const DONE = { answer: 'ok', durationMs: 1, isAborted: false, reason: 'answer' as const, usage: USAGE }
+/** a tool result with a report in it: an Agent call's relay, or a review CLI's output past MIN_REVIEW_CHARS */
+const REPORT = 'Findings: the two error paths differ in how they surface a missing file. '.repeat(4)
+const ANSWERED = { result: {} as never, text: REPORT }
 // the kit's types carry no timers; the runner has them
 const timers = globalThis as unknown as { setTimeout: (f: () => void, ms: number) => void }
 const tick = () => new Promise<void>(r => timers.setTimeout(r, 1))
@@ -742,6 +745,29 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   expect(without[0]).not.toContain('Quota')
 })
 
+test('a cold quota cache leaves the lanes to spick.json: everything disabled reads "no outside lane is enabled"; no spick.json either is the built-in bullet', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  let spickJson: string | null = JSON.stringify({ lanes: { gemini: false, grok: false, codex: false }, lane_registry: { gemini: { enabled: false }, grok: { enabled: false }, codex: { enabled: false } } })
+  // no quota.json at all: the cache is cold
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' && spickJson !== null ? { value: spickJson } : { deny: 'missing' }))
+  await $.session.start(START)
+  const none = (await contextOf($))[0] ?? ''
+  expect(none).toContain('no outside lane is enabled: do not call Gemini, Grok or Codex')
+  // one lane on: the registry wording with the Lanes line from the config
+  spickJson = JSON.stringify({ lane_registry: { gemini: { enabled: false }, grok: { enabled: false } } })
+  const one = (await contextOf($))[0] ?? ''
+  expect(one).not.toContain('no outside lane is enabled')
+  expect(one).toContain('Lanes (user-declared; data = most that may be sent): codex code,review,image data:code')
+  // neither file: the built-in bullet
+  spickJson = null
+  const builtin = (await contextOf($))[0] ?? ''
+  expect(builtin).not.toContain('no outside lane is enabled')
+  expect(builtin).not.toContain('Lanes (user-declared')
+})
+
 test('registry lanes with facts and no windows reach the checklist with their facts; one with neither reads unknown', async ($, on) => {
   mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
   mock.store(on)
@@ -896,7 +922,7 @@ test('the gate stays quiet when something was delegated, on a short reply or a K
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
-  on('tool.call', async () => ({ result: {} as never }))
+  on('tool.call', async () => ANSWERED)
   await $.session.start(START)
   const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg: string) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
@@ -956,10 +982,14 @@ test('the gate asks for the role the hint names: deep that finished or still run
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
   on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: `ag-${e.tool_use_id}` }))
+  const holds = new Map<string, () => void>()
   on('tool.call', async ($, e) => {
     if (e.tool_use_id.startsWith('refused')) return { deny: 'not allowed' }
     if (e.tool_use_id.startsWith('failed')) return { isError: true as const, result: 'boom', text: 'boom' }
-    return { result: {} as never }
+    if (e.tool_use_id.startsWith('empty')) return { result: {} as never, text: '' }
+    if (e.tool_use_id.startsWith('hold')) await new Promise<void>(r => holds.set(e.tool_use_id, r))
+    if (e.tool_use_id.startsWith('short')) return { result: {} as never, text: 'Usage: codex exec [OPTIONS] [PROMPT]' }
+    return ANSWERED
   })
   await $.session.start(START)
   const turn = async (id: string, text = VERDICT) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
@@ -981,6 +1011,18 @@ test('the gate asks for the role the hint names: deep that finished or still run
       await $.turn.complete({ turnId: 'sub', agentId: 'ag-fg1', ...DONE })
       await $.tool.call({ ...agentCall('fg1', 'deep') })
     }, false],
+    // no completion event before the call returned: the call's own result decides
+    ['a foreground deep with no completion event that returned a report', () => $.tool.call({ ...agentCall('fg2', 'deep') }), false],
+    ['a foreground deep with no completion event that returned nothing', () => $.tool.call({ ...agentCall('empty1', 'deep') }), true],
+    // the engine's order: the call starts, its subagent spawns and ends, then the call returns
+    ['a foreground deep whose subagent errored, though the call returned text', async () => {
+      const call = $.tool.call({ ...agentCall('hold3', 'deep') })
+      while (!holds.has('hold3')) await tick()
+      await spawn('hold3', false)
+      await $.turn.complete({ turnId: 'sub', agentId: 'ag-hold3', answer: '', durationMs: 1, isAborted: false, reason: 'error' })
+      holds.get('hold3')!()
+      await call
+    }, true],
   ]
   for (const [i, [name, act, gated]] of cases.entries()) {
     await turn(`t${i}`)
@@ -997,6 +1039,60 @@ test('the gate asks for the role the hint names: deep that finished or still run
   await turn('r2', 'review this diff please')
   await $.tool.call({ tool: 'Bash', tool_use_id: 's9', command: 'agy -p "check"' })
   expect(await stop()).toContain('hinted as a review (review) and no review lane call returned cleanly and no deep run completed')
+  await $.turn.complete({ turnId: 'r2', ...DONE })
+  // a review CLI call counts only as the line's one command, run for real, with real output
+  const reviews: [string, string, boolean][] = [
+    ['a single codex review', 'codex exec --sandbox read-only "Review this diff" < /dev/null', false],
+    ['the diff piped into it', 'git diff | codex exec --sandbox read-only "审查这个改动"', false],
+    ['a chain that may skip it', 'true || codex exec "review"', true],
+    ['a chain after it', 'codex exec "review the diff"; true', true],
+    ['its output piped away', 'codex exec "review the diff" | tail -1', true],
+    ['a question about the program', 'codex exec --help review', true],
+  ]
+  for (const [i, [name, command, gated]] of reviews.entries()) {
+    await turn(`v${i}`, 'review this diff please')
+    await $.tool.call({ tool: 'Bash', tool_use_id: `v${i}`, command })
+    const block = await stop()
+    expect([name, block === undefined ? 'quiet' : 'gated']).toEqual([name, gated ? 'gated' : 'quiet'])
+    await $.turn.complete({ turnId: `v${i}`, ...DONE })
+  }
+  // a review that printed a usage line only, and one that failed
+  await turn('w1', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'short1', command: 'codex exec "review the diff" < /dev/null' })
+  expect(await stop()).toContain('spick gate')
+  await $.turn.complete({ turnId: 'w1', ...DONE })
+  await turn('w2', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'failed9', command: 'codex exec "review the diff" < /dev/null' })
+  expect(await stop()).toContain('spick gate')
+})
+
+test('a review lane from the registry, named by a quoted --lane, satisfies a review hint', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[],"registry":true,"lanes":[{"id":"rev","kind":"api-key","tags":["review"],"data":"code"},{"id":"glm","kind":"api-key","tags":["cheap"],"data":"text"}]}'
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' ? { value: cache } : { deny: 'missing' }))
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('tool.call', async () => ANSWERED)
+  await $.session.start(START)
+  const cases: [string, boolean][] = [
+    ['python3 ~/.claude/skills/spick/scripts/invoke.py --lane "rev" --prompt-file /tmp/p.txt', false],
+    ["python3 invoke.py --lane='rev' --prompt-file /tmp/p.txt", false],
+    ['python3 invoke.py --lane rev --prompt-file /tmp/p.txt', false],
+    // a lane without the review tag is no review
+    ['python3 invoke.py --lane "glm" --prompt-file /tmp/p.txt', true],
+  ]
+  for (const [i, [command, gated]] of cases.entries()) {
+    await $.prompt.submit({ ...PROMPT, text: 'review this diff please' })
+    await $.turn.start({ text: 'review this diff please', turnId: `t${i}` })
+    await $.tool.call({ tool: 'Bash', tool_use_id: `b${i}`, command })
+    const block = (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })).block
+    expect([command, block === undefined ? 'quiet' : 'gated']).toEqual([command, gated ? 'gated' : 'quiet'])
+    await $.turn.complete({ turnId: `t${i}`, ...DONE })
+  }
 })
 
 test('each gate firing and what became of it is in the turn record\'s gateEvents; design words are never gated', async ($, on) => {
@@ -1009,7 +1105,7 @@ test('each gate firing and what became of it is in the turn record\'s gateEvents
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
-  on('tool.call', async () => ({ result: {} as never }))
+  on('tool.call', async () => ANSWERED)
   await $.session.start(START)
   const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg: string, active = false) => (await $.classic.Stop({ stop_hook_active: active as false, last_assistant_message: msg })).block
@@ -1080,7 +1176,7 @@ async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claud
   const world = session(on, model)
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' && spickJson !== null ? { value: spickJson } : { deny: 'missing' }))
   const ran: string[] = []
-  /** Bash commands that exit non-zero (an error result), and ones held until the test releases them */
+  /** Bash commands (or tool_use_ids) that end in an error result, and commands (or tool_use_ids) held until the test releases them */
   const failing = new Set<string>()
   const held = new Map<string, Promise<void>>()
   on('classic.Stop', async () => ({}))
@@ -1089,6 +1185,8 @@ async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claud
   on('tool.call', async ($, e) => {
     const p = (e as { file_path?: string; notebook_path?: string }).file_path ?? (e as { notebook_path?: string }).notebook_path
     if (p) ran.push(p)
+    await held.get(e.tool_use_id)
+    if (failing.has(e.tool_use_id)) return { isError: true as const, result: 'String to replace not found', text: 'String to replace not found' }
     const command = (e as { command?: string }).command
     if (command !== undefined) {
       await held.get(command)
@@ -1268,6 +1366,44 @@ test('a check counts only when it passed and came after the last source edit, wi
   await $.turn.complete({ turnId: 't4', ...DONE })
 })
 
+test('a check binds to completed edits: one started while an edit was in flight, or with one finishing while it ran, does not cover the turn', async ($, on) => {
+  const { turn, stop, failing, held } = await guardWorld($, on)
+  const hold = (key: string) => { let release = () => {}; held.set(key, new Promise<void>(r => { release = r })); return () => release() }
+  // the edit is still in flight when the check starts and ends: the check proves nothing about it
+  await turn('t1')
+  const freeE1 = hold('e1')
+  const e1 = $.tool.call(edit('e1', '/repo/a.py'))
+  await tick()
+  await $.tool.call(bash('b1', 'pytest -q'))
+  freeE1()
+  await e1
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // the edit finishes while the check runs
+  await turn('t2')
+  const freeE2 = hold('e2')
+  const e2 = $.tool.call(edit('e2', '/repo/a.py'))
+  await tick()
+  const freeB2 = hold('b2')
+  const b2 = $.tool.call(bash('b2', 'pytest -q'))
+  await tick()
+  freeE2()
+  await e2
+  freeB2()
+  await b2
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  // an edit that failed changed nothing: no check is owed, and its file leaves the cap so another file goes through
+  await turn('t3')
+  failing.add('e3')
+  await $.tool.call(edit('e3', '/repo/a.py'))
+  expect(await stop()).toBeUndefined()
+  expect((await $.tool.call(edit('e4', '/repo/b.py'))).deny).toBeUndefined()
+  await $.tool.call(bash('b4', 'pytest -q'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't3', ...DONE })
+})
+
 test('the main loop\'s second failure of the same check carries one escalation line; a different check, a pass or a subagent\'s does not', async ($, on) => {
   const { turn, failing } = await guardWorld($, on)
   const ESC = 'spick: this check failed 2 times this turn'
@@ -1295,7 +1431,7 @@ test('the main loop\'s second failure of the same check carries one escalation l
 
 test('a runner named in an argument, a masked exit status or a version query is no check at stop', async ($, on) => {
   const { turn, stop } = await guardWorld($, on)
-  for (const [i, c] of ['echo pytest', 'grep pytest README', 'pytest || true', 'pytest --version'].entries()) {
+  for (const [i, c] of ['echo pytest', 'grep pytest README', 'pytest || true', 'pytest --version', 'true || pytest', 'pytest; true', 'pytest | cat', 'npm test | tail -5'].entries()) {
     await turn(`t${i}`)
     await $.tool.call(edit(`e${i}`, '/repo/a.py'))
     await $.tool.call(bash(`b${i}`, c))
@@ -1444,12 +1580,12 @@ test('a main turn writes one line to <state>/turns/<session>.jsonl: delegates wi
     context: { lastInput: 42_100 }, ms: 9000,
   })
   expect(line!.delegates).toEqual([
-    { id: 'tu1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', status: 'completed', ok: true, startedAt: new Date(1000).toISOString(), ms: 0,
+    { id: 'tu1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', status: 'completed', ok: true, confirmedBy: 'turn.complete', startedAt: new Date(1000).toISOString(), ms: 0,
       usage: { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0, costUsd: expect.any(Number) }, costUsd: expect.any(Number) },
-    { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
+    { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, outputChars: 0, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
   ])
   expect((line as { agentUsage: { input: number } }).agentUsage.input).toBe(1_000_000)
-  expect((line as { checks: unknown[] }).checks).toEqual([{ command: 'python3 -m pytest -q', startedAt: new Date(1000).toISOString(), finishedAt: new Date(1000).toISOString(), exitOk: true, editsDuring: 0, coversTurn: true }])
+  expect((line as { checks: unknown[] }).checks).toEqual([{ command: 'python3 -m pytest -q', startedAt: new Date(1000).toISOString(), finishedAt: new Date(1000).toISOString(), exitOk: true, editsDuring: 0, afterLastEdit: true }])
   // the pane's totals still count every turn
   expect((await probe($)).totals?.coder?.inputTokens).toBe(1_000_000)
 })
@@ -1471,6 +1607,61 @@ test('a background agent that finishes after its main turn\'s line adds a late l
   expect(late.delegate).toMatchObject({ id: 'tu1', lane: 'deep', status: 'completed', ok: true, usage: { input: 1_000_000, output: 100_000 } })
 })
 
+test('a delegate started inside a subagent is recorded for the main turn, with its parent; its usage lands on it', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  const { lines } = recordWorld(on)
+  const tools = gatedTools(on)
+  on('agent.spawn', async ($, e) => ({ model: e.subagentType === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', agentId: `ag-${e.tool_use_id}` }))
+  const spawn = (id: string, type: string) => $.agent.spawn({ tool_use_id: id, prompt: 'p', description: 'd', subagentType: type, provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: false, fork: false })
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  const coder = $.tool.call({ ...agentCall('c1', 'coder'), effort: 'high' })
+  await tools.held('c1')
+  await spawn('c1', 'coder')
+  // inside the coder: a deep call and a Gemini call
+  const deep = $.tool.call({ ...agentCall('d1', 'deep'), agentId: 'ag-c1' })
+  await tools.held('d1')
+  await spawn('d1', 'deep')
+  await $.turn.complete({ turnId: 'sub-d', agentId: 'ag-d1', ...DONE, usage: { ...USAGE, model: 'claude-opus-5-5' } })
+  tools.release('d1')
+  await deep
+  const cli = $.tool.call({ tool: 'Bash', tool_use_id: 'g1', command: 'agy -p "look it up"', agentId: 'ag-c1' })
+  await tools.held('g1')
+  tools.release('g1')
+  await cli
+  await $.turn.complete({ turnId: 'sub-c', agentId: 'ag-c1', ...DONE })
+  tools.release('c1')
+  await coder
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  const ds = lines()[0]!.delegates
+  expect(ds.map(d => [d.id, d.lane, d.status, (d as { parent?: string }).parent ?? null])).toEqual([
+    ['c1', 'coder', 'completed', null], ['d1', 'deep', 'completed', 'ag-c1'], ['g1', 'Gemini', 'completed', 'ag-c1'],
+  ])
+  expect(ds[1]).toMatchObject({ confirmedBy: 'turn.complete', usage: { input: 1_000_000, output: 100_000 } })
+  expect((lines()[0] as { agentUsage: { input: number } }).agentUsage.input).toBe(2_000_000)
+})
+
+test('a delegate with no completion signal for 30 minutes reads timed-out; when it completes later a late line carries its usage', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const { lines } = recordWorld(on)
+  on('tool.call', async () => ({ result: {} as never }))
+  on('agent.spawn', async () => ({ model: 'claude-sonnet-5-5', agentId: 'slow' }))
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'd', subagentType: 'coder', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: true, fork: false })
+  await $.tool.call({ ...agentCall('tu1', 'coder'), run_in_background: true })
+  await clock.advance(31 * 60_000)
+  // any tool call sweeps the stale ones
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'ls' })
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  expect(lines()[0]?.delegates[0]).toMatchObject({ id: 'tu1', lane: 'coder', status: 'timed-out', ok: false, usage: null })
+  // it finishes after all: the index entry was kept, so its usage lands on a late line of t1
+  await $.turn.complete({ turnId: 'sub', agentId: 'slow', ...DONE, usage: { ...USAGE, model: 'claude-sonnet-5-5' } })
+  const late = lines()[1] as Record<string, unknown> & { delegate: Record<string, unknown> }
+  expect(late).toMatchObject({ late: true, turnId: 't1' })
+  expect(late.delegate).toMatchObject({ id: 'tu1', status: 'completed', ok: true, confirmedBy: 'turn.complete', usage: { input: 1_000_000 } })
+})
+
 test('a failed check, then the second failure, are in the record with the escalation and whether a coder followed', async ($, on) => {
   mock.clock(on, { now: 1000 })
   const { lines } = recordWorld(on)
@@ -1482,7 +1673,7 @@ test('a failed check, then the second failure, are in the record with the escala
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'pytest -q' })
   await $.tool.call({ ...agentCall('c1', 'coder'), effort: 'high' })
   await $.turn.complete({ turnId: 't1', ...DONE })
-  expect(lines()[0]).toMatchObject({ check: { ran: true, passed: false, afterLastEdit: false, command: 'pytest -q' }, escalation: { command: 'pytest -q', followed: true } })
+  expect(lines()[0]).toMatchObject({ check: { ran: true, passed: false, afterLastEdit: true, command: 'pytest -q' }, escalation: { command: 'pytest -q', followed: true } })
 })
 
 test('a turn with no usage still writes its line, usage null; a failing write keeps the line for the next; a resumed file is appended to', async ($, on) => {

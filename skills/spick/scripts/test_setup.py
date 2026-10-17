@@ -376,6 +376,52 @@ class TestState(Base):
         self.assertEqual(json.loads(self.read("spick.json"))["installed_version"], version)
 
 
+class TestUpgrade(Base):
+    """an upgrade over an older install: spick's own hook follows the skill; the version is stamped with what was kept"""
+
+    def test_a_spick_hook_at_another_path_is_updated_and_the_manifest_says_so(self):
+        old = 'bash "/old/checkout/skills/spick/scripts/triage-hook.sh"'
+        other = {"hooks": [{"type": "command", "command": "echo mine"}]}
+        self.put("settings.json", json.dumps({"hooks": {"UserPromptSubmit": [other, {"hooks": [{"type": "command", "command": old}]}]}}))
+        r = self.run_setup()
+        cmd = 'bash "%s"' % os.path.join(HERE, "triage-hook.sh")
+        self.assertEqual([h["command"] for h in self.spick_hooks()], [cmd])
+        self.assertIn(other, self.settings()["hooks"]["UserPromptSubmit"])
+        self.assertIn("updated UserPromptSubmit hook", r.stdout)
+        self.assertEqual(self.manifest(self.backups()[-1])["hook_updated"], {"from": [old], "to": cmd})
+        self.assertEqual(json.loads(self.read("spick.json"))["installed"]["hook"], "updated")
+        # the next run finds it current
+        self.run_setup()
+        self.assertEqual(json.loads(self.read("spick.json"))["installed"]["hook"], "kept")
+
+    def test_installed_lists_what_was_written_and_kept_and_the_summary_names_the_kept_files(self):
+        r = self.run_setup()
+        d = json.loads(self.read("spick.json"))
+        names = [a[:-3] for a in AGENTS]
+        self.assertEqual(d["installed"], {"agents": {n: "written" for n in names}, "hook": "added", "snippet": "appended"})
+        self.assertNotIn("Kept as they were", r.stdout)
+        # an older install's agent file stays without --force: the record and the summary say so
+        self.put(os.path.join("agents", "coder.md"), "an older coder\n")
+        r = self.run_setup()
+        d = json.loads(self.read("spick.json"))
+        self.assertEqual(d["installed"]["agents"]["coder"], "kept")
+        self.assertEqual(d["installed"]["snippet"], "replaced")
+        with open(os.path.join(HERE, "..", "assets", "VERSION")) as f:
+            self.assertEqual(d["installed_version"], f.read().strip())
+        self.assertIn("Kept as they were (they may predate this version; run with --force to overwrite them):\n  %s" % self.path("agents", "coder.md"), r.stdout)
+        r = self.run_setup("--force")
+        self.assertEqual(json.loads(self.read("spick.json"))["installed"]["agents"]["coder"], "written")
+        self.assertNotIn("Kept as they were", r.stdout)
+        self.run_setup("--no-explore")
+        self.assertEqual(json.loads(self.read("spick.json"))["installed"]["agents"]["Explore"], "skipped")
+
+    def test_a_failed_step_leaves_the_old_installed_version(self):
+        self.put("spick.json", json.dumps({"version": 1, "installed_version": "0.9.0"}))
+        os.mkdir(self.path("CLAUDE.md"))
+        self._run("--install", "--lanes", "gemini", ok=False)
+        self.assertEqual(json.loads(self.read("spick.json"))["installed_version"], "0.9.0")
+
+
 class TestSteps(Base):
     """Every write is checked: invalid JSON stops the run before anything is written; a failing step stops it with
     a list of what was already changed, and never says done."""

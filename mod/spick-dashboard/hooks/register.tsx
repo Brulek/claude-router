@@ -5,15 +5,15 @@ import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, Quota
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, sampleNote, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
-import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkOf, declaredChecks, editCapReason, escalationLine, uncheckedReason } from './guard'
+import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, asksAboutItself, checkOf, declaredChecks, editCapReason, escalationLine, oneCommand, uncheckedReason } from './guard'
 import { KEPT_RE, gateFiring, gateOutcome, keptLine, roleDone, sendBackText } from './gate'
-import type { DelegateStatus } from './gate'
+import type { ConfirmedBy, DelegateStatus } from './gate'
 import { findHints, lineOf } from './hint'
 import type { Hint } from './hint'
 import { readQuota } from './quota'
 import { ZERO_USAGE, addUsage, appendLines, lateLine, lineText, turnLine, usageEntry } from './turnlog'
 import type { CheckEntry, DelegateEntry, GateEvent, UsageEntry } from './turnlog'
-import { lanesFromCache, quotaLineFromCache } from './quotaline'
+import { lanesFromCache, lanesFromConfig, quotaLineFromCache } from './quotaline'
 import { markerPath, spickPaths, turnsFile } from './paths'
 import { DEFAULT_EFFORTS, effortToFill, effortsFrom } from './efforts'
 import type { Efforts } from './efforts'
@@ -69,13 +69,17 @@ async function quotaLineNow($: EngineInterface): Promise<string | null> {
   } catch { return null }
 }
 
-/** The lanes the user declared (lane_registry), from the same cache; null for a user without one, or when it cannot be read. */
+/**
+ * The lanes the user declared (lane_registry), from the same cache; when the cache is cold (missing, unreadable,
+ * silent on lanes) from spick.json itself, the authority (quotaline.ts lanesFromConfig). Null when neither can be
+ * read: then the built-in bullet stands.
+ */
 async function lanesNow($: EngineInterface): Promise<LanesState | null> {
-  try {
-    const p = await pathsNow($)
-    if (!p) return null
-    return lanesFromCache(await $.fs.read(p.quota))
-  } catch { return null }
+  const p = await pathsNow($).catch(() => null)
+  if (!p) return null
+  const cached = await $.fs.read(p.quota).then(lanesFromCache, () => null)
+  if (cached) return cached
+  return await $.fs.read(p.spickJson).then(lanesFromConfig, () => null)
 }
 
 /** The four remembered choices: routing, review, the gate and the guard. The lanes' on/off is not remembered here: it lives in spick.json. */
@@ -363,29 +367,66 @@ type DelegateRec = {
   id: string; lane: string; model: string; effort?: string; isReview?: boolean; startedAt: number; endedAt?: number; status: DelegateStatus
   /** the main turn that started it, and whether that turn's line is written (a later end then adds a late line) */
   turnId: string; isRecorded?: boolean
+  /** started from inside a subagent: that subagent's id */
+  parent?: string
   /** a subagent's usage, summed over its turn.complete events; null for an outside CLI and until it reports */
   usage: UsageEntry | null
+  /** an Agent call: what confirmed it completed */
+  confirmedBy?: ConfirmedBy
+  /** an outside CLI call: the characters its result carried */
+  outputChars?: number
 }
 
 /** a delegate as the turn record lists it */
 const delegateEntry = (d: DelegateRec): DelegateEntry => ({
-  id: d.id, lane: d.lane, model: d.model, ...(d.effort ? { effort: d.effort } : {}), ...(d.isReview ? { isReview: true } : {}),
-  status: d.status, ok: d.status === 'completed', startedAt: new Date(d.startedAt).toISOString(),
+  id: d.id, lane: d.lane, ...(d.parent ? { parent: d.parent } : {}), model: d.model, ...(d.effort ? { effort: d.effort } : {}), ...(d.isReview ? { isReview: true } : {}),
+  status: d.status, ok: d.status === 'completed', ...(d.confirmedBy ? { confirmedBy: d.confirmedBy } : {}),
+  ...(d.outputChars !== undefined ? { outputChars: d.outputChars } : {}), startedAt: new Date(d.startedAt).toISOString(),
   ms: d.endedAt === undefined ? null : Math.max(0, d.endedAt - d.startedAt), usage: d.usage, costUsd: d.usage?.costUsd ?? null,
 })
 
-/** a check as the turn record lists it; `editCount` is the turn's source edits at the end */
+/**
+ * Whether a check ran after the last completed source edit of the turn: no edit was in flight or completed while it
+ * ran, and none completed after it. `editCount` is the turn's completed source edits now. What it exercised is not
+ * known: an edit outside the check's scope still reads as checked (a known limit).
+ */
+const isAfterLastEdit = (c: CheckRun, editCount: number): boolean => c.editsDuring === 0 && c.editsAtStart === editCount
+
+/** a check as the turn record lists it; `editCount` is the turn's completed source edits at the end */
 const checkEntry = (c: CheckRun, editCount: number): CheckEntry => ({
   command: c.command, startedAt: new Date(c.startedAt).toISOString(), finishedAt: c.finishedAt === undefined ? null : new Date(c.finishedAt).toISOString(),
-  exitOk: c.exitOk ?? null, editsDuring: c.editsDuring ?? null, coversTurn: c.exitOk === true && c.editsDuring === 0 && c.editsAtStart === editCount,
+  exitOk: c.exitOk ?? null, editsDuring: c.editsDuring ?? null, afterLastEdit: isAfterLastEdit(c, editCount),
   ...(c.agentId ? { agentId: c.agentId } : {}),
 })
+
+/**
+ * The text a tool result carries: what the model read (`text`), else a Bash record's stdout and stderr, else a string
+ * result; '' when there is none.
+ */
+function resultText(r: { text?: string; result?: unknown } | undefined): string {
+  if (!r) return ''
+  if (typeof r.text === 'string') return r.text
+  const res = r.result
+  if (typeof res === 'string') return res
+  if (res && typeof res === 'object') {
+    const o = res as { stdout?: unknown; stderr?: unknown }
+    return `${typeof o.stdout === 'string' ? o.stdout : ''}${typeof o.stderr === 'string' ? o.stderr : ''}`
+  }
+  return ''
+}
+
+/** a delegate whose main turn's line is already written reports its end in one late line with that turnId */
+async function writeLate($: EngineInterface, w: TurnWriter, d: DelegateRec | undefined): Promise<void> {
+  if (!d?.isRecorded) return
+  const at = await $.clock.now()
+  await writeTurnLines($, w, [lineText(lateLine({ at, sessionId: w.sessionId, turnId: d.turnId, delegate: delegateEntry(d) }))]).catch(() => undefined)
+}
 
 /** how a call that returned stands: refused, failed (an error result) or completed */
 const statusOf = (r: { deny?: string; isError?: true } | undefined): DelegateStatus => (r === undefined ? 'failed' : r.deny ? 'refused' : r.isError ? 'failed' : 'completed')
 
-/** `onTimeout` hears each call that timed out, so its delegate record reads failed */
-type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean; onTimeout: (id: string) => void }
+/** `onTimeout` hears each call that timed out and when, so its delegate record reads timed-out */
+type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean; onTimeout: (id: string, at: number) => void }
 
 /** put the lane that works now on the band and publish the Running list */
 async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecord) => Partial<TurnRecord>): Promise<void> {
@@ -394,14 +435,14 @@ async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecor
 }
 
 /** Move calls with no completion signal for STALE_MS out of flight into `timedOut`. True when any moved. */
-async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>, onTimeout: (id: string) => void = () => {}): Promise<boolean> {
+async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>, onTimeout: (id: string, at: number) => void = () => {}): Promise<boolean> {
   const now = await $.clock.now()
   let moved = false
   for (const [id, l] of [...inFlight]) {
     if (l.startedAt === undefined || now - l.startedAt < STALE_MS) continue
     inFlight.delete(id)
     timedOut.set(id, { id, lane: l.lane, model: l.model, effort: l.effort, startedAt: l.startedAt, timedOutAt: now })
-    onTimeout(id)
+    onTimeout(id, now)
     moved = true
   }
   return moved
@@ -443,46 +484,90 @@ async function noteEdit($: EngineInterface, mainModel: string, agentId: string |
 
 /**
  * One check a Bash call ran in the turn, any loop's: the command from its runner on, when it started and finished,
- * whether the tool result came back without an error, and the source-edit count at its start and how many edits
- * landed while it ran. It covers the turn only when it passed and no source edit came after it started.
+ * whether the tool result came back without an error, the completed source edits at its start, the edits in flight
+ * then and the edits started so far (to count those that began while it ran), and `editsDuring`: the edits in flight
+ * or started while it ran. It covers the turn only when it passed and ran after the last completed edit (isAfterLastEdit).
  */
-type CheckRun = { command: string; key: string; startedAt: number; finishedAt?: number; exitOk?: boolean; editsAtStart: number; editsDuring?: number; agentId?: string }
+type CheckRun = {
+  command: string; key: string; startedAt: number; finishedAt?: number; exitOk?: boolean
+  editsAtStart: number; inFlightAtStart: number; startsAtStart: number; editsDuring?: number; agentId?: string
+}
 
 /**
  * the guard's state for the main turn: the source files the main session edited itself, those any loop edited, how
  * many source edits went through, the checks run; `cwd` is the session's, which isSourcePath judges paths against
  */
 type GuardTurn = {
-  mainEdits: Set<string>; agentEdits: Set<string>; sourceEdits: Set<string>; editCount: number; checks: CheckRun[]; cwd: string
+  mainEdits: Set<string>; agentEdits: Set<string>; sourceEdits: Set<string>; checks: CheckRun[]; cwd: string
+  /** source edits whose tool call resolved without an error; those started; those started and not yet resolved */
+  editCount: number; editStarts: number; editsInFlight: number
   /** the main loop's failures per check (checkOf's key), and the escalation they raised: once per turn */
   failures: Map<string, number>; escalation: { command: string; at: number } | null
 }
 
-/** a check that passed after the last source edit of the turn, with none landing while it ran */
-const isChecked = (g: GuardTurn): boolean => g.checks.some(c => checkEntry(c, g.editCount).coversTurn)
+/** a check that passed after the last completed source edit of the turn, with none in flight or landing while it ran */
+const isChecked = (g: GuardTurn): boolean => g.editsInFlight === 0 && g.checks.some(c => c.exitOk === true && isAfterLastEdit(c, g.editCount))
 
 /**
  * The guard's edit cap, in front of an Edit, Write or NotebookEdit: the main session's own edit of a source file past
  * EDIT_CAP distinct ones this turn is refused (a toast, `edit cap` on the band) while the guard is on and routing is in
  * force. Returns the refusal, or null to let the edit through. A file already edited, a subagent's edit, and a path that
- * is not source (notes, data, .claude/) never count against the cap; every source edit that goes through, a subagent's
- * too, counts for the check before the turn ends.
+ * is not source (notes, data, .claude/) never count against the cap. The main session's file takes its place under the
+ * cap when the call starts (two edits in parallel cannot both slip under it) and gives it back if the edit fails.
+ * `source` says whether the call is a source edit, for editDone.
  */
-async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string): Promise<string | null> {
-  if (!isSourcePath(path, g.cwd)) return null
+async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string): Promise<{ deny: string | null; source: boolean; reserved: boolean }> {
+  if (!isSourcePath(path, g.cwd)) return { deny: null, source: false, reserved: false }
   if (!agentId && !g.mainEdits.has(path) && g.mainEdits.size >= EDIT_CAP) {
     const c = await read($, controls)
     if (c.guard === 'on' && effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) {
       $.ui.toast('spick: guard — edit cap: one source file per turn; the next one goes to a coder')
       await setCurrent($, { note: { kind: 'error', text: 'edit cap' } })
-      return editCapReason([...g.mainEdits])
+      return { deny: editCapReason([...g.mainEdits]), source: true, reserved: false }
     }
   }
+  const reserved = !agentId && !g.mainEdits.has(path)
   if (!agentId) g.mainEdits.add(path)
-  else g.agentEdits.add(path)
+  g.editStarts++
+  g.editsInFlight++
+  return { deny: null, source: true, reserved }
+}
+
+/**
+ * A source edit's call resolved: it counts for the check before the turn ends only once it went through (a refused or
+ * failed edit changed nothing), so a check binds to completed edits, not started ones. A main-session file whose
+ * first edit failed leaves the cap again.
+ */
+function editDone(g: GuardTurn, agentId: string | undefined, path: string, ok: boolean, reserved: boolean): void {
+  g.editsInFlight = Math.max(0, g.editsInFlight - 1)
+  if (!ok) {
+    if (reserved) g.mainEdits.delete(path)
+    return
+  }
+  if (agentId) g.agentEdits.add(path)
   g.sourceEdits.add(path)
   g.editCount++
-  return null
+}
+
+/** an edit tool call's result went through: not refused, no error */
+const editWentThrough = (r: { deny?: string; isError?: true } | undefined): boolean => r !== undefined && !r.deny && !r.isError
+
+/**
+ * The edit hooks' shared body: the cap in front, the count once the call resolved (finally: a throw is no edit). A
+ * failure in the cap lets the edit through uncounted.
+ */
+async function guardedEdit<E, R extends { deny?: string; isError?: true }>($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string, e: E, next: (e: E) => Promise<R>, note: () => Promise<void>): Promise<R | { deny: string }> {
+  const gate = await guardEdit($, g, mainModel, agentId, path).catch(() => ({ deny: null, source: false, reserved: false }))
+  if (gate.deny) return { deny: gate.deny }
+  await note()
+  if (!gate.source) return next(e)
+  let r: R | undefined
+  try {
+    r = await next(e)
+    return r
+  } finally {
+    editDone(g, agentId, path, editWentThrough(r), gate.reserved)
+  }
 }
 
 // The .catch on the gating hooks: should one throw past its own try/catch or
@@ -533,15 +618,42 @@ export const register: Register = on => {
   let delegate: Lane | null = null
   /** every delegate of the main turn and how it stands; the gate asks them whether the required role completed */
   let delegatesOfTurn: DelegateRec[] = []
-  /** tool_use_id -> its record, until it settles (a background agent's settles at its own turn.complete) */
+  /**
+   * tool_use_id -> its record, until it settles (a background agent's settles at its own turn.complete). A call that
+   * timed out stays here, marked timed-out, so a completion that comes after all still lands on it.
+   */
   const delegateOfCall = new Map<string, DelegateRec>()
-  const settle = (id: string, status: DelegateStatus, at: number): void => {
+  /** the main turns whose line is written: a delegate attributed to one of them reports its end in a late line */
+  const recordedTurns = new Set<string>()
+  const settle = (id: string, status: DelegateStatus, at: number): DelegateRec | undefined => {
     const d = delegateOfCall.get(id)
-    if (!d) return
-    // a refusal or failure the call reported stands; completion is never taken back
-    if (d.status === 'running') d.status = status
+    if (!d) return undefined
+    // a refusal or failure the call reported stands; completion is never taken back; a timeout is (it ended after all)
+    if (d.status === 'running' || d.status === 'timed-out') d.status = status
     d.endedAt = at
     delegateOfCall.delete(id)
+    return d
+  }
+  /** no completion signal for 30 minutes: timed-out, kept for a later completion */
+  const timeOut = (id: string, at: number): void => {
+    const d = delegateOfCall.get(id)
+    if (d?.status !== 'running') return
+    d.status = 'timed-out'
+    d.endedAt = at
+  }
+  /**
+   * A new delegate's record, attributed to a main turn: the current one, or for a call made inside a subagent (`agentId`)
+   * the turn that started that subagent (it may outlive its turn). One attributed to a turn already written ends in a
+   * late line; the others join the turn's list, the gate's included.
+   */
+  const addDelegate = (d: Omit<DelegateRec, 'turnId' | 'parent' | 'isRecorded'>, agentId: string | undefined): DelegateRec => {
+    const parentCall = agentId ? callOfAgent.get(agentId) : undefined
+    const parentRec = parentCall !== undefined ? delegateOfCall.get(parentCall) : undefined
+    const turnId = parentRec?.turnId ?? mainTurnId
+    const rec: DelegateRec = { ...d, turnId, ...(agentId ? { parent: agentId } : {}), ...(recordedTurns.has(turnId) ? { isRecorded: true } : {}) }
+    if (!rec.isRecorded) delegatesOfTurn.push(rec)
+    delegateOfCall.set(d.id, rec)
+    return rec
   }
   let agentsThisTurn = 0
   /** the Hint line's findings for the prompt just submitted, then for the turn it started (a delivery carries none) */
@@ -564,7 +676,7 @@ export const register: Register = on => {
   /** the efforts an Agent call of coder, planner or deep gets when it names none (spick.json efforts) */
   let efforts: Efforts = DEFAULT_EFFORTS
   /** the guard's per-turn state, cleared at turn.start */
-  const guardTurn: GuardTurn = { mainEdits: new Set(), agentEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
+  const guardTurn: GuardTurn = { mainEdits: new Set(), agentEdits: new Set(), sourceEdits: new Set(), editCount: 0, editStarts: 0, editsInFlight: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
   let mainModel = ''
   let mainEffort: string | undefined
   /** the main loop's last prompt size in tokens, from its latest step's usage; undefined until one reported it */
@@ -594,8 +706,8 @@ export const register: Register = on => {
   }
   /** calls that timed out (no completion signal for 30 minutes), listed in the pane until the next prompt drops them */
   const timedOut = new Map<string, RunningAgent>()
-  // a call with no completion signal for 30 minutes is a failed delegate
-  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen, onTimeout: id => settle(id, 'failed', Date.now()) }
+  // a call with no completion signal for 30 minutes is a timed-out delegate (never enough for the gate)
+  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen, onTimeout: timeOut }
 
   on('session.start', async ($, e, next) => {
     try {
@@ -716,6 +828,8 @@ export const register: Register = on => {
       guardTurn.sourceEdits.clear()
       gateEvents = []
       guardTurn.editCount = 0
+      guardTurn.editStarts = 0
+      guardTurn.editsInFlight = 0
       guardTurn.checks = []
       guardTurn.failures.clear()
       guardTurn.escalation = null
@@ -778,11 +892,8 @@ export const register: Register = on => {
       const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn, startedAt: await $.clock.now() }
       inFlight.set(id, entry)
       delegate = entry
-      if (!e.agentId) {
-        const d: DelegateRec = { id, lane: entry.lane, model: e.model ?? '', effort: e.effort, startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
-        delegatesOfTurn.push(d)
-        delegateOfCall.set(id, d)
-      }
+      // a subagent's own Agent call is recorded too, under the main turn that started it
+      addDelegate({ id, lane: entry.lane, model: e.model ?? '', effort: e.effort, startedAt: entry.startedAt!, status: 'running', usage: null }, e.agentId)
       await refreshBand($, tracker, () => ({ agents: agentsThisTurn }))
     } catch {}
     // finally: an interrupted call must not leave the subagent's lane on the band
@@ -796,7 +907,14 @@ export const register: Register = on => {
         // until its own turn.complete, unless the call itself was refused or failed
         const status = statusOf(r)
         const isBackground = (e.run_in_background === true || backgroundCalls.has(id)) && status === 'completed'
-        if (!isBackground) settle(id, status, await $.clock.now())
+        const d = delegateOfCall.get(id)
+        if (!isBackground && d && status === 'completed') {
+          // still unsettled: no turn.complete of its subagent arrived before the call returned. The engine does not
+          // guarantee a foreground subagent's events reach the hooks first, so the call's own result is the honest
+          // fallback: completed when it is no error and carries text, failed when it is empty
+          d.confirmedBy = 'tool.result'
+          await writeLate($, turnWriter, settle(id, resultText(r).trim() ? 'completed' : 'failed', await $.clock.now()))
+        } else if (!isBackground) await writeLate($, turnWriter, settle(id, status, await $.clock.now()))
       } catch {}
       try {
         // a background agent returns at once but its subagent still runs: its lane stays until turn.complete. Background
@@ -820,7 +938,7 @@ export const register: Register = on => {
       }
       if (e.background && !r.deny) backgroundCalls.add(e.tool_use_id)
       const d = delegateOfCall.get(e.tool_use_id)
-      if (d && r.deny) settle(e.tool_use_id, 'refused', await $.clock.now())
+      if (d && r.deny) await writeLate($, turnWriter, settle(e.tool_use_id, 'refused', await $.clock.now()))
       else if (d) { d.lane = e.subagentType; if (r.model) d.model = r.model }
       // the resolved type and model replace what the Agent call named (it may have named neither)
       const entry = inFlight.get(e.tool_use_id)
@@ -840,24 +958,27 @@ export const register: Register = on => {
     try {
       const check = checkOf(e.command, declared)
       if (check) {
-        run = { ...check, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, ...(e.agentId ? { agentId: e.agentId } : {}) }
+        run = { ...check, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, inFlightAtStart: guardTurn.editsInFlight, startsAtStart: guardTurn.editStarts, ...(e.agentId ? { agentId: e.agentId } : {}) }
         guardTurn.checks.push(run)
       }
     } catch {}
     const id = e.tool_use_id
     let isCli = false
-    if (!e.agentId) try {
+    // a subagent's CLI call too (a nested delegate, recorded under the main turn that started the subagent)
+    try {
       const cli = parseCli(e.command)
       if (cli) {
         isCli = true
         const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview: cli.isReview, startedAt: await $.clock.now() }
         inFlight.set(id, entry)
         delegate = entry
-        // a review call: Codex with a review prompt, or a declared lane tagged review (invoke.py --lane <id>)
-        const isReview = cli.isReview || ((await lanesNow($))?.lanes ?? []).some(l => l.id === cli.lane && l.tags.includes('review'))
-        const d: DelegateRec = { id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview, startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
-        delegatesOfTurn.push(d)
-        delegateOfCall.set(id, d)
+        // a review call is the line's one command (commands piped into it allowed, nothing chained), not a question
+        // about the program itself (--help, --version): Codex with a review prompt, or a declared lane tagged review
+        // (invoke.py --lane <id>). A chain such as `true || codex exec "review"` hides whether it ran at all.
+        const one = oneCommand(e.command, true)
+        const single = one && !asksAboutItself(one.text) ? parseCli(one.typed) : null
+        const isReview = single?.lane === cli.lane && (single.isReview || ((await lanesNow($))?.lanes ?? []).some(l => l.id === cli.lane && l.tags.includes('review')))
+        addDelegate({ id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, ...(isReview ? { isReview } : {}), startedAt: entry.startedAt!, status: 'running', usage: null }, e.agentId)
         await refreshBand($, tracker, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
         // outside CLIs report no usage: count the call, leave it unpriced
         await update($, totals, t => {
@@ -886,14 +1007,20 @@ export const register: Register = on => {
       if (run) {
         try {
           run.finishedAt = await $.clock.now()
-          // the exit status as the tool result carries it: a non-zero exit, a refusal or an interrupt is an error
-          run.exitOk = r !== undefined && !r.deny && !r.isError
-          run.editsDuring = guardTurn.editCount - run.editsAtStart
+          // the exit status as the tool result carries it: a non-zero exit, a refusal or an interrupt is an error; a
+          // command moved to the background has no status yet
+          const out = r !== undefined && !r.deny && !r.isError ? (r.result as { backgroundTaskId?: unknown; interrupted?: unknown } | undefined) : undefined
+          run.exitOk = r !== undefined && !r.deny && !r.isError && !out?.backgroundTaskId && out?.interrupted !== true
+          // the edits in flight when it started, and those started while it ran, whether they completed or not
+          run.editsDuring = run.inFlightAtStart + (guardTurn.editStarts - run.startsAtStart)
         } catch {}
       }
       if (isCli) {
         try {
-          settle(id, statusOf(r), await $.clock.now())
+          // how much it printed: a review counts only from MIN_REVIEW_CHARS (gate.ts)
+          const d = delegateOfCall.get(id)
+          if (d) d.outputChars = resultText(r).length
+          await writeLate($, turnWriter, settle(id, statusOf(r), await $.clock.now()))
           inFlight.delete(id)
           await refreshBand($, tracker)
         } catch {}
@@ -902,23 +1029,13 @@ export const register: Register = on => {
   }).catch(passThrough)
 
   // The guard's edit cap sits in front of each edit tool; a failure in it lets the edit through.
-  on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
-    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
-    if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
-    return next(e)
-  }).catch(passThrough)
-  on('tool.call', { tool: 'Write' }, async ($, e, next) => {
-    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
-    if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
-    return next(e)
-  }).catch(passThrough)
-  on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {
-    const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.notebook_path).catch(() => null)
-    if (deny) return { deny }
-    return next(e)
-  }).catch(passThrough)
+  // A source edit counts once its call resolved without an error (guardedEdit).
+  on('tool.call', { tool: 'Edit' }, async ($, e, next) =>
+    guardedEdit($, guardTurn, mainModel, e.agentId, e.file_path, e, next, () => noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd))).catch(passThrough)
+  on('tool.call', { tool: 'Write' }, async ($, e, next) =>
+    guardedEdit($, guardTurn, mainModel, e.agentId, e.file_path, e, next, () => noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd))).catch(passThrough)
+  on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) =>
+    guardedEdit($, guardTurn, mainModel, e.agentId, e.notebook_path, e, next, async () => {})).catch(passThrough)
 
   // Stop time, where the gate and the guard's check intervene (with the guard's edit cap, the only places this module
   // does). They send a turn back at most once between them, with every reason in one block, never while routing is
@@ -999,12 +1116,10 @@ export const register: Register = on => {
         const call = callOfAgent.get(e.agentId)
         // the subagent's own end decides its delegate's status: an answer completed it, anything else failed it
         const d = call !== undefined ? delegateOfCall.get(call) : undefined
-        if (call !== undefined) settle(call, e.reason === 'answer' && !e.isAborted ? 'completed' : 'failed', await $.clock.now())
-        // a background agent that outlived its main turn's line: one late line with the same turnId and its usage
-        if (d?.isRecorded) {
-          const at = await $.clock.now()
-          await writeTurnLines($, turnWriter, [lineText(lateLine({ at, sessionId: turnWriter.sessionId, turnId: d.turnId, delegate: delegateEntry(d) }))]).catch(() => undefined)
-        }
+        if (d) d.confirmedBy = 'turn.complete'
+        // an agent that outlived its main turn's line (in the background, or timed out first): one late line with the
+        // same turnId and its usage
+        if (call !== undefined) await writeLate($, turnWriter, settle(call, e.reason === 'answer' && !e.isAborted ? 'completed' : 'failed', await $.clock.now()))
         callOfAgent.delete(e.agentId)
         // a background agent's Agent call returned long ago; its lane leaves the band now
         if (call !== undefined && inFlight.delete(call)) {
@@ -1032,6 +1147,7 @@ export const register: Register = on => {
             usage: usage ? usageEntry(usage, estimateCost(usage.model, usage)) : null, lastInput: mainLastInput, ms: e.durationMs,
           })
           for (const d of delegatesOfTurn) d.isRecorded = true
+          recordedTurns.add(e.turnId)
           await writeTurnLines($, turnWriter, [lineText(line)]).catch(() => undefined)
         } catch {}
         const c = await read($, current)

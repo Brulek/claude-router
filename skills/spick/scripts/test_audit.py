@@ -124,5 +124,66 @@ class TestText(Base):
         self.assertEqual(cm.exception.code, 2)
 
 
+class TestDelegates(Base):
+    def test_nested_late_and_timed_out_delegates_are_counted(self):
+        sys.path.insert(0, HERE)
+        from test_spend import nested_turn_lines
+        os.makedirs(self.dir, exist_ok=True)
+        with open(os.path.join(self.dir, "nnnn.jsonl"), "w") as f:
+            f.write(nested_turn_lines())
+        f = self.figures()
+        self.assertEqual(f["delegates"], {"total": 3, "nested": 1, "late": 1, "timedOut": 0})
+        self.assertEqual(f["costByLane"]["coder"]["costUsd"], 1.25)
+        _, out, _ = self.run_main()
+        self.assertIn("delegates: 3; started inside a subagent 1, ended after their turn's line 1, timed out 0", out.splitlines())
+
+
+class TestOverrides(Base):
+    def put_calls(self, lines):
+        d = os.path.join(self.home, ".claude", "spick")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "invoke.jsonl"), "w") as f:
+            f.write("".join((x if isinstance(x, str) else json.dumps(x)) + "\n" for x in lines))
+
+    def test_the_period_s_overrides_with_their_reasons(self):
+        call = lambda at, override, exit=0: {"at": at, "lane": "glm", "model": "m", "data": "text", "sent": "code", "override": override, "exit": exit, "tokens": None, "seconds": 1.0}  # noqa: E731
+        self.put_calls([
+            call("2026-10-13T09:00:00Z", "the user said the snippet is public"),
+            call("2026-10-13T10:00:00Z", None),
+            call("2026-09-01T10:00:00Z", "too old for the window"),
+            "not json",
+        ])
+        f = self.figures()
+        self.assertEqual(f["overrides"], {"count": 1, "calls": [{"at": "2026-10-13T09:00:00Z", "lane": "glm", "exit": 0, "reason": "the user said the snippet is public"}]})
+        code, out, err = self.run_main()
+        self.assertEqual(code, 0)
+        self.assertIn("skipped 1 invoke.jsonl line that does not read", err)
+        lines = out.splitlines()
+        self.assertIn("data overrides (invoke.py --override-data): 1", lines)
+        self.assertIn("  2026-10-13T09:00:00Z  glm  exit 0  reason: the user said the snippet is public", lines)
+
+    def test_no_log_is_no_overrides(self):
+        self.put_turns()
+        self.assertEqual(self.figures()["overrides"], {"count": 0, "calls": []})
+
+
+class TestReviewDone(unittest.TestCase):
+    def test_a_review_call_counts_from_200_characters_of_output(self):
+        t = lambda n: {"hint": ["review"], "delegates": [dict({"lane": "Codex", "isReview": True, "status": "completed"}, **({} if n is None else {"outputChars": n}))]}  # noqa: E731
+        self.assertEqual(audit._done(t(200)), "delegated")
+        self.assertEqual(audit._done(t(36)), "neither")
+        self.assertEqual(audit._done(t(None)), "delegated")
+
+
+class TestCovered(unittest.TestCase):
+    def test_a_check_covers_only_when_it_passed_and_ran_after_the_last_completed_edit(self):
+        c = lambda **k: {"checks": [dict({"command": "pytest", "editsDuring": 0}, **k)]}  # noqa: E731
+        self.assertTrue(audit._covered(c(exitOk=True, afterLastEdit=True)))
+        self.assertFalse(audit._covered(c(exitOk=False, afterLastEdit=True)))
+        self.assertFalse(audit._covered(c(exitOk=True, afterLastEdit=False)))
+        # records written before the rename carry coversTurn
+        self.assertTrue(audit._covered(c(exitOk=True, coversTurn=True)))
+
+
 if __name__ == "__main__":
     unittest.main()

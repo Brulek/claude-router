@@ -199,16 +199,18 @@ install() {
   mkdir -p "$CLAUDE_DIR/agents" || fail "creating $CLAUDE_DIR/agents"
 
   echo "== agents =="
-  local written=()
+  # agent_states: name=written|kept|skipped per agent, for the `installed` record in spick.json
+  local written=() kept=() agent_states=()
   for f in "$SKILL_DIR"/assets/agents/*.md; do
     dst="$CLAUDE_DIR/agents/$(basename "$f")"
+    name="$(basename "$f" .md)"
     # Explore.md replaces the built-in Explore (which runs on the main session's model) with a Haiku one
-    if [ "$(basename "$f")" = Explore.md ] && [ "$explore" = 0 ]; then echo "  skip   $dst (--no-explore)"; continue; fi
+    if [ "$name" = Explore ] && [ "$explore" = 0 ]; then echo "  skip   $dst (--no-explore)"; agent_states+=("$name=skipped"); continue; fi
     if [ -e "$dst" ] && [ "$force" = 0 ]; then
-      echo "  keep   $dst (exists; --force to overwrite)"
+      echo "  keep   $dst (exists; --force to overwrite)"; kept+=("$dst"); agent_states+=("$name=kept")
     else
       cp "$f" "$dst" || fail "writing $dst"
-      echo "  wrote  $dst"; written+=("$dst"); changed "$dst"
+      echo "  wrote  $dst"; written+=("$dst"); changed "$dst"; agent_states+=("$name=written")
     fi
   done
   py "$MANIFEST" ${written[@]+"${written[@]}"} <<'PY' || fail "backup manifest (agents)" $?
@@ -217,8 +219,9 @@ note(sys.argv[1], "agents_written", sys.argv[2:])
 PY
 
   echo "== CLAUDE.md block =="
-  local md="$CLAUDE_DIR/CLAUDE.md" snippet="$SKILL_DIR/assets/claude-md-snippet.md"
-  py "$md" "$snippet" "$MANIFEST" <<'PY' || fail "the CLAUDE.md block" $?
+  local md="$CLAUDE_DIR/CLAUDE.md" snippet="$SKILL_DIR/assets/claude-md-snippet.md" md_out
+  md_out=$(py "$md" "$snippet" "$MANIFEST" <<'PY'
+
 import sys, re
 md, snippet, man = sys.argv[1:4]
 start, end = "<!-- spick:start -->", "<!-- spick:end -->"
@@ -234,12 +237,15 @@ atomic_write(md, cur)
 note(man, "claude_md_block", True)
 print(f"  {action} block in {md}")
 PY
+) || fail "the CLAUDE.md block" $?
+  echo "$md_out"
   changed "the spick block in $md"
 
   echo "== config =="
-  py "$CONFIG" "$lanes" "$model" "$effort" "$VERSION" "$SKILL_DIR/assets/rules.json" <<'PY' || fail "writing $CONFIG" $?
+  # installed_version is not written here: the last step stamps it with what the run left current (`installed`)
+  py "$CONFIG" "$lanes" "$model" "$effort" "$SKILL_DIR/assets/rules.json" <<'PY' || fail "writing $CONFIG" $?
 import sys, datetime
-cfg, lanes, model, effort, version, rules = sys.argv[1:7]
+cfg, lanes, model, effort, rules = sys.argv[1:6]
 # the delegates' default efforts, for the mod (it cannot read the skill's files): rules.json is the source
 efforts = {k: v["default"] for k, v in json.load(open(rules))["efforts"].items()}
 old = {}
@@ -254,13 +260,13 @@ if os.path.exists(cfg):
 owned = {
   "version": 1,
   "installed_at": datetime.date.today().isoformat(),
-  "installed_version": version or None,
   "lanes": {k: (k in lanes.split(",")) for k in ("gemini", "grok", "codex")},
   "main_session": {"model": model or "haiku", "effort": effort or "medium"},
   "review_triggers": {"files": 3, "lines": 150},
   "efforts": efforts,
 }
-# keep every key setup does not own (subscriptions etc.); drop retired quota threshold block
+# keep every key setup does not own (subscriptions etc., and the last run's installed_version until the stamp step);
+# drop retired quota threshold block
 d = {k: v for k, v in old.items() if k not in owned and k != "quota"}
 d.update(owned)
 atomic_write(cfg, json.dumps(d, indent=2, ensure_ascii=False))
@@ -277,18 +283,30 @@ p, man, hook = sys.argv[1:4]
 d = json.load(open(p)) if os.path.exists(p) else {}
 cmd = 'bash "%s"' % hook
 hooks = d.setdefault("hooks", {}); lst = hooks.setdefault("UserPromptSubmit", [])
-present = any("spick/scripts/triage-hook.sh" in h.get("command", "") for e in lst for h in e.get("hooks", []))
-if not present:
+ours = [h for e in lst for h in e.get("hooks", []) if "spick/scripts/triage-hook.sh" in h.get("command", "")]
+if not ours:
     lst.append({"hooks": [{"type": "command", "command": cmd}]})
     atomic_write(p, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
     note(man, "hook_added", True)
     print(f"  added  UserPromptSubmit hook -> {p}")
+elif any(h.get("command") != cmd for h in ours):
+    # a spick hook pointing at another checkout or an old path is spick's own: it follows this skill
+    old = [h.get("command") for h in ours if h.get("command") != cmd]
+    for h in ours:
+        h["command"] = cmd
+    atomic_write(p, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
+    note(man, "hook_updated", {"from": old, "to": cmd})
+    print(f"  updated UserPromptSubmit hook -> {p} (was {', '.join(old)})")
 else:
     print(f"  keep   hook already present in {p}")
 PY2
 ) || fail "adding the hook to $CLAUDE_DIR/settings.json" $?
   echo "$hook_out"
-  case "$hook_out" in *added*) changed "the triage hook in $CLAUDE_DIR/settings.json";; esac
+  local hook_state=kept
+  case "$hook_out" in
+    *added*) hook_state=added; changed "the triage hook in $CLAUDE_DIR/settings.json";;
+    *updated*) hook_state=updated; changed "the triage hook's path in $CLAUDE_DIR/settings.json";;
+  esac
 
   if [ -n "$model$effort" ]; then
     echo "== settings.json =="
@@ -318,8 +336,26 @@ if man and os.path.exists(man):
         s[k]["after"] = d.get(k)
     note(man, "settings", s)
 PY
+
+  # last: stamp the version with what this run left current and what it kept, so a version that says "current"
+  # never hides an agent file from an older install
+  local snippet_state=appended
+  case "$md_out" in *replaced*) snippet_state=replaced;; esac
+  py "$CONFIG" "$VERSION" "$hook_state" "$snippet_state" ${agent_states[@]+"${agent_states[@]}"} <<'PY' || fail "stamping installed_version in $CONFIG" $?
+import sys
+cfg, version, hook, snippet = sys.argv[1:5]
+d = json.load(open(cfg))
+d["installed_version"] = version or None
+d["installed"] = {"agents": dict(a.split("=", 1) for a in sys.argv[5:]), "hook": hook, "snippet": snippet}
+atomic_write(cfg, json.dumps(d, indent=2, ensure_ascii=False))
+PY
   echo
   echo "done. New sessions pick this up; the current one does not."
+  if [ ${#kept[@]} -gt 0 ]; then
+    echo "Kept as they were (they may predate this version; run with --force to overwrite them):"
+    local k
+    for k in "${kept[@]}"; do echo "  $k"; done
+  fi
   echo "Desktop app users: pick the main model once in the composer's model menu (the app remembers its own choice)."
 }
 

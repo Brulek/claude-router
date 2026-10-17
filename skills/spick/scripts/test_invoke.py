@@ -397,6 +397,47 @@ class DataLevel(InvokeCase):
         self.assertEqual(self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--override-data", " ").returncode, 2)
 
 
+class AuditLog(InvokeCase):
+    """every prompt call leaves one line in <state>/invoke.jsonl: what was declared and sent, the override, the outcome"""
+
+    def lines(self):
+        p = os.path.join(self.tmp.name, "spick", "invoke.jsonl")
+        if not os.path.exists(p):
+            return []
+        with open(p) as f:
+            return [json.loads(x) for x in f.read().splitlines()]
+
+    def test_a_call_logs_lane_model_levels_exit_tokens_and_seconds_never_the_key(self):
+        r = self.run_invoke(self.api_lane(data="code"), "--lane", "t", "--contains", "text")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        (line,) = self.lines()
+        self.assertEqual({k: line[k] for k in ("lane", "model", "data", "sent", "override", "exit", "tokens")},
+                         {"lane": "t", "model": "m1", "data": "code", "sent": "text", "override": None, "exit": 0, "tokens": {"in": 7, "out": 3}})
+        self.assertIsInstance(line["seconds"], float)
+        self.assertRegex(line["at"], r"^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\dZ$")
+        with open(os.path.join(self.tmp.name, "spick", "invoke.jsonl")) as f:
+            self.assertNotIn(KEY, f.read())
+
+    def test_a_refusal_and_an_override_are_logged_with_the_heuristic_level(self):
+        with open(self.prompt, "w") as f:
+            f.write("fix this:\n```python\nprint(1)\n```\n")
+        self.assertEqual(self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--contains", "text").returncode, 6)
+        reason = "the user said send it, key " + KEY
+        self.assertEqual(self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--override-data", reason).returncode, 0)
+        refused, overridden = self.lines()
+        self.assertEqual((refused["exit"], refused["sent"], refused["data"], refused["override"], refused["tokens"]), (6, "code", "text", None, None))
+        self.assertEqual((overridden["exit"], overridden["sent"], overridden["override"]), (0, "code", "the user said send it, key [redacted]"))
+        with open(os.path.join(self.tmp.name, "spick", "invoke.jsonl")) as f:
+            self.assertNotIn(KEY, f.read())
+
+    def test_an_unknown_lane_is_logged_and_a_model_listing_is_not(self):
+        self.assertEqual(self.run_invoke(self.api_lane(), "--lane", "nope").returncode, 2)
+        (line,) = self.lines()
+        self.assertEqual((line["lane"], line["exit"], line["data"], line["sent"]), ("nope", 2, None, None))
+        self.assertEqual(self.run_invoke(self.api_lane(), "--lane", "t", "--list-models").returncode, 0)
+        self.assertEqual(len(self.lines()), 1)
+
+
 class Answers(InvokeCase):
     def test_every_text_block_in_order(self):
         for api, want in (("openai-chat", "one two\n"), ("anthropic-messages", "first, second\n")):

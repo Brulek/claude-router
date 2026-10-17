@@ -9,10 +9,10 @@
 export const EDIT_CAP = 1
 
 /**
- * The checks: a test runner, a build, a linter or a type checker, each matched at the start of one command of the line
- * (its command word, after the prefixes below and with a path cut to its base name), so `echo pytest` and
- * `grep pytest README` are not checks. A project can add its own in spick.json (`guard.check_commands`, see
- * declaredChecks); those are matched against each command the same way.
+ * The checks: a test runner, a build, a linter or a type checker, matched at the command word of the line's one command
+ * (after the prefixes below and with a path cut to its base name), so `echo pytest` and `grep pytest README` are not
+ * checks. A project can add its own in spick.json (`guard.check_commands`, see declaredChecks); those are matched
+ * against the command the same way.
  */
 const RUNNERS: readonly RegExp[] = [
   /^(pytest|py\.test|vitest|jest|mocha|tsc|ruff|eslint|flake8|mypy|pyright|shellcheck|xcodebuild|rspec|phpunit|ctest)\b/,
@@ -62,41 +62,82 @@ function commandText(seg: string): { text: string; raw: string; isTestScript: bo
 }
 
 /**
- * The check a Bash command runs, as the command text from its runner on, or null when it runs none. Each command of
- * the line (split on && || ; | and newlines, quoted text masked so nothing inside it splits or matches) is matched
- * by its command word. A check whose exit status is thrown away (`pytest || true`) or that only asks the runner about
- * itself (`pytest --version`) does not count. A pipe into another command (`npm test | tail`) is taken as it is: the
- * exit status is then the last command's, a known blind spot.
+ * The check a Bash command runs, as the command text from its runner on, or null when it runs none. The line must be
+ * ONE simple command: after the prefixes (env, npx, sudo, time, uv run, assignments) and at most one leading
+ * `cd <dir> &&`, the runner and its arguments, with redirections (`2>&1`, `> out.txt`) allowed. Any `|`, `;`, `&&`,
+ * `||`, `&` or newline elsewhere disqualifies it: the engine reports the whole line's status only, so `true || pytest`,
+ * `pytest; true`, `pytest | cat` and `npm test | tail -5` prove nothing about the check. Quoted text is masked so
+ * nothing inside it splits or matches. A runner asked about itself (`pytest --version`) runs no check.
  */
 export function checkCommand(command: string, declared: readonly RegExp[] = []): string | null {
   return checkOf(command, declared)?.command ?? null
 }
 
+/** command separators and grouping outside quotes, after redirections are taken out: any one means several commands */
+const SEPARATOR = /\|\||&&|;|\||&|\n|\(|\)|`/
+/** a redirection with its target (`> out.txt`, `2>>log`, `< in`), so a target is no check target */
+const REDIRECT = /\d*(?:>>?|<)\s*(?:&\d+-?|\S+)|&>>?\s*\S+/g
+
+/** the line as one simple command (see oneCommand) */
+export type OneCommand = {
+  /** from the command word on, the word cut to its base name, redirections out, quoted text masked */
+  text: string
+  /** the same with the command word as typed */
+  raw: string
+  /** the command as typed from its command word on, redirections kept, quoted text restored */
+  typed: string
+  /** where a leading `cd` moved, '' when none */
+  dir: string
+  isTestScript: boolean
+  /** masked quoted text back in place */
+  restore: (t: string) => string
+}
+
 /**
- * The check a Bash command runs and its identity: `key` is the directory a `cd` before it moved to, the runner's
- * command word and its targets (the arguments that are not flags), so `pytest -q tests/a.py` and
- * `pytest tests/a.py -x` are the same check and `pytest tests/b.py` another.
+ * The line as ONE simple command, or null when it holds several: after at most one leading `cd <dir> &&`, no `|`, `;`,
+ * `&&`, `||`, `&`, newline, subshell or backquote outside quotes; redirections (`2>&1`, `> out.txt`) are allowed. With
+ * `feedIn`, commands piped INTO it are allowed too (`git diff | codex exec "..."`): a pipeline's exit status and output
+ * are its last command's, so what feeds it hides nothing about it; anything after it, or any other separator, still
+ * disqualifies the line.
+ */
+export function oneCommand(command: string, feedIn = false): OneCommand | null {
+  const quoted: string[] = []
+  let masked = (command ?? '').replace(QUOTED, m => `"${quoted.push(m) - 1}"`).replace(/\\\n/g, ' ').trim()
+  // one leading `cd <dir> &&` moves where it runs; it is not a second command (cd's own failure stops the line)
+  let dir = ''
+  const cd = masked.match(/^cd\s+(\S+)\s*&&\s*/)
+  if (cd) { dir = cd[1]!; masked = masked.slice(cd[0].length) }
+  // redirections are not separators: 2>&1, >&2, &> and &>> must not read as a background & or a second command
+  let bare = masked.replace(REDIRECT, ' ')
+  // a pipeline of plain pipes only (no ||, no other separator): keep its last command, redirections and all
+  if (feedIn && bare.includes('|') && !bare.includes('||') && !SEPARATOR.test(bare.replace(/\|/g, ' '))) {
+    masked = masked.slice(masked.lastIndexOf('|') + 1).trim()
+    bare = masked.replace(REDIRECT, ' ')
+  }
+  if (SEPARATOR.test(bare)) return null
+  const { text, raw, isTestScript } = commandText(bare)
+  if (!text) return null
+  const restore = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
+  return { text, raw, typed: restore(commandText(masked).raw), dir, isTestScript, restore }
+}
+
+/** whether a command only asks its program about itself (`--version`, `--help`): it runs nothing */
+export const asksAboutItself = (text: string): boolean => NOT_A_RUN.test(` ${text}`)
+
+/**
+ * The check a Bash command runs and its identity: `key` is the directory a leading `cd` moved to, the runner's
+ * command word and its targets (the arguments that are not flags or redirections), so `pytest -q tests/a.py` and
+ * `pytest tests/a.py -x` are the same check and `pytest tests/b.py` another. Null unless the line is one simple
+ * command (see checkCommand).
  */
 export function checkOf(command: string, declared: readonly RegExp[] = []): { command: string; key: string } | null {
-  const quoted: string[] = []
-  const masked = (command ?? '').replace(QUOTED, m => `"${quoted.push(m) - 1}"`).replace(/\\\n/g, ' ')
-    // redirections are not command separators: 2>&1, >&2, &> and &>> must not split on their &
-    .replace(/\d*>&\d*-?|&>>?/g, ' ')
-  const parts = masked.split(/(\|\||&&|;|\||\n|&|\(|\))/)
-  let dir = ''
-  for (let k = 0; k < parts.length; k += 2) {
-    const cd = (parts[k] ?? '').trim().match(/^cd\s+(\S+)/)
-    if (cd) { dir = cd[1]!; continue }
-    const { text, raw, isTestScript } = commandText(parts[k] ?? '')
-    if (!text || NOT_A_RUN.test(` ${text}`)) continue
-    // the project's own patterns see the command word as typed, path included (bin/verify)
-    if (!isTestScript && !RUNNERS.some(re => re.test(text)) && !declared.some(re => re.test(raw))) continue
-    if (parts[k + 1] === '||') continue
-    const restore = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
-    const [word, ...args] = text.split(' ')
-    return { command: restore(raw), key: restore([dir, word, ...args.filter(a => !a.startsWith('-'))].join(' ')) }
-  }
-  return null
+  const one = oneCommand(command)
+  if (!one || asksAboutItself(one.text)) return null
+  const { text, raw, isTestScript, restore, dir } = one
+  // the project's own patterns see the command word as typed, path included (bin/verify)
+  if (!isTestScript && !RUNNERS.some(re => re.test(text)) && !declared.some(re => re.test(raw))) return null
+  const [word, ...args] = text.split(' ')
+  return { command: one.typed, key: restore([dir, word, ...args.filter(a => !a.startsWith('-'))].join(' ')) }
 }
 
 /** the failures of one check in a turn after which the main session is told to escalate */

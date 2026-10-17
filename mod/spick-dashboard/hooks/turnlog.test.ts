@@ -23,7 +23,7 @@ test('turnLine carries schemaVersion 2 and derives gate, check, escalation and a
     gateEvents: [{ at: 'x', kind: 'judgement', words: ['why'], outcome: 'sent-back' }, { at: 'y', kind: 'judgement', words: ['why'], outcome: 'delegated' }],
     delegates: [coder('2026-10-17T10:00:05.000Z'), { id: 'g1', lane: 'Gemini', model: '', status: 'failed', ok: false, startedAt: '2026-10-17T10:00:01.000Z', ms: 3, usage: null, costUsd: null }],
     mainFiles: ['a.py'], agentFiles: ['b.py', 'c.py'], files: ['a.py', 'b.py', 'c.py'],
-    checks: [{ command: 'pytest', startedAt: 'a', finishedAt: 'b', exitOk: false, editsDuring: 0, coversTurn: false }],
+    checks: [{ command: 'pytest', startedAt: 'a', finishedAt: 'b', exitOk: false, editsDuring: 0, afterLastEdit: false }],
     escalation: { command: 'pytest', at: Date.parse('2026-10-17T10:00:04Z') },
   })
   expect(l.schemaVersion).toBe(SCHEMA_VERSION)

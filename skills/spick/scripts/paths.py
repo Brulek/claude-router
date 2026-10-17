@@ -33,6 +33,8 @@ IN_STATE = {
     "backup": "backup",
     "spend": "spick-spend",
     "gate": "spick-gate.jsonl",
+    # invoke.py's call log: one JSON line per lane call (data levels and overrides; never a key)
+    "invoke": "invoke.jsonl",
 }
 # round-1 names in the config dir -> their name in the state dir
 LEGACY = (

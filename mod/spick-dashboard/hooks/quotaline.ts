@@ -72,12 +72,14 @@ export function lanesLine(lanes: readonly LaneInfo[]): string {
  * lane_registry (the built-in lanes apply); `registry` true with an empty list means every lane is off, and an empty
  * list stays empty. A cache written before the `registry` field carried `lanes` only for a registry, so there a lanes
  * list, even an empty one, means registry true.
- * Null when the cache cannot be read. checklist() takes this object (or the older bare list).
+ * Null when the cache cannot be read or says nothing about lanes (neither field): then spick.json decides
+ * (lanesFromConfig). checklist() takes this object (or the older bare list).
  */
 export function lanesFromCache(text: string): LanesState | null {
   let doc: { lanes?: unknown; registry?: unknown }
   try { doc = JSON.parse(text) } catch { return null }
   if (!doc || typeof doc !== 'object') return null
+  if (typeof doc.registry !== 'boolean' && !Array.isArray(doc.lanes)) return null
   const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
   const out: LaneInfo[] = []
   for (const l of (Array.isArray(doc.lanes) ? doc.lanes : []) as Record<string, unknown>[]) {
@@ -86,4 +88,51 @@ export function lanesFromCache(text: string): LanesState | null {
   }
   const registry = typeof doc.registry === 'boolean' ? doc.registry : Array.isArray(doc.lanes)
   return { registry, lanes: registry ? out : [] }
+}
+
+/**
+ * The built-in lanes as the cache lists them: a copy of skills/spick/assets/builtin-lanes.json's id, kind, tags and
+ * data (the mod cannot read the skill's files); test_lanes.py fails when the two drift.
+ */
+// builtins:start
+export const BUILTIN_LANES: readonly LaneInfo[] = [
+  { id: 'gemini', kind: 'cli-subscription', tags: ['search', 'long-context', 'multimodal', 'image'], data: 'code' },
+  { id: 'grok', kind: 'cli-subscription', tags: ['x-data'], data: 'code' },
+  { id: 'codex', kind: 'cli-subscription', tags: ['code', 'review', 'image'], data: 'code' },
+]
+// builtins:end
+
+const isObj = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v)
+
+/**
+ * What spick.json says about lanes when the quota cache is cold (missing, unreadable, or silent on lanes): the config
+ * is the authority. Mirrors scripts/lanes.py load_effective: `registry` is whether `lane_registry` is there; each
+ * built-in lane is enabled unless `lanes.<id>` is false, a `lane_registry.<id>` record overrides its fields (its
+ * `enabled` wins), registry ids that are not built-in follow, enabled unless they say otherwise. A registry with
+ * nothing enabled is `{registry: true, lanes: []}`. Null when the text is not a JSON object (no config to go by).
+ */
+export function lanesFromConfig(text: string): LanesState | null {
+  let cfg: unknown
+  try { cfg = JSON.parse(text) } catch { return null }
+  if (!isObj(cfg)) return null
+  if (!('lane_registry' in cfg)) return { registry: false, lanes: [] }
+  const switches = isObj(cfg.lanes) ? cfg.lanes : {}
+  const reg = isObj(cfg.lane_registry) ? cfg.lane_registry : {}
+  const strs = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : [])
+  const out: LaneInfo[] = []
+  const add = (id: string, base: LaneInfo | null, enabledByDefault: boolean): void => {
+    const over = isObj(reg[id]) ? (reg[id] as Record<string, unknown>) : {}
+    const enabled = 'enabled' in over ? over.enabled : enabledByDefault
+    // lanes.py keeps a lane whose enabled is truthy (absent reads true)
+    if (!enabled) return
+    out.push({
+      id,
+      kind: typeof over.kind === 'string' ? over.kind : base?.kind,
+      tags: 'tags' in over ? strs(over.tags) : [...(base?.tags ?? [])],
+      data: 'data' in over ? (typeof over.data === 'string' ? over.data : null) : (base?.data ?? null),
+    })
+  }
+  for (const b of BUILTIN_LANES) add(b.id, b, typeof switches[b.id] === 'boolean' ? (switches[b.id] as boolean) : true)
+  for (const id of Object.keys(reg)) if (!BUILTIN_LANES.some(b => b.id === id)) add(id, null, true)
+  return { registry: true, lanes: out }
 }

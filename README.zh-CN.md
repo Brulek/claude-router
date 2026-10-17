@@ -115,20 +115,21 @@ flowchart TD
 **守卫**在分流生效时：
 
 - 编辑上限：主会话每轮只能亲自改 1 个源码文件。第 2 个文件会被拒绝，拒绝信息点名已改的那个文件并要求派 `Agent(coder)`。同一文件反复改、子代理的编辑、笔记（`.md`、`.txt`）、表格（`.csv`、`.tsv`）、日志、锁文件以及开头为 `.claude/` 的路径都不计数；json、yaml、toml 计数，`.claude/worktrees/` 下的 worktree 也计数。这是工具层面的软上限：只看 Edit、Write、NotebookEdit，看不到 `sed -i`、重定向这类 Bash 写入。
-- 收工测试门：本轮任何循环（含子代理）改过源码，而最后一次修改之后没有通过的检查，收工时退回。检查只在三种情况同时满足时才算数：命令本身就是检查工具（可以带 `cd x &&`、`env`、`npx`、`sudo`、`time` 前缀；`echo pytest`、`grep pytest README` 都不算）；退出状态正常（`pytest || true`、`pytest --version` 不算）；检查开始之后没有再改源码。项目有自己的检查命令时，可在 `<config>/spick.json` 的 `guard.check_commands` 里用正则声明（见 `skills/spick/references/providers.md`）。主会话被要求跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。
+- 收工测试门：本轮任何循环（含子代理）改过源码，而最后一次修改之后没有通过的检查，收工时退回。检查只在三种情况同时满足时才算数：整行是一条简单命令，命令词就是检查工具（前面可以有一个 `cd x &&`，以及 `env`、`npx`、`sudo`、`time`、`uv run` 或变量赋值；`2>&1`、`> out.txt` 这类重定向可以有；`echo pytest`、`grep pytest README` 都不算）；退出状态正常；检查在最后一次已完成的源码修改之后才开始，运行期间也没有修改在进行或完成。行里其他位置出现 `|`、`;`、`&&`、`||` 就不算：引擎只报告整行的退出状态，所以 `true || pytest`、`pytest; true`、`pytest | cat`、`npm test | tail -5` 什么也证明不了（`pytest || true`、`pytest --version` 同样不算）。每轮记录保留检查命令本身，因为模组看不到检查实际覆盖了什么：改了检查范围以外的文件，照样显示为已检查，这是已知限制。项目有自己的检查命令时，可在 `<config>/spick.json` 的 `guard.check_commands` 里用正则声明（见 `skills/spick/references/providers.md`）。主会话被要求跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。
 - 升级：同一个检查在一轮里失败两次时，第二次失败的结果后面会附一行，要求主会话改派 `coder`（effort high），原因不明时派 `deep`，不要再自己修第三次。
 - `/spick guard off` 可关闭守卫，选择会被记住。
 
 **拦截**按结论类请求需要的角色检查：判断词需要 `deep`，审查词需要审查通道（带审查提示的 Codex，或标了 `review` 的通道）或 `deep`。设计类词只出现在 `Hint` 行里，从不拦截。
 
-- 收工时，若该角色本轮没有完成（`deep` 子代理已结束或仍在后台运行算完成；审查调用正常返回算完成；被拒、失败或超时的调用不算），回复里也没有以 `Kept:`（或 `自留:`）开头的一行，且这一轮有实际工作（调过工具，或回复不少于 400 字符），就退回。
+- 审查调用只在以下情况算数：它是这一行唯一的命令（`codex exec "<审查提示>"` 或 `invoke.py --lane <审查通道>`；可以把 diff 用管道喂给它，但 `true || codex exec "review"`、`;` 或 `&&` 串起来的命令、把输出再管道出去、`--help` 和 `--version` 都不算），结果不是错误，并且输出至少 200 个字符。`deep` 调用在其子代理正常结束时算完成；如果调用在任何结束事件之前就返回了（引擎不保证顺序），则要求调用本身的结果不是错误且不为空。
+- 收工时，若该角色本轮没有完成（`deep` 子代理已结束或仍在后台运行算完成；符合上一条的审查调用算完成；被拒、失败或超时的调用不算），回复里也没有以 `Kept:`（或 `自留:`）开头的一行，且这一轮有实际工作（调过工具，或回复不少于 400 字符），就退回。
 - `/spick gate off` 可关闭。
 
 拦截与守卫合计一轮最多退回一次，所有理由放在同一段里。
 
 **默认 effort。** 派 `coder`、`planner`、`deep` 时若没写 effort，按 `<config>/spick.json` 里 `efforts` 的默认值执行（未设置时 coder medium、planner high、deep medium）。
 
-**每轮记录。** 每个主会话轮次在 `<config>/spick/turns/<sessionId>.jsonl` 里记一行 JSON（`<config>` 为 `CLAUDE_CONFIG_DIR`，未设置时为 `~/.claude`）：Hint、实际由谁执行（每个委派的状态、模型、effort、用量与费用）、拦截的每次触发及其后续、`Kept:` 行、改过的文件、每次检查及其退出状态、升级提示、主循环用量与最近一次请求大小。后台代理在该轮结束后才完成时，会为同一轮追加一行 `late` 记录。`/spick spend` 汇总最近七天的费用（`scripts/spend.py`，也读取 0.x 版模组的按会话文件）；`/spick audit` 运行 `scripts/audit.py`：按 Hint 类别统计轮次与实际执行者、结论类请求的去向、拦截结果与疑似误判、改了源码却没有通过检查的轮次、升级提示、按通道和按类别的费用，以及上下文最大的几个会话。
+**每轮记录。** 每个主会话轮次在 `<config>/spick/turns/<sessionId>.jsonl` 里记一行 JSON（`<config>` 为 `CLAUDE_CONFIG_DIR`，未设置时为 `~/.claude`）：Hint、实际由谁执行（每个委派的状态、模型、effort、用量与费用；子代理自己发起的委派也会列出，`parent` 指明是哪个子代理）、拦截的每次触发及其后续、`Kept:` 行、改过的文件、每次检查及其退出状态、升级提示、主循环用量与最近一次请求大小。委派在该轮记录写入之后才结束时（后台代理，或 30 分钟没有完成信号、已记为 `timed-out` 的调用），会为同一轮追加一行带用量的 `late` 记录。`/spick spend` 汇总最近七天的费用（`scripts/spend.py`，也读取 0.x 版模组的按会话文件）；`/spick audit` 运行 `scripts/audit.py`：按 Hint 类别统计轮次与实际执行者、结论类请求的去向、拦截结果与疑似误判、改了源码却没有通过检查的轮次、升级提示、嵌套/迟到/超时的委派数、按通道和按类别的费用，以及上下文最大的几个会话。
 
 ## 安装
 
@@ -141,9 +142,9 @@ bash ~/.claude/skills/spick/scripts/setup.sh --check
 bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
-`--install` 在写入任何文件之前，先检查 `settings.json` 和 `spick.json` 是否为合法 JSON（不合法就停下，什么都不改），再把 `CLAUDE.md`、`settings.json` 和 `spick.json` 复制到 `~/.claude/spick/backup/<时间戳>/`，并附一份 `manifest.json`，记录本次改动了什么。每一步都检查结果：某一步失败，就以退出码 1 停下，并列出已经改动的内容；只有全部步骤成功才会打印 `done`。加 `--no-explore` 则不安装跑在 Haiku 上的 `Explore` 子代理。
+`--install` 在写入任何文件之前，先检查 `settings.json` 和 `spick.json` 是否为合法 JSON（不合法就停下，什么都不改），再把 `CLAUDE.md`、`settings.json` 和 `spick.json` 复制到 `~/.claude/spick/backup/<时间戳>/`，并附一份 `manifest.json`，记录本次改动了什么。每一步都检查结果：某一步失败，就以退出码 1 停下，并列出已经改动的内容；只有全部步骤成功才会打印 `done`。已有的 spick hook 若指向别的路径（旧的检出目录），会改成当前这一份。已存在的子代理文件默认保留，加 `--force` 才覆盖；安装结束时会列出保留下来的文件。加 `--no-explore` 则不安装跑在 Haiku 上的 `Explore` 子代理。
 
-状态文件放在 `~/.claude/spick/`（设了 `CLAUDE_CONFIG_DIR` 时在 `$CLAUDE_CONFIG_DIR/spick/`）：额度缓存 `quota.json`、每个会话一份的回合记录 `turns/<sessionId>.jsonl`、mod 的会话标记 `mod-active/`，以及备份。安装时会把旧版本的文件（`spick-quota.json`、`spick-spend/`、`spick-gate.jsonl`、`spick-backup/`）一次性移进来。`spick.json` 仍在 `~/.claude/`，其中记录已安装的版本；磁盘上的技能更新后，清单会提示 `spick: skill X installed Y, run spick setup`。
+状态文件放在 `~/.claude/spick/`（设了 `CLAUDE_CONFIG_DIR` 时在 `$CLAUDE_CONFIG_DIR/spick/`）：额度缓存 `quota.json`、每个会话一份的回合记录 `turns/<sessionId>.jsonl`、mod 的会话标记 `mod-active/`，以及备份。安装时会把旧版本的文件（`spick-quota.json`、`spick-spend/`、`spick-gate.jsonl`、`spick-backup/`）一次性移进来。`spick.json` 仍在 `~/.claude/`（设了 `$CLAUDE_CONFIG_DIR` 时在那里）；全部步骤成功后，最后一步写入已安装的版本，同时写入 `installed`，记录本次写了什么、保留了什么（`{"agents": {"coder": "written|kept"}, "hook": "added|updated|kept", "snippet": "replaced|appended"}`）；磁盘上的技能更新后，清单会提示 `spick: skill X installed Y, run spick setup`。
 
 桌面版应用需在模型菜单中选择一次 Haiku。
 
@@ -237,7 +238,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 Spick 不改主会话的模型。模组可以改写每次请求的模型与推理强度（Claude Code 2.1.299 引擎类型中的 `turn.step`），claude-router 与 claude-agent-tools 就是这样做的；Spick 把这件事留给它们、与 claude-router 配合使用，所以主会话跑在低成本模型上，靠清单分派。清单只是建议：主会话仍可能把本该委派的任务留给自己，`Hint` 行和按交付物形状排列的第二项就是为了防这一点。
 
 - Hint 行是关键词匹配，不是分类器：措辞里没有关键词的结论类请求它会漏掉，也会在少数不该触发的地方触发（"版本号"会被当作联网信号）。它的标注语料是 `skills/spick/scripts/testdata/hint_corpus.json`。
-- lane 的 `data` 级别是用户声明的上限，不是敏感数据检测。`scripts/invoke.py` 会拒绝超出上限的调用（退出码 6），没写 `--contains` 时按 code 处理，在 `text` 或 `public` 声明下还会扫描像代码的内容；它不查找密钥或个人信息。
+- lane 的 `data` 级别是用户声明的上限，不是敏感数据检测。`scripts/invoke.py` 会拒绝超出上限的调用（退出码 6），没写 `--contains` 时按 code 处理，在 `text` 或 `public` 声明下还会扫描像代码的内容；它不查找密钥或个人信息。`--override-data "<理由>"` 只能在你明确同意时使用：每次调用都记入 `<config>/spick/invoke.jsonl`（通道、模型、声明与实际级别、越权理由、退出码、token、耗时；不记密钥和提示词），`/spick audit` 会列出这些越权调用及其理由。直接调用内置 CLI（`agy`、`grok`、`codex`）不经过这项检查。
 - 守卫的改文件上限和 `Explore` 的只读工具列表都是工具层面的软约束：Bash 命令照样能写文件。
 - 用户级 `Explore` 取代内置版本，是 Claude Code 文档的说法，本项目没有在运行时实测。
 

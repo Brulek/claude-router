@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { lanesFromCache, lanesLine, quotaLineFromCache } from './quotaline'
+import { BUILTIN_LANES, lanesFromCache, lanesFromConfig, lanesLine, quotaLineFromCache } from './quotaline'
 
 // A copy of skills/spick/scripts/testdata/cache_sample.json and cache_sample.line.txt: quota.py's tests
 // check the same pair, so the Python and TypeScript builders stay word for word the same.
@@ -31,7 +31,8 @@ test('the cache says whether there is a registry and which lanes are enabled; an
   expect(lanesFromCache(`{"registry":true,"lanes":[${JSON.stringify(glm)},{"no":"id"}]}`)).toEqual({ registry: true, lanes: [glm] })
   // a cache from before the registry field: lanes were written only for a registry, so a list (even empty) means one
   expect(lanesFromCache('{"lanes":[]}')).toEqual({ registry: true, lanes: [] })
-  expect(lanesFromCache('{"written_at":"2026-10-13T15:30:00Z","providers":[]}')).toEqual({ registry: false, lanes: [] })
+  // a cache silent on lanes says nothing: spick.json decides (lanesFromConfig)
+  expect(lanesFromCache('{"written_at":"2026-10-13T15:30:00Z","providers":[]}')).toBeNull()
   expect(lanesFromCache('{not json')).toBeNull()
   expect(lanesFromCache('null')).toBeNull()
 })
@@ -87,4 +88,19 @@ test('a missing, corrupt or empty cache gives no line', () => {
   expect(quotaLineFromCache('{not json', NOW)).toBeNull()
   expect(quotaLineFromCache('{"written_at":"2026-10-13T15:30:00Z","providers":[]}', NOW)).toBeNull()
   expect(quotaLineFromCache('{"providers":[{"provider":"claude"}]}', NOW)).toBeNull()
+})
+
+test('with a cold cache spick.json decides, by lanes.py\'s rule: no registry is the built-in lanes; a registry with nothing enabled is none', () => {
+  const cfg = (o: unknown) => JSON.stringify(o)
+  expect(lanesFromConfig(cfg({ lanes: { gemini: false, grok: false, codex: false } }))).toEqual({ registry: false, lanes: [] })
+  expect(lanesFromConfig(cfg({ lanes: { gemini: false, grok: false, codex: false }, lane_registry: {} }))).toEqual({ registry: true, lanes: [] })
+  expect(lanesFromConfig(cfg({ lane_registry: { gemini: { enabled: false }, grok: { enabled: false }, codex: { enabled: false }, glm: { enabled: false, tags: ['cheap'] } } }))).toEqual({ registry: true, lanes: [] })
+  // the registry's enabled wins over the old switch; a registry record overrides fields one at a time
+  const r = lanesFromConfig(cfg({ lanes: { gemini: false, codex: true }, lane_registry: { gemini: { enabled: true, data: 'public' }, codex: { enabled: false }, glm: { kind: 'api-key', tags: ['cheap'], data: 'text' } } }))
+  expect(r).toEqual({ registry: true, lanes: [
+    { id: 'gemini', kind: 'cli-subscription', tags: BUILTIN_LANES[0]!.tags, data: 'public' },
+    { id: 'grok', kind: 'cli-subscription', tags: ['x-data'], data: 'code' },
+    { id: 'glm', kind: 'api-key', tags: ['cheap'], data: 'text' },
+  ] })
+  for (const t of ['', 'not json', '[]', 'null']) expect(lanesFromConfig(t)).toBeNull()
 })

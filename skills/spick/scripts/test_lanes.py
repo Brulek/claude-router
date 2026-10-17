@@ -191,5 +191,22 @@ class Cli(unittest.TestCase):
         self.assertEqual([ln["id"] for ln in out], ["gemini"])
 
 
+class ModCopy(unittest.TestCase):
+    """the dashboard mod cannot read the skill's files, so quotaline.ts carries the built-in lanes; they must agree"""
+
+    TS = os.path.join(HERE, "..", "..", "..", "mod", "spick-dashboard", "hooks", "quotaline.ts")
+
+    @unittest.skipUnless(os.path.exists(TS), "the skill installed without the repository's mod")
+    def test_quotaline_builtins_match_builtin_lanes_json(self):
+        import re
+        ts = self.TS
+        with open(ts) as f:
+            block = f.read().split("// builtins:start")[1].split("// builtins:end")[0]
+        rows = re.findall(r"\{ id: '([^']+)', kind: '([^']+)', tags: \[([^\]]*)\], data: '([^']+)' \}", block)
+        got = [(i, k, re.findall(r"'([^']+)'", t), d) for i, k, t, d in rows]
+        want = [(lid, r["kind"], r["tags"], r["data"]) for lid, r in lanes.builtins().items()]
+        self.assertEqual(got, want)
+
+
 if __name__ == "__main__":
     unittest.main()

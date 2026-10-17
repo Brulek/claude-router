@@ -1,6 +1,6 @@
 # First-run onboarding
 
-Follow this when `~/.claude/spick.json` is missing or the user says `spick setup`. Keep it conversational; most users have never configured a CLI. Ask one question at a time and explain each step in a sentence.
+Follow this when `<config>/spick.json` is missing (`<config>` is `$CLAUDE_CONFIG_DIR`, else `~/.claude`) or the user says `spick setup`. Keep it conversational; most users have never configured a CLI. Ask one question at a time and explain each step in a sentence.
 
 ## 1. Detect
 
@@ -40,9 +40,9 @@ Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <h
 - moves the round-1 state files (`spick-quota.json`, `spick-spend/`, `spick-gate.jsonl`, `spick-backup/`) into `~/.claude/spick/`, once,
 - copies `~/.claude/CLAUDE.md`, `settings.json` and `spick.json` (those that exist) into `~/.claude/spick/backup/<YYYYmmdd-HHMMSS>/` with a `manifest.json` listing what this run wrote (agents, CLAUDE.md block, hook, `model`/`effortLevel` before and after); every run makes a new folder, and each file is written to a temp file then swapped in, so a symlinked file stays a link,
 - copies `assets/agents/*.md` (`coder`, `planner`, `deep`, `Explore`) into `~/.claude/agents/` (existing files are kept unless `--force`),
-- writes `~/.claude/spick.json` with the enabled lanes, `installed_version` and the delegates' default `efforts`,
+- writes `<config>/spick.json` with the enabled lanes and the delegates' default `efforts`; last, once every step passed, `installed_version` with `installed` (agents written or kept, hook added, updated or kept, block replaced or appended); the summary lists kept agent files with the `--force` hint,
 - inserts `assets/claude-md-snippet.md` into `~/.claude/CLAUDE.md` between `<!-- spick:start -->` / `<!-- spick:end -->` markers (re-running replaces the block, never duplicates it),
-- registers a `UserPromptSubmit` hook (`scripts/triage-hook.sh`) in `~/.claude/settings.json` that prints a three-question triage checklist on every prompt; small models follow a per-turn checklist far better than a once-per-session rule,
+- registers a `UserPromptSubmit` hook (`scripts/triage-hook.sh`) in `~/.claude/settings.json` that prints a three-question triage checklist on every prompt (a spick hook already there at another path is updated to this one); small models follow a per-turn checklist far better than a once-per-session rule,
 - sets `model` and `effortLevel` in `~/.claude/settings.json` only if `--model` / `--effort` were given, keeping every other key.
 
 Every step is checked. A non-zero exit means setup stopped: it prints the failed step and what it had already changed (and the backup folder); tell the user exactly that, never "installed". Only a run that prints `done` succeeded.

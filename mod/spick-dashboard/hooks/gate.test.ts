@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { KEPT_RE, gateFiring, gateOutcome, keptLine, roleDone, sendBackText } from './gate'
+import { KEPT_RE, MIN_REVIEW_CHARS, gateFiring, gateOutcome, keptLine, roleDone, sendBackText } from './gate'
 import type { RoleRun } from './gate'
 
 const J = { kind: 'judgement' as const, words: ['对比', '差距'] }
@@ -16,8 +16,12 @@ test('judgement needs deep: completed or still running counts; refused or failed
   expect(roleDone('deep', run('Codex', 'completed', true))).toBe(false)
 })
 
-test('review needs a review call that returned cleanly, or deep', () => {
-  expect(roleDone('review', [{ lane: 'Codex', isReview: true, status: 'completed' }])).toBe(true)
+test('review needs a review call that returned cleanly with real output, or deep', () => {
+  expect(MIN_REVIEW_CHARS).toBe(200)
+  expect(roleDone('review', [{ lane: 'Codex', isReview: true, status: 'completed', outputChars: 200 }])).toBe(true)
+  // a usage text or an error line is no review
+  expect(roleDone('review', [{ lane: 'Codex', isReview: true, status: 'completed', outputChars: 199 }])).toBe(false)
+  expect(roleDone('review', [{ lane: 'Codex', isReview: true, status: 'completed' }])).toBe(false)
   expect(roleDone('review', [{ lane: 'Codex', isReview: true, status: 'failed' }])).toBe(false)
   expect(roleDone('review', [{ lane: 'Codex', status: 'completed' }])).toBe(false)
   expect(roleDone('review', [{ lane: 'deep', status: 'completed' }])).toBe(true)
@@ -32,7 +36,7 @@ test('gateFiring names the missing roles and words; design words never gate; not
   expect(both.words).toEqual(['对比', '差距', 'review'])
   expect(both.text).toContain('hinted as a verdict (对比, 差距, review) and no deep run completed')
   // a review done by Codex leaves the judgement missing
-  const j = gateFiring([J, R], [{ lane: 'Codex', isReview: true, status: 'completed' }])!
+  const j = gateFiring([J, R], [{ lane: 'Codex', isReview: true, status: 'completed', outputChars: 500 }])!
   expect(j.kinds).toEqual(['judgement'])
   expect(gateFiring([J, R], [{ lane: 'deep', status: 'completed' }])).toBeNull()
   const r = gateFiring([R], [])!

@@ -55,8 +55,10 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 
 - The data level fails closed: a call above the lane's declared `data` exits 6 and sends nothing. Without
   `--contains` the prompt counts as `code`; under a `text` or `public` declaration, code-looking content in the prompt
-  or the system file is refused too. `--override-data "<reason>"` sends anyway and prints the reason. This is a
-  declared limit, not sensitive-data detection.
+  or the system file is refused too. `--override-data "<reason>"` sends anyway and prints the reason; it is for the
+  user's explicit say-so only. Every prompt call is logged to `<config>/spick/invoke.jsonl` (lane, model, declared
+  and sent level, override reason, exit code, tokens, seconds; never the key) and `/spick audit` lists the period's
+  overrides. This is a declared limit, not sensitive-data detection.
 - An answer cut off at the token limit (`finish_reason=length`, `stop_reason=max_tokens`) exits 7 with the partial
   text on stdout and `INCOMPLETE` on stderr.
 - An answer in several text blocks is returned whole, not only its first block.
@@ -75,11 +77,16 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 - Setup validates `settings.json` and `spick.json` before writing anything, checks every step, exits 1 naming what
   it already changed when a step fails, and prints `done` only when every step passed. Install and uninstall need
   python3.
-- `spick.json` records `installed_version` and `efforts` (the delegates' default efforts, read by the mod).
+- `spick.json` records `efforts` (the delegates' default efforts, read by the mod) and, as the last step of a run
+  that passed, `installed_version` with `installed`: which agents were written or kept, whether the hook was added,
+  updated or kept, whether the block was replaced or appended. The summary lists kept agent files with the `--force`
+  hint. A spick hook pointing at another checkout is updated to this one.
+- The skill reads `<config>/spick.json` (`$CLAUDE_CONFIG_DIR`, else `~/.claude`), not a fixed `~/.claude/spick.json`.
 - `--uninstall --purge` removes `spick.json` and the whole state directory, backups included.
 - A registry with every lane switched off is no longer read as "no registry": the quota cache carries
   `registry: true|false` and the enabled `lanes`, and the checklist says no outside lane may be called and the label
-  reads `Review: skipped`.
+  reads `Review: skipped`. With the cache missing or unreadable the mod reads the same from `spick.json`, by
+  `lanes.py`'s rule; only without `spick.json` does it fall back to the built-in lanes.
 - Setup writes the hook's absolute path, so a skill outside `~/.claude` or a `CLAUDE_CONFIG_DIR` still runs (round 1).
 - Setup backs up `CLAUDE.md`, `settings.json` and `spick.json` before every write; uninstall removes only what the
   install wrote (0.x, kept).
@@ -87,12 +94,19 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 ### Dashboard mod
 
 - The turn record: one JSON line per main turn in `~/.claude/spick/turns/<sessionId>.jsonl` (who ran, usage, gate,
-  checks) replaces the spend files and the gate log; `/spick spend` and the new `/spick audit` read it.
+  checks) replaces the spend files and the gate log; `/spick spend` and the new `/spick audit` read it. Delegates a
+  subagent started are recorded with `parent`; a call silent for 30 minutes reads `timed-out` and, if it ends after
+  all, adds a `late` line with its usage.
 - The guard's edit cap is one source file per turn, judged relative to the session cwd (a worktree under
   `.claude/worktrees/` counts); a tool-level soft bound, Bash writes are not caught.
 - The gate asks for the role the hint names (judgement: `deep`; review: the review lane or `deep`); one send-back per
-  turn carries every reason.
-- A check counts only when it is the command itself, passed, and ran after the last edit.
+  turn carries every reason. A review call counts only as the line's one `codex exec` or review-lane command (a diff
+  piped into it allowed), with no error and at least 200 characters of output; a `deep` call counts when its
+  subagent ended without failure, or, with no such event before the call returned, on its own non-empty result.
+- A check counts only when the line is one simple command whose command word is the runner (one leading `cd x &&`
+  and redirections allowed; a pipe, `;`, `&&` or `||` disqualifies it, since only the line's status is reported), it
+  passed, and it started after the last completed source edit with no edit in flight or finishing while it ran. The
+  record's `afterLastEdit` says the latter; the command is kept, as the mod cannot see what a check exercises.
 - The same check failing twice adds an escalation line to the turn.
 - The band shows the main loop's prompt size and warns a Haiku session past 80k tokens.
 - An Agent call of `coder`, `planner` or `deep` without an effort gets the default from `spick.json`.

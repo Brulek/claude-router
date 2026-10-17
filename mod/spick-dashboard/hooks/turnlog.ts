@@ -3,7 +3,7 @@
 // two sessions ending turns together never share a file, and $.fs.write writes a whole file only, so a write reads
 // the session's file, appends and writes it back. A background agent that finishes after its main turn's line adds a
 // `late: true` line with the same turnId; readers merge by turnId and the delegate's id. Pure; register.tsx gathers.
-import type { DelegateStatus } from './gate'
+import type { ConfirmedBy, DelegateStatus } from './gate'
 
 export const SCHEMA_VERSION = 2
 
@@ -17,12 +17,18 @@ export type DelegateEntry = {
   id: string
   /** a subagent type, or an outside CLI's lane (Gemini, Grok, Codex, a registry id) */
   lane: string
+  /** a delegate started from inside a subagent: that subagent's id (the delegate counts for the main turn) */
+  parent?: string
   model: string
   effort?: string
   isReview?: boolean
   status: DelegateStatus
   /** completed */
   ok: boolean
+  /** an Agent call: what confirmed its completion (gate.ts ConfirmedBy) */
+  confirmedBy?: ConfirmedBy
+  /** an outside CLI call: the characters it printed (a review counts from MIN_REVIEW_CHARS) */
+  outputChars?: number
   startedAt: string
   /** wall time while it ran; null while it still runs */
   ms: number | null
@@ -38,10 +44,14 @@ export type CheckEntry = {
   startedAt: string
   finishedAt: string | null
   exitOk: boolean | null
-  /** source edits that landed while it ran; null while it runs */
+  /** source edits in flight or started while it ran; null while it runs */
   editsDuring: number | null
-  /** it passed with no source edit after it started: it covers the turn */
-  coversTurn: boolean
+  /**
+   * it ran after the last completed source edit: none in flight or landing while it ran, none after. With exitOk it
+   * covers the turn. The command is kept: the mod cannot see what the check exercised, so an edit outside its scope
+   * still reads as checked.
+   */
+  afterLastEdit: boolean
   agentId?: string
 }
 
@@ -129,7 +139,7 @@ export function turnLine(t: {
     gateEvents: [...t.gateEvents],
     delegates: [...t.delegates],
     edits: { main: t.mainFiles.length, agents: t.agentFiles.length, files: [...t.files] },
-    check: lastCheck ? { ran: true, passed: lastCheck.exitOk === true, afterLastEdit: lastCheck.coversTurn, command: lastCheck.command } : null,
+    check: lastCheck ? { ran: true, passed: lastCheck.exitOk === true, afterLastEdit: lastCheck.afterLastEdit, command: lastCheck.command } : null,
     checks: [...t.checks],
     escalation: esc ? { command: esc.command, followed: t.delegates.some(d => (d.lane === 'coder' || d.lane === 'deep') && Date.parse(d.startedAt) >= esc.at) } : null,
     usage: t.usage,
