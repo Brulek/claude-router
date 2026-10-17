@@ -9,46 +9,85 @@
 export const EDIT_CAP = 1
 
 /**
- * The command names that count as a check: a test runner, a build, a linter or a type checker. Each on word
- * boundaries, anywhere in the command (after `cd x &&`, in a pipeline, on a later line). A project can add its own
- * in spick.json (`guard.check_commands`, see declaredChecks).
+ * The checks: a test runner, a build, a linter or a type checker, each matched at the start of one command of the line
+ * (its command word, after the prefixes below and with a path cut to its base name), so `echo pytest` and
+ * `grep pytest README` are not checks. A project can add its own in spick.json (`guard.check_commands`, see
+ * declaredChecks); those are matched against each command the same way.
  */
-const CHECKS: readonly RegExp[] = [
-  /\bpytest\b/,
-  /\bunittest\b/,
-  /\bvitest\b/,
-  /\bjest\b/,
-  /\bmocha\b/,
-  /\bnode\b.*\s--test\b/,
-  // a python script whose name ends in test or tests, or a module whose name holds test
-  /\bpython3?\s+(?:\S+\s+)*?\S*tests?\.py\b/,
-  /\bpython3?\s+-m\s+\S*test/,
-  // a script whose name holds test, run as ./x where a command starts, or as bash x or sh x
-  /(?:^|[;&|(\n])\s*\.\/\S*test/,
-  /\b(?:bash|sh)\s+\S*test/,
-  /\bcargo\s+(test|check|clippy|build)\b/,
-  /\bgo\s+(test|vet|build)\b/,
-  /\b(npm|pnpm|yarn|bun)\s+(run\s+)?(test|check|lint|typecheck|build)\b/,
-  /\bdotnet\s+(test|build)\b/,
-  /\bgradlew?\s+(test|build)\b/,
-  /\bmvn\s+(?:-\S+\s+)*(test|verify|package)\b/,
-  /\bclaude\s+plugin\s+(test|validate)\b/,
-  /\btsc\b/,
-  /\bmake\s+(test|check)\b/,
-  /\bswift\s+(test|build)\b/,
-  /\bxcodebuild\b/,
-  /\bruff\b/,
-  /\beslint\b/,
-  /\bflake8\b/,
-  /\bmypy\b/,
-  /\bshellcheck\b/,
-  /\bbash\s+-n\b/,
+const RUNNERS: readonly RegExp[] = [
+  /^(pytest|py\.test|vitest|jest|mocha|tsc|ruff|eslint|flake8|mypy|pyright|shellcheck|xcodebuild|rspec|phpunit|ctest)\b/,
+  /^node\s+(?:\S+\s+)*?--test\b/,
+  // a python script whose name ends in test or tests, or a module whose name holds test (unittest, pytest included)
+  /^python[\d.]*\s+(?:-\S+\s+)*\S*tests?\.py\b/,
+  /^python[\d.]*\s+(?:-\S+\s+)*-m\s+(?:\S*test|mypy|ruff|flake8|pyright)/,
+  /^(?:bash|sh|zsh)\s+-n\b/,
+  /^(?:bash|sh|zsh)\s+\S*test/,
+  /^cargo\s+(?:test|check|clippy|build|nextest)\b/,
+  /^go\s+(?:test|vet|build)\b/,
+  /^(?:npm|pnpm|yarn|bun)\s+(?:run\s+)?(?:test|check|lint|typecheck|build)\b/,
+  /^dotnet\s+(?:test|build)\b/,
+  /^gradlew?\s+(?:test|build|check)\b/,
+  /^mvn\s+(?:-\S+\s+)*(?:test|verify|package)\b/,
+  /^claude\s+plugin\s+(?:test|validate)\b/,
+  /^make\s+(?:test|check)\b/,
+  /^swift\s+(?:test|build)\b/,
 ]
+
+/** words in front of the command word that run it: `env A=1`, `sudo -E`, `time`, `npx --yes` ... */
+const PREFIX_WORDS = new Set(['env', 'sudo', 'time', 'nice', 'npx', 'bunx', 'command', 'exec', 'nohup'])
+/** two-word launchers in front of the command word */
+const PREFIX_PAIRS = new Set(['uv run', 'poetry run', 'pipenv run', 'hatch run', 'bundle exec', 'pnpm exec', 'yarn exec', 'pnpm dlx'])
+/** asking a runner about itself runs no check */
+const NOT_A_RUN = /\s(?:--version|--help|-V|-h)(?:\s|$)/
+const QUOTED = /"(?:[^"\\]|\\.)*"|'(?:[^'\\]|\\.)*'/g
+
+/**
+ * One command's text from its command word on: prefixes and assignments dropped, the command word cut to its base
+ * name. `isTestScript`: a script run by its path whose name holds test (./run-tests.sh, scripts/test.sh).
+ */
+function commandText(seg: string): { text: string; raw: string; isTestScript: boolean } {
+  const words = seg.trim().split(/\s+/).filter(Boolean)
+  let i = 0
+  while (i < words.length) {
+    const w = words[i]!
+    if (PREFIX_PAIRS.has(`${w} ${words[i + 1] ?? ''}`)) i += 2
+    else if (PREFIX_WORDS.has(w) || /^[A-Za-z_][A-Za-z0-9_]*=/.test(w) || (i > 0 && PREFIX_WORDS.has(words[i - 1]!) && w.startsWith('-'))) i++
+    else break
+  }
+  const first = words[i]
+  if (!first) return { text: '', raw: '', isTestScript: false }
+  const base = first.slice(first.lastIndexOf('/') + 1)
+  const rest = words.slice(i + 1)
+  return { text: [base, ...rest].join(' '), raw: [first, ...rest].join(' '), isTestScript: first.includes('/') && /test/i.test(base) }
+}
+
+/**
+ * The check a Bash command runs, as the command text from its runner on, or null when it runs none. Each command of
+ * the line (split on && || ; | and newlines, quoted text masked so nothing inside it splits or matches) is matched
+ * by its command word. A check whose exit status is thrown away (`pytest || true`) or that only asks the runner about
+ * itself (`pytest --version`) does not count. A pipe into another command (`npm test | tail`) is taken as it is: the
+ * exit status is then the last command's, a known blind spot.
+ */
+export function checkCommand(command: string, declared: readonly RegExp[] = []): string | null {
+  const quoted: string[] = []
+  const masked = (command ?? '').replace(QUOTED, m => `"${quoted.push(m) - 1}"`).replace(/\\\n/g, ' ')
+    // redirections are not command separators: 2>&1, >&2, &> and &>> must not split on their &
+    .replace(/\d*>&\d*-?|&>>?/g, ' ')
+  const parts = masked.split(/(\|\||&&|;|\||\n|&|\(|\))/)
+  for (let k = 0; k < parts.length; k += 2) {
+    const { text, raw, isTestScript } = commandText(parts[k] ?? '')
+    if (!text || NOT_A_RUN.test(` ${text}`)) continue
+    // the project's own patterns see the command word as typed, path included (bin/verify)
+    if (!isTestScript && !RUNNERS.some(re => re.test(text)) && !declared.some(re => re.test(raw))) continue
+    if (parts[k + 1] === '||') continue
+    return raw.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
+  }
+  return null
+}
 
 /** whether a Bash command runs a check (tests, a build, a linter, a type checker), the project's declared ones included */
 export function isCheckCommand(command: string, declared: readonly RegExp[] = []): boolean {
-  const c = command ?? ''
-  return CHECKS.some(re => re.test(c)) || declared.some(re => re.test(c))
+  return checkCommand(command, declared) !== null
 }
 
 /** the longest declared pattern taken; a longer one is reported as bad */
@@ -89,9 +128,9 @@ export function editCapReason(files: readonly string[]): string {
 }
 
 /**
- * Why a stop is sent back once: source was edited this turn and no check ran. Three ways out, the last one for a
+ * Why a stop is sent back once: source was edited this turn and no check passed after the last edit. Three ways out, the last one for a
  * project with nothing to run. What Claude Code hands the model as the reason to continue.
  */
 export function uncheckedReason(files: readonly string[]): string {
-  return `spick guard: source files were edited this turn (${listed(files)}) and no check ran (no test, build check, linter or type checker). Do one of three things now: run the project's check command and report its result; or hand the user one \`/goal <check command>; stop after 10 attempts\` line; or, if this project has no check to run, reply with one line starting with \`Unchecked:\` that says why, and stop. This gate fires once per turn.`
+  return `spick guard: source files were edited this turn (${listed(files)}) and no check passed after the last edit (a test, build check, linter or type checker run as its own command, after the edits, with a clean exit; a failed one, or one an edit followed, does not count). Do one of three things now: run the project's check command and report its result; or hand the user one \`/goal <check command>; stop after 10 attempts\` line; or, if this project has no check to run, reply with one line starting with \`Unchecked:\` that says why, and stop. This gate fires once per turn.`
 }

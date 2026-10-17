@@ -1007,19 +1007,27 @@ async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claud
   const world = session(on, model)
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' && spickJson !== null ? { value: spickJson } : { deny: 'missing' }))
   const ran: string[] = []
+  /** Bash commands that exit non-zero (an error result), and ones held until the test releases them */
+  const failing = new Set<string>()
+  const held = new Map<string, Promise<void>>()
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
   on('tool.call', async ($, e) => {
     const p = (e as { file_path?: string; notebook_path?: string }).file_path ?? (e as { notebook_path?: string }).notebook_path
     if (p) ran.push(p)
+    const command = (e as { command?: string }).command
+    if (command !== undefined) {
+      await held.get(command)
+      if (failing.has(command)) return { isError: true as const, result: 'Exit code 1', text: 'Exit code 1\nFAILED test_a.py::test_x' }
+    }
     return { result: {} as never }
   })
   await $.session.start(START)
   const turn = async (id: string, text = 'tidy the module') => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg = CHECKED) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
   const run = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text
-  return { world, ran, turn, stop, run }
+  return { world, ran, turn, stop, run, failing, held }
 }
 
 test('the guard refuses the main session\'s second distinct source file in a turn, naming the first, with a toast and an edit cap note', { plugins: [probePlugin] }, async ($, on) => {
@@ -1096,10 +1104,10 @@ test('a turn that edited source and ran no check is sent back once at stop, with
   await turn('t1')
   await $.tool.call(edit('e1', '/repo/a.py'))
   const block = await stop()
-  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py) and no check ran')
+  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py) and no check passed after the last edit')
   expect(block).toContain('`Unchecked:`')
   expect(block).toContain('`/goal <check command>; stop after 10 attempts`')
-  expect(world.toasts).toContain('spick: guard — source edited and no check ran; sent back once')
+  expect(world.toasts).toContain('spick: guard — source edited, no passing check after it; sent back once')
   expect((await $.classic.Stop({ stop_hook_active: true, last_assistant_message: CHECKED })).block).toBeUndefined()
   expect(await stop()).toBeUndefined()
   await $.turn.complete({ turnId: 't1', ...DONE })
@@ -1149,6 +1157,53 @@ test('the check before the turn ends passes after a check command, on an Uncheck
   await turn('t7')
   await $.tool.call(edit('e7', '/repo/a.py'))
   expect(await stop()).toContain('spick guard')
+})
+
+test('a check counts only when it passed and came after the last source edit, with none landing while it ran', async ($, on) => {
+  const { turn, stop, failing, held } = await guardWorld($, on)
+  // a failing check (an error result) does not count; the same check passing afterwards does
+  failing.add('pytest -q')
+  await turn('t1')
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  await $.tool.call(bash('b1', 'pytest -q'))
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  failing.clear()
+  await turn('t2')
+  await $.tool.call(edit('e2', '/repo/a.py'))
+  await $.tool.call(bash('b2', 'pytest -q'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  // a check before the last edit does not cover it
+  await turn('t3')
+  await $.tool.call(edit('e3', '/repo/a.py'))
+  await $.tool.call(bash('b3', 'pytest -q'))
+  await $.tool.call(edit('e4', '/repo/a.py'))
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't3', ...DONE })
+  // an edit (a subagent's) that lands while the check runs leaves the turn unchecked
+  await turn('t4')
+  await $.tool.call(edit('e5', '/repo/a.py'))
+  let release = () => {}
+  held.set('npm test', new Promise<void>(r => { release = r }))
+  const check = $.tool.call(bash('b4', 'npm test'))
+  await tick()
+  await $.tool.call(edit('e6', '/repo/b.py', 'a1'))
+  release()
+  await check
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't4', ...DONE })
+})
+
+test('a runner named in an argument, a masked exit status or a version query is no check at stop', async ($, on) => {
+  const { turn, stop } = await guardWorld($, on)
+  for (const [i, c] of ['echo pytest', 'grep pytest README', 'pytest || true', 'pytest --version'].entries()) {
+    await turn(`t${i}`)
+    await $.tool.call(edit(`e${i}`, '/repo/a.py'))
+    await $.tool.call(bash(`b${i}`, c))
+    expect(await stop()).toContain('spick guard')
+    await $.turn.complete({ turnId: `t${i}`, ...DONE })
+  }
 })
 
 test('a coder that edited source and ran no check still sends the turn back, though something was delegated', async ($, on) => {

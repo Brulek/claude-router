@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { EDIT_CAP, UNCHECKED_RE, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
+import { EDIT_CAP, UNCHECKED_RE, checkCommand, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 
 test('the edit cap is one source file per turn', () => {
   expect(EDIT_CAP).toBe(1)
@@ -31,6 +31,30 @@ test('isCheckCommand leaves ordinary commands out, and matches on word boundarie
     'rm -rf .pytest_cache', 'cat test_unittest_helpers.py', 'bash setup.sh', 'npm run dev', 'echo testing', '', 'node server.js',
     'python3 attest.pyc', 'cat ./tests/data.json', 'mvn clean', 'dotnet run', 'gradle clean', 'sh ./deploy.sh',
   ]) expect(isCheckCommand(c)).toBe(false)
+})
+
+test('the runner must be the command word itself: a name in an argument, a quote or a pipe\'s reader is no check', () => {
+  for (const c of [
+    'echo pytest', 'grep pytest README', 'grep -rn "npm test" .', 'echo "cd x && pytest"', 'cat Makefile | grep test', 'git log --grep=pytest',
+    'ls tests/ && echo cargo test', 'which pytest', 'pip install pytest',
+  ]) expect(isCheckCommand(c)).toBe(false)
+})
+
+test('the command word is found after env, npx, sudo, time, assignments, uv run and cd x &&', () => {
+  expect(checkCommand('cd /r/x && python3 -m unittest -q')).toBe('python3 -m unittest -q')
+  expect(checkCommand('env CI=1 npx vitest run')).toBe('vitest run')
+  expect(checkCommand('sudo -E make test')).toBe('make test')
+  expect(checkCommand('time cargo test --all')).toBe('cargo test --all')
+  expect(checkCommand('FOO=1 uv run pytest -q tests/')).toBe('pytest -q tests/')
+  expect(checkCommand('/usr/local/bin/pytest -x')).toBe('/usr/local/bin/pytest -x')
+  expect(checkCommand('npx tsc --noEmit')).toBe('tsc --noEmit')
+})
+
+test('a check whose exit status is thrown away, or that only asks the runner about itself, does not count', () => {
+  for (const c of ['pytest || true', 'pytest 2>&1 || true', 'npm test &>/dev/null || :', 'npm test || echo failed', 'pytest --version', 'cargo --version', 'ruff --help', 'python3 -m pytest -V']) expect(isCheckCommand(c)).toBe(false)
+  // a later command after && still runs only on success; a check reached after || is a check
+  expect(isCheckCommand('pytest && echo ok')).toBe(true)
+  expect(isCheckCommand('false || pytest')).toBe(true)
 })
 
 test('declared check commands: each regex string compiled on its own, a bad one reported and ignored', () => {

@@ -4,7 +4,7 @@ import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, Quota
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
-import { EDIT_CAP, UNCHECKED_RE, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
+import { EDIT_CAP, UNCHECKED_RE, checkCommand, declaredChecks, editCapReason, uncheckedReason } from './guard'
 import { KEPT_RE, appendGateLog, gateLogPath, gateOutcome } from './gatelog'
 import type { GateLogEntry } from './gatelog'
 import { findHints, gateReason, lineOf } from './hint'
@@ -435,10 +435,20 @@ async function noteEdit($: EngineInterface, mainModel: string, agentId: string |
 }
 
 /**
- * the guard's state for the main turn: the source files the main session edited itself, those any loop edited, whether
- * a check ran; `cwd` is the session's, which isSourcePath judges paths against
+ * One check a Bash call ran in the turn, any loop's: the command from its runner on, when it started and finished,
+ * whether the tool result came back without an error, and the source-edit count at its start and how many edits
+ * landed while it ran. It covers the turn only when it passed and no source edit came after it started.
  */
-type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; checkRan: boolean; cwd: string }
+type CheckRun = { command: string; startedAt: number; finishedAt?: number; exitOk?: boolean; editsAtStart: number; editsDuring?: number; agentId?: string }
+
+/**
+ * the guard's state for the main turn: the source files the main session edited itself, those any loop edited, how
+ * many source edits went through, the checks run; `cwd` is the session's, which isSourcePath judges paths against
+ */
+type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; editCount: number; checks: CheckRun[]; cwd: string }
+
+/** a check that passed after the last source edit of the turn, with none landing while it ran */
+const isChecked = (g: GuardTurn): boolean => g.checks.some(c => c.exitOk === true && c.editsDuring === 0 && c.editsAtStart === g.editCount)
 
 /**
  * The guard's edit cap, in front of an Edit, Write or NotebookEdit: the main session's own edit of a source file past
@@ -459,6 +469,7 @@ async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, ag
   }
   if (!agentId) g.mainEdits.add(path)
   g.sourceEdits.add(path)
+  g.editCount++
   return null
 }
 
@@ -524,7 +535,7 @@ export const register: Register = on => {
   /** the project's own check commands (spick.json guard.check_commands), read once at session.start */
   let declared: RegExp[] = []
   /** the guard's per-turn state, cleared at turn.start */
-  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), checkRan: false, cwd: '' }
+  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '' }
   let mainModel = ''
   let mainEffort: string | undefined
   /** the last elapsed-time stamp written to `current` */
@@ -666,7 +677,8 @@ export const register: Register = on => {
       pendingHints = []
       guardTurn.mainEdits.clear()
       guardTurn.sourceEdits.clear()
-      guardTurn.checkRan = false
+      guardTurn.editCount = 0
+      guardTurn.checks = []
       // a mod loaded mid-session saw no session.start: ask for the cwd once
       if (!guardTurn.cwd) guardTurn.cwd = await $.session.cwd().catch(() => '')
       lastTickMs = startedAt
@@ -750,12 +762,19 @@ export const register: Register = on => {
   }).catch(passThrough)
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    // a check run by any loop, a subagent's included, counts for the guard's check before the turn ends
-    try { if (isCheckCommand(e.command, declared)) guardTurn.checkRan = true } catch {}
-    if (e.agentId) return next(e)
+    // a check run by any loop, a subagent's included, counts for the guard's check before the turn ends, once its
+    // result is in: bound to the edit count at its start, so an edit while it ran or after it leaves the turn unchecked
+    let run: CheckRun | null = null
+    try {
+      const command = checkCommand(e.command, declared)
+      if (command) {
+        run = { command, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, ...(e.agentId ? { agentId: e.agentId } : {}) }
+        guardTurn.checks.push(run)
+      }
+    } catch {}
     const id = e.tool_use_id
     let isCli = false
-    try {
+    if (!e.agentId) try {
       const cli = parseCli(e.command)
       if (cli) {
         isCli = true
@@ -772,9 +791,19 @@ export const register: Register = on => {
         try { await addSpend($, spend, spendRow({ at: await $.clock.now(), turnId: mainTurnId, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, usage: null, costUsd: null })) } catch {}
       }
     } catch {}
+    let r: Awaited<ReturnType<typeof next>> | undefined
     try {
-      return await next(e)
+      r = await next(e)
+      return r
     } finally {
+      if (run) {
+        try {
+          run.finishedAt = await $.clock.now()
+          // the exit status as the tool result carries it: a non-zero exit, a refusal or an interrupt is an error
+          run.exitOk = r !== undefined && !r.deny && !r.isError
+          run.editsDuring = guardTurn.editCount - run.editsAtStart
+        } catch {}
+      }
       if (isCli) {
         try {
           inFlight.delete(id)
@@ -841,9 +870,9 @@ export const register: Register = on => {
         await setCurrent($, { note: { kind: 'warning', text: `gate: ${g.kind} kept` } })
         return { ...r, block: g.text }
       }
-      if (c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !guardTurn.checkRan && !UNCHECKED_RE.test(answer)) {
+      if (c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !isChecked(guardTurn) && !UNCHECKED_RE.test(answer)) {
         gateAskedTurn = mainTurnId
-        $.ui.toast('spick: guard — source edited and no check ran; sent back once')
+        $.ui.toast('spick: guard — source edited, no passing check after it; sent back once')
         await setCurrent($, { note: { kind: 'warning', text: 'guard: unchecked' } })
         return { ...r, block: uncheckedReason([...guardTurn.sourceEdits]) }
       }
