@@ -1,0 +1,61 @@
+{
+  "meta": {
+    "arm": "haiku-bare",
+    "task": "T2",
+    "run": 1,
+    "started": "2026-10-17T02:22:36+00:00",
+    "wall_seconds": 0.3,
+    "exit_code": 0,
+    "timed_out": false,
+    "stderr_tail": "",
+    "cmd": [
+      "/tmp/s3stub/claude2",
+      "-p",
+      "<prompt>",
+      "--output-format",
+      "json",
+      "--permission-mode",
+      "acceptEdits",
+      "--model",
+      "haiku",
+      "--settings",
+      "/Users/brulek/dev/spick/.claude/worktrees/v2-evals/skills/spick/evals/ab/samples/_arms/haiku-bare.json",
+      "--disallowedTools",
+      "Agent",
+      "--allowedTools",
+      "Read",
+      "Edit",
+      "Write",
+      "Glob",
+      "Grep",
+      "Bash(python3:*)",
+      "Bash(pytest:*)",
+      "Bash(ls:*)",
+      "Bash(cat:*)",
+      "Bash(wc:*)",
+      "Bash(head:*)",
+      "Bash(echo:*)",
+      "Bash(date:*)",
+      "Bash(sort:*)",
+      "Bash(shasum:*)"
+    ]
+  },
+  "result": {
+    "type": "result",
+    "is_error": false,
+    "result": "STUB: no model ran",
+    "session_id": "stub-session",
+    "total_cost_usd": 0.0,
+    "num_turns": 1,
+    "modelUsage": {
+      "claude-haiku-stub": {
+        "costUSD": 0.0
+      }
+    },
+    "subagent_stats": {
+      "spawned": 0,
+      "by_type": {}
+    }
+  },
+  "turn_records": null
+}

@@ -259,3 +259,7 @@ Spick 免费，采用 MIT 许可。如果它帮你省了时间、你想支持作
 ## 许可证
 
 MIT，见 [LICENSE](LICENSE)。
+
+## 评测
+
+`skills/spick/evals/ab/` 是一套 A/B 评测：用 `claude -p` 把八个小任务分别交给 spick 臂和若干基线（单模型、可自由委派）去做，再用精确检查、隐藏测试和盲评打分，报告给出质量、完成率、每次成功交付的成本和耗时分位数。它说明的是这些任务上的情况，不能证明在一般任务上不劣于大模型。臂的定义、参数、局限和完整矩阵的命令见 [skills/spick/evals/ab/README.md](skills/spick/evals/ab/README.md)。

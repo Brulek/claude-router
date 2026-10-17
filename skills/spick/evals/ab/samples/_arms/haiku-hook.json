@@ -1,0 +1,17 @@
+{
+  "enabledPlugins": {
+    "spick-dashboard@spick": false
+  },
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bash '/Users/brulek/dev/spick/.claude/worktrees/v2-evals/skills/spick/scripts/triage-hook.sh'"
+          }
+        ]
+      }
+    ]
+  }
+}

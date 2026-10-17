@@ -1,0 +1,29 @@
+{
+  "runs": {
+    "haiku-bare/T2/run-1": {
+      "arm": "haiku-bare",
+      "task": "T2",
+      "run": 1,
+      "error": false,
+      "timed_out": false,
+      "cost": 0.0,
+      "wall": 0.3,
+      "turns": 1,
+      "models": [
+        "claude-haiku-stub"
+      ],
+      "subagents": 0,
+      "label_line": false,
+      "kept_line": false,
+      "ideal": "haiku",
+      "tier_match": true,
+      "turn_record": false,
+      "outside_calls": null,
+      "explore_ran": false,
+      "haiku_billed": true,
+      "subagent_types": {},
+      "pass": false
+    }
+  },
+  "judge": {}
+}
