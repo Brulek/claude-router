@@ -13,7 +13,7 @@ import type { Hint } from './hint'
 import { readQuota } from './quota'
 import { ZERO_USAGE, addUsage, appendLines, lateLine, lineText, turnLine, usageEntry } from './turnlog'
 import type { CheckEntry, DelegateEntry, GateEvent, UsageEntry } from './turnlog'
-import { lanesFromCache, quotaLineFromCache } from './quotaline'
+import { lanesFromCache, lanesFromConfig, quotaLineFromCache } from './quotaline'
 import { markerPath, spickPaths, turnsFile } from './paths'
 import { DEFAULT_EFFORTS, effortToFill, effortsFrom } from './efforts'
 import type { Efforts } from './efforts'
@@ -69,13 +69,17 @@ async function quotaLineNow($: EngineInterface): Promise<string | null> {
   } catch { return null }
 }
 
-/** The lanes the user declared (lane_registry), from the same cache; null for a user without one, or when it cannot be read. */
+/**
+ * The lanes the user declared (lane_registry), from the same cache; when the cache is cold (missing, unreadable,
+ * silent on lanes) from spick.json itself, the authority (quotaline.ts lanesFromConfig). Null when neither can be
+ * read: then the built-in bullet stands.
+ */
 async function lanesNow($: EngineInterface): Promise<LanesState | null> {
-  try {
-    const p = await pathsNow($)
-    if (!p) return null
-    return lanesFromCache(await $.fs.read(p.quota))
-  } catch { return null }
+  const p = await pathsNow($).catch(() => null)
+  if (!p) return null
+  const cached = await $.fs.read(p.quota).then(lanesFromCache, () => null)
+  if (cached) return cached
+  return await $.fs.read(p.spickJson).then(lanesFromConfig, () => null)
 }
 
 /** The four remembered choices: routing, review, the gate and the guard. The lanes' on/off is not remembered here: it lives in spick.json. */

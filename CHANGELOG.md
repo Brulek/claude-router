@@ -79,7 +79,8 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 - `--uninstall --purge` removes `spick.json` and the whole state directory, backups included.
 - A registry with every lane switched off is no longer read as "no registry": the quota cache carries
   `registry: true|false` and the enabled `lanes`, and the checklist says no outside lane may be called and the label
-  reads `Review: skipped`.
+  reads `Review: skipped`. With the cache missing or unreadable the mod reads the same from `spick.json`, by
+  `lanes.py`'s rule; only without `spick.json` does it fall back to the built-in lanes.
 - Setup writes the hook's absolute path, so a skill outside `~/.claude` or a `CLAUDE_CONFIG_DIR` still runs (round 1).
 - Setup backs up `CLAUDE.md`, `settings.json` and `spick.json` before every write; uninstall removes only what the
   install wrote (0.x, kept).

@@ -745,6 +745,29 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   expect(without[0]).not.toContain('Quota')
 })
 
+test('a cold quota cache leaves the lanes to spick.json: everything disabled reads "no outside lane is enabled"; no spick.json either is the built-in bullet', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  let spickJson: string | null = JSON.stringify({ lanes: { gemini: false, grok: false, codex: false }, lane_registry: { gemini: { enabled: false }, grok: { enabled: false }, codex: { enabled: false } } })
+  // no quota.json at all: the cache is cold
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' && spickJson !== null ? { value: spickJson } : { deny: 'missing' }))
+  await $.session.start(START)
+  const none = (await contextOf($))[0] ?? ''
+  expect(none).toContain('no outside lane is enabled: do not call Gemini, Grok or Codex')
+  // one lane on: the registry wording with the Lanes line from the config
+  spickJson = JSON.stringify({ lane_registry: { gemini: { enabled: false }, grok: { enabled: false } } })
+  const one = (await contextOf($))[0] ?? ''
+  expect(one).not.toContain('no outside lane is enabled')
+  expect(one).toContain('Lanes (user-declared; data = most that may be sent): codex code,review,image data:code')
+  // neither file: the built-in bullet
+  spickJson = null
+  const builtin = (await contextOf($))[0] ?? ''
+  expect(builtin).not.toContain('no outside lane is enabled')
+  expect(builtin).not.toContain('Lanes (user-declared')
+})
+
 test('registry lanes with facts and no windows reach the checklist with their facts; one with neither reads unknown', async ($, on) => {
   mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
   mock.store(on)
