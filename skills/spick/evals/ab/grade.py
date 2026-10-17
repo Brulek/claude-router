@@ -179,21 +179,81 @@ def outside_calls(turn_records):
                if str(d.get("lane", "")).lower() not in CLAUDE_LANES)
 
 
+def unpriced_delegates(turn_records):
+    """Number of delegates in the turn records whose cost is unknown (no costUsd); None when there is no record."""
+    if not turn_records:
+        return None
+    return sum(1 for r in turn_records for d in (r.get("delegates") or []) if d.get("costUsd") is None)
+
+
+def _explore_entries(res):
+    """(by_type present, entries) for Explore-type agents in the result's subagent_stats.by_type."""
+    stats = res.get("subagent_stats") or {}
+    if "by_type" not in stats:
+        return False, []
+    by_type = stats["by_type"] or {}
+    return True, [v for k, v in by_type.items() if str(k).lower() == "explore"]
+
+
+def _entry_models(entry):
+    """Model names an Explore entry of by_type names, in any of the shapes a count-with-detail may take; [] if none."""
+    if isinstance(entry, str):
+        return [entry]
+    if not isinstance(entry, dict):
+        return []  # a bare count says an agent ran, not on what
+    names = [entry["model"]] if isinstance(entry.get("model"), str) else []
+    names += [m for m in (entry.get("models") or []) if isinstance(m, str)]
+    names += list((entry.get("modelUsage") or {}).keys())
+    return names
+
+
 def explore_ran(res):
-    """The Explore override is only checkable at runtime: did an Explore agent run, and was any Haiku billed?
-    (On a Haiku main session the Haiku line alone proves nothing; the agent type is what counts.)"""
-    by_type = (res.get("subagent_stats") or {}).get("by_type") or {}
-    ran = any(str(k).lower() == "explore" for k in by_type)
-    return ran, any("haiku" in m for m in (res.get("modelUsage") or {}))
+    """Did an Explore agent run? (The agent type is what counts; a Haiku line in modelUsage proves nothing on a
+    Haiku main session.)"""
+    return bool(_explore_entries(res)[1])
+
+
+def explore_haiku(res, turn_records=None):
+    """True only when an Explore-type agent is shown running on Haiku; False when Explore did not run or ran on
+    another model; "unknown" when it ran (or nothing says it did not) and neither source names its model.
+    Source 1 is subagent_stats.by_type; if that key is absent, or names no model, the turn-record `delegates[]`.
+    Several Explore agents: all named ones must be Haiku."""
+    present, entries = _explore_entries(res)
+    models = [m for e in entries for m in _entry_models(e)]
+    if not models:
+        models = [d.get("model") for r in turn_records or [] for d in (r.get("delegates") or [])
+                  if str(d.get("lane") or d.get("type") or "").lower() == "explore" and isinstance(d.get("model"), str)]
+    if models:
+        return all("haiku" in m.lower() for m in models)
+    if present and not entries:
+        return False  # by_type is there and lists no Explore: it did not run
+    return "unknown"
+
+
+def error_reason(meta, res):
+    """Why a run counts as an error, or None. A non-zero exit, an is_error result, a timeout or an unparsable result is
+    never a pass, however right the answer text looks (a crashed run can still have printed a correct answer)."""
+    reasons = []
+    if meta.get("timed_out"):
+        reasons.append("timeout")
+    code = meta.get("exit_code")  # None on timeout, absent in results written before the field existed
+    if code not in (0, None):
+        reasons.append(f"exit_code={code}")
+    if res.get("is_error"):
+        reasons.append("is_error")
+    if not res:
+        reasons.append("no result json")
+    return ", ".join(reasons) or None
 
 
 def run_metrics(rec, task):
     meta, res = rec["meta"], rec.get("result") or {}
+    reason = error_reason(meta, res)
     models = sorted((res.get("modelUsage") or {}).keys())
     answer = res.get("result") or ""
     return {
         "arm": meta["arm"], "task": meta["task"], "run": meta["run"],
-        "error": bool(res.get("is_error")) or not res or meta.get("timed_out", False),
+        "error": reason is not None, "error_reason": reason,
         "timed_out": meta.get("timed_out", False),
         "cost": res.get("total_cost_usd"), "wall": meta.get("wall_seconds"),
         "turns": res.get("num_turns"), "models": models,
@@ -202,7 +262,8 @@ def run_metrics(rec, task):
         "ideal": task["ideal_tier"], "tier_match": tier_match(models, task["ideal_tier"]),
         "turn_record": rec.get("turn_records") is not None,
         "outside_calls": outside_calls(rec.get("turn_records")),
-        "explore_ran": explore_ran(res)[0], "haiku_billed": explore_ran(res)[1],
+        "unpriced_delegates": unpriced_delegates(rec.get("turn_records")),
+        "explore_ran": explore_ran(res), "explore_haiku": explore_haiku(res, rec.get("turn_records")),
         "subagent_types": (res.get("subagent_stats") or {}).get("by_type") or {},
     }
 

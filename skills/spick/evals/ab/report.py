@@ -26,6 +26,19 @@ def mean(values):
     return sum(values) / len(values) if values else None
 
 
+def cost_floor(gs):
+    """The Claude-side cost is a floor when a run called an outside CLI (it bills elsewhere) or had a delegate
+    whose cost is unknown."""
+    return any((g.get("outside_calls") or 0) > 0 or (g.get("unpriced_delegates") or 0) > 0 for g in gs)
+
+
+def cost_summary(gs):
+    """(total, priced). The total is None unless every run has a priced cost: a sum over the priced ones alone
+    would pass for the whole cell. priced is the number of runs that carry a cost."""
+    costs = [g["cost"] for g in gs if g.get("cost") is not None]
+    return (sum(costs) if len(costs) == len(gs) else None), len(costs)
+
+
 def aggregate(runs):
     """{(arm, task): cell} from grades.json's runs. A cell keeps every run; nothing is dropped."""
     cells = {}
@@ -34,13 +47,13 @@ def aggregate(runs):
     out = {}
     for key, gs in cells.items():
         graded = [g for g in gs if g["pass"] is not None]
-        costs = [g["cost"] for g in gs if g["cost"] is not None]
+        total, priced = cost_summary(gs)
         out[key] = {
             "n": len(gs), "graded": len(graded), "passed": sum(1 for g in graded if g["pass"]),
             "completed": sum(1 for g in gs if not g["error"]),
-            "cost_mean": mean(costs), "cost_sum": sum(costs),
-            # an outside CLI call bills elsewhere, so the Claude-side cost is a floor, not the cost
-            "cost_floor": any((g.get("outside_calls") or 0) > 0 for g in gs),
+            "cost_total": total, "cost_priced": priced, "cost_coverage": priced / len(gs),
+            "cost_mean": total / len(gs) if total is not None else None,
+            "cost_floor": cost_floor(gs),
             "wall_mean": mean([g["wall"] for g in gs]),
             "models": sorted({m for g in gs for m in g["models"]}),
             "labels": sum(1 for g in gs if g["label_line"]), "kept": sum(1 for g in gs if g["kept_line"]),
@@ -53,25 +66,30 @@ def arm_summary(runs, arm):
     gs = [g for g in runs.values() if g["arm"] == arm]
     graded = [g for g in gs if g["pass"] is not None]
     passed = sum(1 for g in graded if g["pass"])
-    costs = [g["cost"] for g in gs if g["cost"] is not None]
+    total, priced = cost_summary(gs)
     walls = [g["wall"] for g in gs if g["wall"] is not None]
     return {
         "n": len(gs), "graded": len(graded), "passed": passed,
         "completed": sum(1 for g in gs if not g["error"]),
-        "cost_total": sum(costs),
+        "cost_total": total, "cost_priced": priced, "cost_coverage": priced / len(gs) if gs else None,
         # failures are paid for too: total spend over successful deliveries
-        "cost_per_success": (sum(costs) / passed) if passed else None,
-        "cost_floor": any((g.get("outside_calls") or 0) > 0 for g in gs),
+        "cost_per_success": (total / passed) if passed and total is not None else None,
+        "cost_floor": cost_floor(gs),
         "wall_p50": percentile(walls, 50), "wall_p95": percentile(walls, 95),
         "subagent_runs": sum(1 for g in gs if g.get("subagents")),
         "explore_runs": sum(1 for g in gs if g.get("explore_ran")),
-        "explore_haiku": sum(1 for g in gs if g.get("explore_ran") and g.get("haiku_billed")),
+        "explore_haiku": sum(1 for g in gs if g.get("explore_haiku") is True),
+        "explore_unknown": sum(1 for g in gs if g.get("explore_haiku") == "unknown"),
         "turn_records": sum(1 for g in gs if g.get("turn_record")),
     }
 
 
-def fmt_cost(v, floor=False):
-    return "n/a" if v is None else f"{'>=' if floor else ''}${v:.3f}"
+def fmt_cost(v, floor=False, priced=None, n=None):
+    """A missing figure with unpriced runs reads "unknown (priced/n priced)"; with every run priced (no success to
+    divide by) it stays n/a."""
+    if v is None:
+        return f"unknown ({priced}/{n} priced)" if n and priced < n else "n/a"
+    return f"{'>=' if floor else ''}${v:.3f}"
 
 
 def fmt_s(v):
@@ -88,7 +106,7 @@ CAVEATS = """\
 - n is small. With 3 runs per cell one flaky run moves a pass rate by a third; do not read differences smaller than that.
 - Costs are `total_cost_usd` from Claude Code. A delegate on an outside CLI (Gemini, Grok, Codex) bills on its own subscription, so it is not in that figure; cells with such calls show `>=`, and an arm whose turn records are missing cannot be told apart from one with no outside calls.
 - Turn records (`~/.claude/spick/turns/<sessionId>.jsonl`) are written by the mod; a headless run may have none. Their absence is not an error and leaves the turn-record column at 0.
-- The mod arm relies on `disableAllHooks: true` leaving the mod's own prompt hook alone and on `--plugin-dir` taking precedence over the disabled global copy. Neither was verifiable offline; the Explore and turn-record columns below are the runtime evidence.
+- The mod arm relies on `disableAllHooks: true` leaving the mod's own prompt hook alone and on `--plugin-dir` taking precedence over the disabled global copy. The start-up probe above is the check on both; the Explore and turn-record columns below are further runtime evidence.
 - The global marker `~/.claude/spick/mod-active/<sessionId>` or the v1 `~/.claude/.spick-mod-active` file may silence the hook of this checkout in `haiku-hook`, and the user's global v1 hook may print as well. `haiku-hook` is a best-effort ablation arm.
 - Global agents in `~/.claude/agents` exist in every arm; `*-free` arms can use them.
 - Sessions were run with the user's real settings otherwise (permissions, MCP servers, plugins other than the mod), which adds the same fixed context to every arm.
@@ -98,8 +116,25 @@ CANNOT = """\
 - **General non-inferiority.** Eight small tasks show whether routing held up on these tasks, not that a routed Haiku session is as good as Opus on work of any other kind.
 - **Real bills.** `total_cost_usd` is list-price arithmetic from token counts. It ignores subscription quotas, outside-CLI delegates and the user's plan; the judge's cost is not in it either.
 - **Long-session cache effects.** Each run is a fresh one-prompt session. Prompt caching across a long working session, where the routing block is paid for once and reused, is not exercised; neither is context growth over many turns.
+- **A spick-free baseline.** The `*-free` arms still read the user's global `~/.claude/CLAUDE.md`, which may carry the spick block. They are strong-model baselines with spick's instructions visible but no spick tooling, not models that have never seen spick.
 - **Leak safety.** Nothing here tests whether a lane's declared data level is respected, or whether code or secrets would reach a lane they should not.
 """
+
+
+def probe_lines(out_dir):
+    """Caveat bullets from <out>/_probe.json: version, checkout head and what each arm's start-up probe showed."""
+    path = Path(out_dir) / "_probe.json"
+    if not path.exists():
+        return ["- **Arm start-up probe: none recorded** (`_probe.json` is missing), so nothing here shows that the arms "
+                "started as their names say."]
+    info = json.loads(path.read_text(encoding="utf-8"))
+    head = (info.get("checkout_head") or "unknown")[:12]
+    L = [f"- Arm start-up probe (claude `{info.get('claude_version') or 'version unknown'}`, checkout `{head}`"
+         f"{', run with --allow-unverified' if info.get('allow_unverified') else ''}):"]
+    for arm, p in (info.get("arms") or {}).items():
+        state = "INVALID" if not p.get("ok") else ("accepted, not verified" if p.get("check") == "best-effort" else "verified")
+        L.append(f"  - `{arm}`: **{state}** - {p.get('detail') or 'no detail'}")
+    return L
 
 
 def render(out_dir, today):
@@ -118,11 +153,14 @@ def render(out_dir, today):
     for a in arms:
         s = arm_summary(runs, a)
         L.append(f"| {a} | {fmt_rate(s['passed'], s['graded'])} | {fmt_rate(s['completed'], s['n'])} | "
-                 f"{fmt_cost(s['cost_total'], s['cost_floor'])} | {fmt_cost(s['cost_per_success'], s['cost_floor'])} | "
+                 f"{fmt_cost(s['cost_total'], s['cost_floor'], s['cost_priced'], s['n'])} | "
+                 f"{fmt_cost(s['cost_per_success'], s['cost_floor'], s['cost_priced'] if s['passed'] else s['n'], s['n'])} | "
                  f"{fmt_s(s['wall_p50'])} | {fmt_s(s['wall_p95'])} |")
     L += ["", "Quality counts graded runs only (a judged cell whose judge call failed is left out). Completion is runs that "
           "returned a result without error or timeout. Cost per successful delivery is the arm's whole spend, failures "
-          "included, over its passes.", ""]
+          "included, over its passes. A cost is `unknown (n/m priced)` when some runs carry no priced cost (a failed or "
+          "unparsed run): a sum over the priced runs alone would understate it. `>=` marks a floor: an outside-CLI call or "
+          "a delegate with an unknown cost bills outside the figure.", ""]
 
     L += ["## Per arm and task", "",
           "Every cell is kept, including the ones where an arm loses (marked LOSES: pass rate below the best arm on that task).", "",
@@ -136,7 +174,7 @@ def render(out_dir, today):
                 continue
             loses = best is not None and c["graded"] and c["passed"] / c["graded"] < best
             L.append(f"| {t} {tasks[t]['name']} | {a} | {fmt_rate(c['passed'], c['graded'])}{' LOSES' if loses else ''} | "
-                     f"{fmt_rate(c['completed'], c['n'])} | {fmt_cost(c['cost_mean'], c['cost_floor'])} | "
+                     f"{fmt_rate(c['completed'], c['n'])} | {fmt_cost(c['cost_mean'], c['cost_floor'], c['cost_priced'], c['n'])} | "
                      f"{fmt_s(c['wall_mean'])} | {', '.join(m.replace('claude-', '') for m in c['models']) or '-'} | "
                      f"{c['labels']}/{c['n']} | {c['kept']}/{c['n']} |")
     L.append("")
@@ -145,20 +183,22 @@ def render(out_dir, today):
     if failed:
         L += ["## Failed runs", ""]
         for rid, g in sorted(failed):
-            why = "error/timeout" if g["error"] else ", ".join(
+            why = f"error ({g.get('error_reason') or 'unknown'})" if g["error"] else ", ".join(
                 f"{k}={g[k]}" for k in ("visible_pass", "hidden_pass", "tests_untouched", "chars", "forbidden_found",
                                         "judge_overall") if k in g) or "check failed"
             L.append(f"- `{rid}`: {why}")
         L.append("")
 
     L += ["## Tier use and Explore", "",
-          "| arm | runs that spawned a subagent | Explore ran | Explore with Haiku billed | runs with a turn record |", "|---|---|---|---|---|"]
+          "| arm | runs that spawned a subagent | Explore ran | Explore agent on Haiku | runs with a turn record |", "|---|---|---|---|---|"]
     for a in arms:
         s = arm_summary(runs, a)
-        L.append(f"| {a} | {s['subagent_runs']}/{s['n']} | {s['explore_runs']}/{s['n']} | {s['explore_haiku']}/{s['n']} | {s['turn_records']}/{s['n']} |")
+        L.append(f"| {a} | {s['subagent_runs']}/{s['n']} | {s['explore_runs']}/{s['n']} | {s['explore_haiku']}/{s['n']}"
+                 f"{' (+' + str(s['explore_unknown']) + ' unknown)' if s['explore_unknown'] else ''} | {s['turn_records']}/{s['n']} |")
     L += ["", "The Explore check is the spec's runtime acceptance for the Explore override: in `haiku-spick` and the `*-free` "
-          "arms, `subagent_stats.by_type` must show Explore and `modelUsage` a Haiku line. On a Haiku main session the "
-          "Haiku line alone proves nothing, so read the Explore column with it.", ""]
+          "arms, the Explore agent itself must be shown on Haiku, by `subagent_stats.by_type` or, if that names no model, "
+          "by the turn record's `delegates[]`. A Haiku line in `modelUsage` is not evidence (a Haiku main session bills "
+          "one anyway). \"unknown\" counts runs where Explore ran but no source names its model; they are not passes.", ""]
 
     L += ["## Tier match", "", "| task | ideal | " + " | ".join(arms) + " |", "|---|---|" + "---|" * len(arms)]
     for t in tids:
@@ -177,7 +217,7 @@ def render(out_dir, today):
                  "cost unknown (a subscription CLI reports no dollar figure). It is kept out of every arm's cost above.")
     else:
         L.append("No judge call recorded (grading ran with `--no-judge`, or no judged task was in the matrix).")
-    L += ["", "## Caveats", "", CAVEATS, "## What this matrix cannot show", "", CANNOT]
+    L += ["", "## Caveats", "", *probe_lines(out_dir), CAVEATS, "## What this matrix cannot show", "", CANNOT]
     return "\n".join(L)
 
 

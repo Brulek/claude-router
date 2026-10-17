@@ -100,6 +100,82 @@ def run_claude(cmd, cwd, env, timeout):
         return out or "", err or "", None, True
 
 
+PROBE_PROMPT = "Reply with exactly OK."
+PROBE_SETTLE = 3.0  # seconds the mod gets to write its turn record after claude exits
+
+
+def checkout_head():
+    r = subprocess.run(["git", "-C", str(common.MOD_DIR), "rev-parse", "HEAD"], capture_output=True, text=True)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def claude_version(binary):
+    try:
+        r = subprocess.run([binary, "--version"], capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    return r.stdout.strip() or None
+
+
+def probe_arm(arm, args, env, agents_file, settings_dir, settle=None):
+    """One cheap call per arm, then check from the turn-record directory that the arm started as configured.
+    haiku-spick: the checkout's mod ran (a schemaVersion 2 record appeared; the global copy is disabled, so it cannot
+    have written one). *-bare and *-free arms: no record file for the session (the global mod stayed disabled).
+    haiku-hook: accepted, a bash hook leaves nothing the harness can read."""
+    cfg = common.ARMS[arm]
+    settle = PROBE_SETTLE if settle is None else settle
+    work = Path(args.out) / "_probe" / arm / "work"
+    work.mkdir(parents=True, exist_ok=True)
+    cmd = build_cmd(arm, PROBE_PROMPT, agents_file, settings_dir / f"{arm}.json", args.claude_bin)
+    out, err, code, timed_out = run_claude(cmd, work, env, args.probe_timeout)
+    p = {"arm": arm, "ok": False, "check": None, "detail": "", "session_id": None, "exit_code": code,
+         "timed_out": timed_out, "record_seen": None, "schema_version": None}
+    try:
+        res = json.loads(out)
+    except ValueError:
+        res = None
+    if timed_out or code != 0 or not isinstance(res, dict) or res.get("is_error") or not res.get("session_id"):
+        p["detail"] = (f"the probe call failed (exit {code}{', timeout' if timed_out else ''}"
+                       f"{'' if isinstance(res, dict) else ', no JSON result'}): {err.strip()[-200:]}")
+        return p
+    sid = p["session_id"] = res["session_id"]
+    path = common.turn_record_path(sid)
+    deadline = time.time() + settle
+    while True:  # the mod writes at turn end, possibly just after claude exits
+        recs = common.find_turn_records(sid) or []
+        versions = {r.get("schemaVersion") for r in recs}
+        done = 2 in versions if cfg["mod"] else cfg["hook"] or path.exists()
+        if done or time.time() >= deadline:
+            break
+        time.sleep(0.2)
+    p["record_seen"] = path.exists()
+    p["schema_version"] = 2 if 2 in versions else (sorted(versions, key=str)[0] if versions else None)
+    if cfg["mod"]:
+        p["check"] = "record"
+        p["ok"] = 2 in versions
+        p["detail"] = ("the checkout's mod wrote a schemaVersion 2 turn record" if p["ok"] else
+                       f"no schemaVersion 2 turn record for session {sid}: the checkout's mod did not run "
+                       "(--plugin-dir not honoured, or the mod does not write records in headless runs)")
+    elif cfg["hook"]:
+        p["check"], p["ok"] = "best-effort", True
+        p["detail"] = "accepted unverified: a bash hook leaves no trace the harness can read"
+    else:
+        p["check"] = "no-record"
+        p["ok"] = not p["record_seen"]
+        p["detail"] = ("no turn record for the session: the global mod stayed disabled" if p["ok"] else
+                       f"{path} exists: the global mod ran although it should be disabled")
+    return p
+
+
+def probe_all(arms, args, env, agents_file, settings_dir, settle=None):
+    """Probe each distinct arm once, write <out>/_probe.json, return {arm: result}."""
+    results = {a: probe_arm(a, args, env, agents_file, settings_dir, settle) for a in dict.fromkeys(arms)}
+    info = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "claude_version": claude_version(args.claude_bin),
+            "checkout_head": checkout_head(), "allow_unverified": bool(args.allow_unverified), "arms": results}
+    (Path(args.out) / "_probe.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
+    return results
+
+
 def do_run(job, args, env, agents_file, settings_dir, lock):
     arm, tid, n = job
     task = common.load_tasks()[tid]
@@ -153,6 +229,9 @@ def main():
     ap.add_argument("--force", action="store_true", help="redo runs that already have a result.json")
     ap.add_argument("--claude-bin", default="claude", help="the claude executable (a stub for pipeline tests)")
     ap.add_argument("--dry-run", action="store_true", help="print the commands and exit")
+    ap.add_argument("--allow-unverified", action="store_true",
+                    help="go on although an arm's start-up probe failed (the arm is marked invalid in _probe.json and the report)")
+    ap.add_argument("--probe-timeout", type=int, default=180, help="seconds for each arm's start-up probe call")
     args = ap.parse_args()
 
     if args.setup:
@@ -188,6 +267,14 @@ def main():
         for arm, tid, n in jobs:
             print(arm, tid, n, build_cmd(arm, tasks[tid]["prompt"], agents_file, arms_dir / f"{arm}.json", args.claude_bin))
         return 0
+    probes = probe_all(arms, args, env, agents_file, arms_dir)
+    for a, p in probes.items():
+        print(f"probe {a:12} {'ok' if p['ok'] else 'FAILED'} ({p['check'] or 'call'}): {p['detail']}", flush=True)
+    bad = [a for a, p in probes.items() if not p["ok"]]
+    if bad and not args.allow_unverified:
+        sys.exit(f"start-up probe failed for {', '.join(bad)}: these arms did not start as configured, so their results "
+                 f"would not mean what the arm name says. See {out / '_probe.json'}; fix the setup or rerun with "
+                 "--allow-unverified (the arms are then marked invalid in the report).")
     lock = threading.Lock()
     print(f"{len(jobs)} runs, parallel {args.parallel}, out {out}", flush=True)
     with ThreadPoolExecutor(max_workers=args.parallel) as ex:

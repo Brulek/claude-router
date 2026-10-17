@@ -9,7 +9,7 @@ import report
 def g(arm, task, ok, cost=0.01, wall=10, **kw):
     d = dict(arm=arm, task=task, run=1, error=False, cost=cost, wall=wall, turns=2, models=["claude-haiku-5-5"],
              label_line=False, kept_line=False, ideal="haiku", tier_match=True, turn_record=False,
-             outside_calls=None, explore_ran=False, haiku_billed=True, subagents=0, pass_=ok)
+             outside_calls=None, explore_ran=False, explore_haiku=False, subagents=0, pass_=ok)
     d["pass"] = d.pop("pass_")
     d.update(kw)
     return d
@@ -39,6 +39,84 @@ class Stats(unittest.TestCase):
         c = report.aggregate({"a/T5/run-1": g("a", "T5", None)})[("a", "T5")]
         self.assertEqual((c["passed"], c["graded"], c["n"]), (0, 0, 1))
 
+    def test_unpriced_runs_make_cost_unknown_not_a_partial_sum(self):
+        runs = {"a/T1/run-1": g("a", "T1", True, cost=0.10), "a/T1/run-2": g("a", "T1", True, cost=None),
+                "a/T1/run-3": g("a", "T1", False, cost=0.30)}
+        c = report.aggregate(runs)[("a", "T1")]
+        self.assertIsNone(c["cost_total"])
+        self.assertIsNone(c["cost_mean"])
+        self.assertEqual(c["cost_priced"], 2)
+        self.assertAlmostEqual(c["cost_coverage"], 2 / 3)
+        s = report.arm_summary(runs, "a")
+        self.assertIsNone(s["cost_total"])
+        self.assertIsNone(s["cost_per_success"])
+        self.assertAlmostEqual(s["cost_coverage"], 2 / 3)
+        self.assertEqual(report.fmt_cost(s["cost_total"], False, s["cost_priced"], s["n"]), "unknown (2/3 priced)")
+
+    def test_all_unpriced_is_zero_of_n_not_zero_dollars(self):
+        runs = {"a/T1/run-1": g("a", "T1", False, cost=None), "a/T1/run-2": g("a", "T1", False, cost=None)}
+        s = report.arm_summary(runs, "a")
+        self.assertIsNone(s["cost_total"])
+        self.assertEqual(s["cost_priced"], 0)
+        self.assertEqual(report.fmt_cost(None, False, 0, 2), "unknown (0/2 priced)")
+
+    def test_fully_priced_cell_keeps_its_numbers(self):
+        c = report.aggregate({"a/T1/run-1": g("a", "T1", True, cost=0.10), "a/T1/run-2": g("a", "T1", True, cost=0.30)})[("a", "T1")]
+        self.assertAlmostEqual(c["cost_total"], 0.40)
+        self.assertAlmostEqual(c["cost_mean"], 0.20)
+        self.assertEqual(c["cost_coverage"], 1.0)
+
+    def test_unknown_delegate_cost_keeps_the_floor(self):
+        c = report.aggregate({"a/T1/run-1": g("a", "T1", True, outside_calls=0, unpriced_delegates=1)})[("a", "T1")]
+        self.assertTrue(c["cost_floor"])
+        self.assertFalse(report.aggregate({"a/T1/run-1": g("a", "T1", True, outside_calls=0, unpriced_delegates=0)})[("a", "T1")]["cost_floor"])
+        s = report.arm_summary({"a/T1/run-1": g("a", "T1", True, unpriced_delegates=2)}, "a")
+        self.assertTrue(s["cost_floor"])
+
+    def test_floor_survives_in_the_rendered_row_and_unknown_is_printed(self):
+        runs = {"haiku-bare/T1/run-1": g("haiku-bare", "T1", True, cost=0.10, outside_calls=1),
+                "haiku-bare/T1/run-2": g("haiku-bare", "T1", True, cost=None),
+                "opus-bare/T1/run-1": g("opus-bare", "T1", True, cost=0.20, unpriced_delegates=1)}
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {}}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("| haiku-bare | 2/2 | 2/2 | unknown (1/2 priced) | unknown (1/2 priced) |", text)
+        self.assertIn("| opus-bare | 1/1 | 1/1 | >=$0.200 | >=$0.200 |", text)
+        self.assertNotIn("$0.000", text)
+
+    def test_explore_column_counts_verified_haiku_and_flags_unknown(self):
+        runs = {"haiku-spick/T1/run-1": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku=True),
+                "haiku-spick/T1/run-2": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku="unknown"),
+                "haiku-spick/T1/run-3": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku=False)}
+        s = report.arm_summary(runs, "haiku-spick")
+        self.assertEqual((s["explore_runs"], s["explore_haiku"], s["explore_unknown"]), (3, 1, 1))
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {}}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("| haiku-spick | 0/3 | 3/3 | 1/3 (+1 unknown) | 0/3 |", text)
+
+
+class Probe(unittest.TestCase):
+    def render(self, probe):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": {"haiku-bare/T1/run-1": g("haiku-bare", "T1", True)}, "judge": {}}))
+            if probe is not None:
+                Path(d, "_probe.json").write_text(json.dumps(probe))
+            return report.render(d, "2026-10-17")
+
+    def test_caveats_show_probe_results_version_and_head(self):
+        text = self.render({"claude_version": "2.9.9 (Claude Code)", "checkout_head": "abcdef0123456789", "allow_unverified": True,
+                            "arms": {"haiku-spick": {"ok": False, "check": "record", "detail": "no schemaVersion 2 turn record"},
+                                     "haiku-bare": {"ok": True, "check": "no-record", "detail": "no turn record"},
+                                     "haiku-hook": {"ok": True, "check": "best-effort", "detail": "accepted unverified"}}})
+        self.assertIn("claude `2.9.9 (Claude Code)`, checkout `abcdef012345`, run with --allow-unverified", text)
+        self.assertIn("`haiku-spick`: **INVALID**", text)
+        self.assertIn("`haiku-bare`: **verified**", text)
+        self.assertIn("`haiku-hook`: **accepted, not verified**", text)
+
+    def test_missing_probe_file_is_said_out_loud(self):
+        self.assertIn("Arm start-up probe: none recorded", self.render(None))
+
 
 class Render(unittest.TestCase):
     def test_report_has_every_section_and_marks_losing_cells(self):
@@ -50,7 +128,7 @@ class Render(unittest.TestCase):
             self.assertIn(h, text)
         self.assertIn("| T1 chore-count | haiku-bare | 0/1 LOSES", text)
         self.assertIn("| T1 chore-count | opus-bare | 1/1 |", text)
-        for phrase in ("General non-inferiority", "Real bills", "Long-session cache", "Leak safety"):
+        for phrase in ("General non-inferiority", "Real bills", "Long-session cache", "A spick-free baseline", "Leak safety"):
             self.assertIn(phrase, text)
 
 
