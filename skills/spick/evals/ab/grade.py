@@ -35,7 +35,8 @@ def grade_exact_csv(actual, expected):
     """Equal after dropping a BOM, CRs and surrounding blank space."""
     if actual is None:
         return False
-    norm = lambda s: s.lstrip("﻿").replace("\r", "").strip()
+    def norm(s):
+        return s.lstrip("﻿").replace("\r", "").strip()
     return norm(actual) == norm(expected)
 
 
@@ -68,7 +69,8 @@ def tier_match(models, ideal):
     if ideal == "haiku":
         return all("haiku" in m for m in models)
     order = ["haiku", "sonnet", "opus"]
-    tier = lambda m: next((t for t in order if t in m), None)
+    def tier(m):
+        return next((t for t in order if t in m), None)
     tiers = {tier(m) for m in models}
     return ideal in tiers and all(t in ("haiku", ideal) for t in tiers if t)
 

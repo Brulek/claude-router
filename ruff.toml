@@ -1,4 +1,7 @@
 # ruff's own defaults grew past pyflakes and the error rules; keep CI on those (the style is the author's: printf
 # formatting, broad excepts in best-effort paths) so a ruff release cannot fail the build on taste alone.
+# evals/ab/tasks holds the templates the agent under test edits: fixtures, not our code
+exclude = ["skills/spick/evals/ab/tasks"]
+
 [lint]
 select = ["E4", "E7", "E9", "F"]
