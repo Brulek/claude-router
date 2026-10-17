@@ -18,9 +18,9 @@ Spick 让主会话保持低成本，只在真正需要的任务上动用 Opus，
 
 ## 它做什么
 
-- 主会话（Haiku）读取每条请求，作出一次分派决定。它按交付物的形状分派：结论类交给 `deep`，方案交给 `planner`，改代码交给 `coder`。主会话排在最后，只接纯查阅。
-- 每条请求先过一遍关键词，清单里多出一行 `Hint`。这一行写明默认该走哪条路。主会话要自己接下带 Hint 的任务，必须说明一句理由。
-- 子代理（`coder`、`planner`、`deep`）运行于固定模型。外部 CLI（Gemini、Grok、Codex）承担各自擅长的任务。
+- 主会话（Haiku）读取每条请求，作出一次分派决定。它按交付物的形状分派：结论类交给 `deep`，涉及架构、接口或数据格式的决策交给 `planner`，跨文件的代码交给 `coder`。小活（查阅、目标明确的单文件修改）留在主会话，因为每次交接都有成本。
+- 每条请求先过一遍关键词，清单里多出一行 `Hint`。这一行写明默认该走哪条路。路径、网址、代码块里的词，以及紧跟在否定词（不要、don't）后面的词，都不算数。主会话要自己接下带 Hint 的任务，必须说明一句理由。
+- 子代理（`coder`、`planner`、`deep`，以及负责搜索的 `Explore`）运行于固定模型，结尾附一段简短的 Evidence（跑了哪些检查、改了哪些文件、有何局限），主会话转述时保留。外部 CLI（Gemini、Grok、Codex）承担各自擅长的任务。
 - 每次回复均标明参与者，标明方式为标注行或状态带。
 
 ## 快速开始
@@ -77,6 +77,7 @@ flowchart TD
     BAND -->|"是"| SHOWN
 ```
 
+- 规则只有一份：`skills/spick/assets/rules.json`，含分派顺序、默认推理强度、Hint 关键词和清单文字。`scripts/render_rules.py` 据此生成钩子的清单、mod 的文字，以及 `SKILL.md` 与 CLAUDE.md 区块里的表格。
 - 降级链见 `skills/spick/references/providers.md`；审核条件见 `skills/spick/SKILL.md`。
 - 标注行格式：`[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]`
 
@@ -137,7 +138,9 @@ bash ~/.claude/skills/spick/scripts/setup.sh --check
 bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
-`--install` 在写入任何文件之前，先把 `CLAUDE.md`、`settings.json` 和 `spick.json` 复制到 `~/.claude/spick-backup/<时间戳>/`，并附一份 `manifest.json`，记录本次改动了什么。
+`--install` 在写入任何文件之前，先检查 `settings.json` 和 `spick.json` 是否为合法 JSON（不合法就停下，什么都不改），再把 `CLAUDE.md`、`settings.json` 和 `spick.json` 复制到 `~/.claude/spick/backup/<时间戳>/`，并附一份 `manifest.json`，记录本次改动了什么。每一步都检查结果：某一步失败，就以退出码 1 停下，并列出已经改动的内容；只有全部步骤成功才会打印 `done`。加 `--no-explore` 则不安装跑在 Haiku 上的 `Explore` 子代理。
+
+状态文件放在 `~/.claude/spick/`（设了 `CLAUDE_CONFIG_DIR` 时在 `$CLAUDE_CONFIG_DIR/spick/`）：额度缓存 `quota.json`、每个会话一份的回合记录 `turns/<sessionId>.jsonl`、mod 的会话标记 `mod-active/`，以及备份。安装时会把旧版本的文件（`spick-quota.json`、`spick-spend/`、`spick-gate.jsonl`、`spick-backup/`）一次性移进来。`spick.json` 仍在 `~/.claude/`，其中记录已安装的版本；磁盘上的技能更新后，清单会提示 `spick: skill X installed Y, run spick setup`。
 
 桌面版应用需在模型菜单中选择一次 Haiku。
 
@@ -159,14 +162,14 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 
 - `CLAUDE.md` 里 spick 标记之间的块；
 - `settings.json` 里的清单钩子；
-- 三个子代理。
+- 四个子代理（`coder`、`planner`、`deep`、`Explore`）；
+- 额度缓存与 mod 的会话标记。
 
 它不动的内容：
 
 - `model` 与 `effortLevel` 只有仍是安装时设的值，才恢复为安装前的值。
 - 你改过的子代理文件会保留，加 `--force` 才删除。
-- `spick.json` 默认保留，加 `--purge` 才删除，同时删除 `spick-quota.json` 与 `spick-spend/`。
-- `spick-backup/` 永远保留。
+- `spick.json` 与 `~/.claude/spick/`（回合记录、备份）默认保留，加 `--purge` 才一并删除。
 
 剩下两步需要你自己做：`claude plugin uninstall spick-dashboard`，以及删除 `~/.claude/skills/spick`。
 
@@ -180,15 +183,16 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 | `/spick on\|force\|off` | 分流开关：`on` 只在 Haiku 会话里分流，`force` 任何模型都分流 |
 | `/spick review on\|off` | Codex 审核步骤开关 |
 | `/spick gate on\|off` | 拦截开关：主会话自己答了带 Hint 的结论类任务，收工时退回一次 |
-| `/spick guard on\|off` | 守卫开关：主会话每轮最多亲自改 3 个源码文件；改了源码却没跑检查的一轮，收工时退回一次 |
+| `/spick guard on\|off` | 守卫开关：主会话每轮最多亲自改 1 个源码文件（第二个会被拒绝，交给 `coder`）；改了源码却没有通过检查的一轮，收工时退回一次。这个上限是工具层面的软约束：经 Bash 做的修改（`sed -i`、重定向）不计入 |
 | `/spick lane <id>` | 显示单个 lane 的记录 |
 | `/spick lane <id> on\|off` | 开关某个 lane（字段 `enabled`，写入 `spick.json`） |
 | `/spick lane <id> <field> <value>` | 经 `set_lane.py` 修改 lane 的任意字段（tags 用逗号分隔） |
 | `/spick hide` / `show` | 隐藏或显示状态带，仅限本会话 |
 | `/spick quota` | 刷新额度信息 |
 | `/spick spend` | 近 7 天各 lane 的花费（`scripts/spend.py`；手动运行可加 `--days N`、`--by lane\|day\|session`、`--json`） |
+| `/spick audit` | 近 7 天回合记录的统计：各类 Hint 实际由谁完成、拦截触发及其结果、改了却没通过检查的回合、各 lane 花费（`scripts/audit.py --days N`） |
 
-`/spick spend` 的数据从哪来：mod 为每个会话在 `~/.claude/spick-spend/` 写一个文件，每个带用量的回合一行，每次外部 CLI 调用一行（tokens 为 0，不计价）。没有 mod 就没有花费记录：bash 钩子拿不到用量。
+`/spick spend` 和 `/spick audit` 的数据从哪来：mod 为每个会话写一份回合记录 `~/.claude/spick/turns/<sessionId>.jsonl`，每个主回合一行，记下谁干了活、用量、拦截和检查。旧版本的会话从原来的逐会话花费文件读取。没有 mod 就没有记录：bash 钩子拿不到用量。
 
 面板快捷键：`r` 分流，`v` 审核，`e` 拦截，`d` 守卫，`g` `k` `c` 对应 Gemini / Grok / Codex，`l` lane 设置页（改 tags、data 等；移动端无输入框），`b` 状态带，`q` 刷新额度，`x` 关闭。
 
@@ -197,7 +201,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 - Claude Code 2.1 或更高版本，bash 与 python3。
 - 可选：已登录的 `codex`、`grok`、`agy`。
 - 线路密钥用 `keychain:<名称>` 仅限 macOS；Linux 与 Windows 请用 `env:<变量名>`。
-- 安装脚本、钩子与各脚本都认 `CLAUDE_CONFIG_DIR`。仪表盘 Mod 只能读到 `HOME`，所以设了 `CLAUDE_CONFIG_DIR` 时，它的标记文件（`.spick-mod-active`）和花费记录（`spick-spend/`）仍在 `~/.claude` 下。
+- 安装脚本、钩子、各脚本（`scripts/paths.py` 是唯一的路径规则）和仪表盘 Mod 都认 `CLAUDE_CONFIG_DIR`：状态文件放在 `<config>/spick/`。
 
 ## 常见问题
 
@@ -215,7 +219,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 
 ### 安装改了本机哪些东西，能撤销吗？
 
-`--install` 在写入任何文件之前，先把 `CLAUDE.md`、`settings.json` 和 `spick.json` 备份到 `~/.claude/spick-backup/<时间戳>/`。`--uninstall` 只移除安装时写入的内容，见[卸载](#卸载)。
+`--install` 在写入任何文件之前，先把 `CLAUDE.md`、`settings.json` 和 `spick.json` 备份到 `~/.claude/spick/backup/<时间戳>/`。`--uninstall` 只移除安装时写入的内容，见[卸载](#卸载)。
 
 ### 不装仪表盘 Mod 能用吗？
 
@@ -229,6 +233,11 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 
 Spick 不改主会话的模型。模组可以改写每次请求的模型与推理强度（Claude Code 2.1.299 引擎类型中的 `turn.step`），claude-router 与 claude-agent-tools 就是这样做的；Spick 把这件事留给它们、与 claude-router 配合使用，所以主会话跑在低成本模型上，靠清单分派。清单只是建议：主会话仍可能把本该委派的任务留给自己，`Hint` 行和按交付物形状排列的第二项就是为了防这一点。
 
+- Hint 行是关键词匹配，不是分类器：措辞里没有关键词的结论类请求它会漏掉，也会在少数不该触发的地方触发（"版本号"会被当作联网信号）。它的标注语料是 `skills/spick/scripts/testdata/hint_corpus.json`。
+- lane 的 `data` 级别是用户声明的上限，不是敏感数据检测。`scripts/invoke.py` 会拒绝超出上限的调用（退出码 6），没写 `--contains` 时按 code 处理，在 `text` 或 `public` 声明下还会扫描像代码的内容；它不查找密钥或个人信息。
+- 守卫的改文件上限和 `Explore` 的只读工具列表都是工具层面的软约束：Bash 命令照样能写文件。
+- 用户级 `Explore` 取代内置版本，是 Claude Code 文档的说法，本项目没有在运行时实测。
+
 ## 相关项目
 
 [alexei-led/claude-router](https://github.com/alexei-led/claude-router) 逐轮切换主会话的模型，可与 Spick 同时使用。
@@ -237,7 +246,7 @@ Spick 不改主会话的模型。模组可以改写每次请求的模型与推�
 
 欢迎提 issue 和 PR。
 
-目录结构：`skills/spick/` 放分诊规则；`mod/spick-dashboard/` 放状态带与面板。
+目录结构：`skills/spick/` 放分诊规则；`mod/spick-dashboard/` 放状态带与面板。分派规则在 `skills/spick/assets/rules.json`：改完后运行 `python3 skills/spick/scripts/render_rules.py`（CI 的单测会跑 `--check`，生成的副本与规则不一致就失败）。各版本的改动见 [CHANGELOG.md](CHANGELOG.md)。
 
 CI（`.github/workflows/ci.yml`）跑 python 单测与 mod 测试。在本地运行，请在仓库根目录执行：
 

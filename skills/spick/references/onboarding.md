@@ -34,14 +34,18 @@ Nothing is required except Claude itself. With no outside CLI installed the skil
 
 ## 3. Install
 
-Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <haiku|sonnet|opus> --effort <level>`. It:
+Run `bash <skill-dir>/scripts/setup.sh --install --lanes <comma list> --model <haiku|sonnet|opus> --effort <level>` (add `--no-explore` to keep Claude Code's built-in Explore). It:
 
-- first copies `~/.claude/CLAUDE.md`, `settings.json` and `spick.json` (those that exist) into `~/.claude/spick-backup/<YYYYmmdd-HHMMSS>/` with a `manifest.json` listing what this run wrote (agents, CLAUDE.md block, hook, `model`/`effortLevel` before and after); every run makes a new folder and old ones are never deleted, and each file is written to a temp file then swapped in, so a symlinked file stays a link,
-- copies `assets/agents/*.md` into `~/.claude/agents/` (existing files are kept unless `--force`),
-- writes `~/.claude/spick.json` with the enabled lanes and thresholds,
+- stops with nothing written if `settings.json` or `spick.json` is not valid JSON (tell the user which, and stop),
+- moves the round-1 state files (`spick-quota.json`, `spick-spend/`, `spick-gate.jsonl`, `spick-backup/`) into `~/.claude/spick/`, once,
+- copies `~/.claude/CLAUDE.md`, `settings.json` and `spick.json` (those that exist) into `~/.claude/spick/backup/<YYYYmmdd-HHMMSS>/` with a `manifest.json` listing what this run wrote (agents, CLAUDE.md block, hook, `model`/`effortLevel` before and after); every run makes a new folder, and each file is written to a temp file then swapped in, so a symlinked file stays a link,
+- copies `assets/agents/*.md` (`coder`, `planner`, `deep`, `Explore`) into `~/.claude/agents/` (existing files are kept unless `--force`),
+- writes `~/.claude/spick.json` with the enabled lanes, `installed_version` and the delegates' default `efforts`,
 - inserts `assets/claude-md-snippet.md` into `~/.claude/CLAUDE.md` between `<!-- spick:start -->` / `<!-- spick:end -->` markers (re-running replaces the block, never duplicates it),
 - registers a `UserPromptSubmit` hook (`scripts/triage-hook.sh`) in `~/.claude/settings.json` that prints a three-question triage checklist on every prompt; small models follow a per-turn checklist far better than a once-per-session rule,
 - sets `model` and `effortLevel` in `~/.claude/settings.json` only if `--model` / `--effort` were given, keeping every other key.
+
+Every step is checked. A non-zero exit means setup stopped: it prints the failed step and what it had already changed (and the backup folder); tell the user exactly that, never "installed". Only a run that prints `done` succeeded.
 
 Then record each plan from question 4, one call per provider: `python3 <skill-dir>/scripts/set_subscription.py --provider <claude|codex|gemini|grok> --plan "<plan>" [--price "<price>"]`. Never hand-edit `spick.json`.
 
@@ -57,4 +61,4 @@ Say, in the user's language:
 - Desktop app users: pick Haiku once in the model menu.
 - Three self-tests to try in a new session: a web lookup (should go to a lane tagged `search`, Gemini by default), a small code change (should route to `coder`), "review what you just changed" (should trigger Codex review if the triggers match, otherwise say "not reviewed").
 - `spick doctor` re-checks tools; `spick quota` shows usage.
-- `spick uninstall` (`setup.sh --uninstall [--purge] [--force]`) removes only what this install wrote and keeps anything the user changed since; `spick-backup/` stays.
+- `spick uninstall` (`setup.sh --uninstall [--purge] [--force]`) removes only what this install wrote and keeps anything the user changed since; `~/.claude/spick/` (turn records, backups) stays unless `--purge`.
