@@ -2,13 +2,16 @@
 # spick setup: detect CLIs, install agents + CLAUDE.md block, write config.
 # Usage:
 #   setup.sh --check
-#   setup.sh --install [--lanes gemini,grok,codex] [--model haiku|sonnet|opus] [--effort low|medium|high] [--force]
+#   setup.sh --install [--lanes gemini,grok,codex] [--model haiku|sonnet|opus] [--effort low|medium|high] [--force] [--no-explore]
 #   setup.sh --uninstall [--purge] [--force]
 set -u
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SKILL_DIR="$(dirname "$HERE")"
+# paths.py's rule, inline: the config dir is CLAUDE_CONFIG_DIR (unset or empty: ~/.claude), state lives in <config>/spick
 CLAUDE_DIR="${CLAUDE_CONFIG_DIR:-$HOME/.claude}"
 CONFIG="$CLAUDE_DIR/spick.json"
+STATE_DIR="$CLAUDE_DIR/spick"
+VERSION=$(head -1 "$SKILL_DIR/assets/VERSION" 2>/dev/null | tr -d '[:space:]')
 PY=$(command -v python3 || command -v python || true)
 
 have() { command -v "$1" >/dev/null 2>&1; }
@@ -41,24 +44,66 @@ def note(man, key, value):
 '
 py() { { printf '%s\n' "$PYLIB"; cat; } | "$PY" - "$@"; }
 
+# Every write is a step: on success it is added to CHANGED; on failure fail() names the step and what this run has
+# already changed, then exits 1. "done" is printed only when every step passed.
+CHANGED=()
+changed() { CHANGED+=("$1"); }
+fail() {
+  echo "setup: $1 failed${2:+ (exit $2)}; not done." >&2
+  if [ ${#CHANGED[@]} -gt 0 ]; then
+    echo "  already changed by this run:" >&2
+    local c
+    for c in "${CHANGED[@]}"; do echo "    $c" >&2; done
+  else
+    echo "  nothing was changed." >&2
+  fi
+  if [ -n "$BACKUP_DIR" ]; then echo "  the files as they were: $BACKUP_DIR" >&2; fi
+  exit 1
+}
+# install and uninstall edit JSON and Markdown through python: without it nothing is written
+need_python() {
+  [ -n "$PY" ] || { echo "setup: python3 not found; nothing written" >&2; exit 1; }
+}
+# validate_json FILE...: each one that exists must hold a JSON object. Runs before anything is written, so a
+# settings.json or spick.json caught mid-edit stops the run with nothing changed.
+validate_json() {
+  "$PY" - "$@" <<'PY' || exit 1
+import json, os, sys
+bad = []
+for p in sys.argv[1:]:
+    if not os.path.exists(p):
+        continue
+    try:
+        with open(p) as f:
+            d = json.load(f)
+        if not isinstance(d, dict):
+            bad.append("%s is not a JSON object" % p)
+    except Exception as e:
+        bad.append("%s is not valid JSON (%s)" % (p, e))
+for b in bad:
+    print("setup: %s; nothing written, fix it and run again" % b, file=sys.stderr)
+sys.exit(1 if bad else 0)
+PY
+}
+
 # backup <action>: copy CLAUDE.md, settings.json and spick.json (those that exist) into
-# $CLAUDE_DIR/spick-backup/<YYYYmmdd-HHMMSS>/ and start manifest.json there. Sets BACKUP_DIR and
-# MANIFEST. Runs before anything is written; exits if the copy fails. Old backups are never pruned.
+# $STATE_DIR/backup/<YYYYmmdd-HHMMSS>/ and start manifest.json there. Sets BACKUP_DIR and
+# MANIFEST. Runs before any file of the user's is written; fails the run if the copy fails. Never pruned.
 BACKUP_DIR="" MANIFEST=""
 backup() {
-  local base="$CLAUDE_DIR/spick-backup" stamp n=1 f
+  local base="$STATE_DIR/backup" stamp n=1 f
   stamp=$(date +%Y%m%d-%H%M%S)
   BACKUP_DIR="$base/$stamp"
   while [ -e "$BACKUP_DIR" ]; do n=$((n+1)); BACKUP_DIR="$base/$stamp-$n"; done
-  mkdir -p "$BACKUP_DIR" || { echo "  backup failed: cannot create $BACKUP_DIR; nothing written" >&2; exit 1; }
+  mkdir -p "$BACKUP_DIR" || { local d="$BACKUP_DIR"; BACKUP_DIR=""; fail "backup (cannot create $d)"; }
   for f in CLAUDE.md settings.json spick.json; do
     if [ -f "$CLAUDE_DIR/$f" ]; then
-      cp -p "$CLAUDE_DIR/$f" "$BACKUP_DIR/$f" || { echo "  backup failed: $CLAUDE_DIR/$f; nothing written" >&2; exit 1; }
+      cp -p "$CLAUDE_DIR/$f" "$BACKUP_DIR/$f" || fail "backup of $CLAUDE_DIR/$f"
     fi
   done
   if [ -n "$PY" ]; then
     MANIFEST="$BACKUP_DIR/manifest.json"
-    py "$MANIFEST" "$1" "$CLAUDE_DIR/settings.json" <<'PY'
+    py "$MANIFEST" "$1" "$CLAUDE_DIR/settings.json" <<'PY' || fail "backup manifest" $?
 import sys, datetime
 man, action, settings = sys.argv[1:4]
 try:
@@ -82,6 +127,21 @@ PY
   fi
 }
 ver() { "$@" 2>/dev/null | head -1 | tr -d '\r'; }
+
+# migrate: move the round-1 state files (spick-quota.json, spick-spend/, spick-gate.jsonl, spick-backup/) into
+# $STATE_DIR and drop the old single mod marker. A no-op once they are gone, so every run may call it.
+migrate() {
+  [ -n "$PY" ] || return 0
+  local out rc
+  out=$("$PY" "$HERE/paths.py" --migrate)
+  rc=$?
+  if [ -n "$out" ]; then
+    echo "== state files (round 1 -> $STATE_DIR) =="
+    echo "$out"
+    changed "round-1 state files moved into $STATE_DIR"
+  fi
+  [ "$rc" = 0 ] || fail "moving the round-1 state files" "$rc"
+}
 
 check() {
   printf '%-8s %-10s %-10s %s\n' tool installed logged_in version
@@ -117,9 +177,10 @@ check() {
 }
 
 install() {
-  local lanes="" model="" effort="" force=0
+  local lanes="" model="" effort="" force=0 explore=1
   while [ $# -gt 0 ]; do
     case "$1" in
+      --no-explore) explore=0; shift;;
       --lanes) lanes="$2"; shift 2;;
       --model) model="$2"; shift 2;;
       --effort) effort="$2"; shift 2;;
@@ -131,32 +192,38 @@ install() {
     l=(); have agy && l+=(gemini); have grok && l+=(grok); have codex && l+=(codex)
     lanes=$(IFS=,; echo "${l[*]:-}")
   fi
+  need_python
+  validate_json "$CLAUDE_DIR/settings.json" "$CONFIG"
+  migrate
   backup install
-  mkdir -p "$CLAUDE_DIR/agents"
+  mkdir -p "$CLAUDE_DIR/agents" || fail "creating $CLAUDE_DIR/agents"
 
   echo "== agents =="
   local written=()
   for f in "$SKILL_DIR"/assets/agents/*.md; do
     dst="$CLAUDE_DIR/agents/$(basename "$f")"
-    if [ -e "$dst" ] && [ "$force" = 0 ]; then echo "  keep   $dst (exists; --force to overwrite)"; else cp "$f" "$dst"; echo "  wrote  $dst"; written+=("$dst"); fi
+    # Explore.md replaces the built-in Explore (which runs on the main session's model) with a Haiku one
+    if [ "$(basename "$f")" = Explore.md ] && [ "$explore" = 0 ]; then echo "  skip   $dst (--no-explore)"; continue; fi
+    if [ -e "$dst" ] && [ "$force" = 0 ]; then
+      echo "  keep   $dst (exists; --force to overwrite)"
+    else
+      cp "$f" "$dst" || fail "writing $dst"
+      echo "  wrote  $dst"; written+=("$dst"); changed "$dst"
+    fi
   done
-  if [ -n "$PY" ]; then
-    py "$MANIFEST" ${written[@]+"${written[@]}"} <<'PY'
+  py "$MANIFEST" ${written[@]+"${written[@]}"} <<'PY' || fail "backup manifest (agents)" $?
 import sys
 note(sys.argv[1], "agents_written", sys.argv[2:])
 PY
-  fi
 
   echo "== CLAUDE.md block =="
   local md="$CLAUDE_DIR/CLAUDE.md" snippet="$SKILL_DIR/assets/claude-md-snippet.md"
-  touch "$md"
-  if [ -n "$PY" ]; then
-    py "$md" "$snippet" "$MANIFEST" <<'PY'
+  py "$md" "$snippet" "$MANIFEST" <<'PY' || fail "the CLAUDE.md block" $?
 import sys, re
 md, snippet, man = sys.argv[1:4]
 start, end = "<!-- spick:start -->", "<!-- spick:end -->"
 block = start + "\n" + open(snippet).read().rstrip() + "\n" + end
-cur = open(md).read()
+cur = open(md).read() if os.path.exists(md) else ""
 if start in cur and end in cur:
     cur = re.sub(re.escape(start) + r".*?" + re.escape(end), lambda m: block, cur, flags=re.S)
     action = "replaced"
@@ -167,15 +234,14 @@ atomic_write(md, cur)
 note(man, "claude_md_block", True)
 print(f"  {action} block in {md}")
 PY
-  else
-    echo "  python not found; append $snippet to $md by hand"
-  fi
+  changed "the spick block in $md"
 
   echo "== config =="
-  if [ -n "$PY" ]; then
-    py "$CONFIG" "$lanes" "$model" "$effort" <<'PY'
+  py "$CONFIG" "$lanes" "$model" "$effort" "$VERSION" "$SKILL_DIR/assets/rules.json" <<'PY' || fail "writing $CONFIG" $?
 import sys, datetime
-cfg, lanes, model, effort = sys.argv[1:5]
+cfg, lanes, model, effort, version, rules = sys.argv[1:7]
+# the delegates' default efforts, for the mod (it cannot read the skill's files): rules.json is the source
+efforts = {k: v["default"] for k, v in json.load(open(rules))["efforts"].items()}
 old = {}
 if os.path.exists(cfg):
     try:
@@ -188,9 +254,11 @@ if os.path.exists(cfg):
 owned = {
   "version": 1,
   "installed_at": datetime.date.today().isoformat(),
+  "installed_version": version or None,
   "lanes": {k: (k in lanes.split(",")) for k in ("gemini", "grok", "codex")},
   "main_session": {"model": model or "haiku", "effort": effort or "medium"},
   "review_triggers": {"files": 3, "lines": 150},
+  "efforts": efforts,
 }
 # keep every key setup does not own (subscriptions etc.); drop retired quota threshold block
 d = {k: v for k, v in old.items() if k not in owned and k != "quota"}
@@ -198,12 +266,12 @@ d.update(owned)
 atomic_write(cfg, json.dumps(d, indent=2, ensure_ascii=False))
 print(f"  wrote  {cfg}")
 PY
-  fi
+  changed "$CONFIG"
 
   echo "== triage hook (UserPromptSubmit) =="
-  if [ -n "$PY" ]; then
-    # the hook next to this script, by absolute path: a skill installed outside ~/.claude (or a CLAUDE_CONFIG_DIR) still runs
-    py "$CLAUDE_DIR/settings.json" "$MANIFEST" "$HERE/triage-hook.sh" <<'PY2'
+  # the hook next to this script, by absolute path: a skill installed outside ~/.claude (or a CLAUDE_CONFIG_DIR) still runs
+  local hook_out
+  hook_out=$(py "$CLAUDE_DIR/settings.json" "$MANIFEST" "$HERE/triage-hook.sh" <<'PY2'
 import sys
 p, man, hook = sys.argv[1:4]
 d = json.load(open(p)) if os.path.exists(p) else {}
@@ -218,11 +286,13 @@ if not present:
 else:
     print(f"  keep   hook already present in {p}")
 PY2
-  fi
+) || fail "adding the hook to $CLAUDE_DIR/settings.json" $?
+  echo "$hook_out"
+  case "$hook_out" in *added*) changed "the triage hook in $CLAUDE_DIR/settings.json";; esac
 
-  if [ -n "$model$effort" ] && [ -n "$PY" ]; then
+  if [ -n "$model$effort" ]; then
     echo "== settings.json =="
-    py "$CLAUDE_DIR/settings.json" "$model" "$effort" <<'PY'
+    py "$CLAUDE_DIR/settings.json" "$model" "$effort" <<'PY' || fail "setting model/effortLevel in $CLAUDE_DIR/settings.json" $?
 import sys
 p, model, effort = sys.argv[1:4]
 d = json.load(open(p)) if os.path.exists(p) else {}
@@ -231,9 +301,9 @@ if effort: d["effortLevel"] = effort
 atomic_write(p, json.dumps(d, indent=2, ensure_ascii=False) + "\n")
 print(f"  model={d.get('model')} effortLevel={d.get('effortLevel')} -> {p}")
 PY
+    changed "model/effortLevel in $CLAUDE_DIR/settings.json"
   fi
-  if [ -n "$PY" ]; then
-    py "$MANIFEST" "$CLAUDE_DIR/settings.json" <<'PY'
+  py "$MANIFEST" "$CLAUDE_DIR/settings.json" <<'PY' || fail "backup manifest (settings)" $?
 import sys
 man, p = sys.argv[1:3]
 try:
@@ -248,14 +318,13 @@ if man and os.path.exists(man):
         s[k]["after"] = d.get(k)
     note(man, "settings", s)
 PY
-  fi
   echo
   echo "done. New sessions pick this up; the current one does not."
   echo "Desktop app users: pick the main model once in the composer's model menu (the app remembers its own choice)."
 }
 
 # uninstall: remove only what --install wrote; anything changed since is kept. No snapshot is
-# restored (spick-backup/ is for rolling back by hand and is never removed).
+# restored (backup/ is for rolling back by hand; only --purge removes it, with the rest of the state dir).
 uninstall() {
   local purge=0 force=0
   while [ $# -gt 0 ]; do
@@ -265,14 +334,18 @@ uninstall() {
       *) shift;;
     esac
   done
+  need_python
+  validate_json "$CLAUDE_DIR/settings.json"
+  migrate
   backup uninstall
 
   echo "== CLAUDE.md block =="
   local md="$CLAUDE_DIR/CLAUDE.md"
   if [ ! -f "$md" ]; then
     echo "  none   $md does not exist"
-  elif [ -n "$PY" ]; then
-    py "$md" <<'PY'
+  else
+    local md_out
+    md_out=$(py "$md" <<'PY'
 import sys, re
 md = sys.argv[1]
 start, end = "<!-- spick:start -->", "<!-- spick:end -->"
@@ -301,15 +374,17 @@ else:
     os.unlink(md)
     print(f"  removed {md} (only the block was in it)")
 PY
-  else
-    echo "  python not found; delete the spick:start..spick:end block from $md by hand"
+) || fail "removing the spick block from $md" $?
+    echo "$md_out"
+    case "$md_out" in *removed*) changed "the spick block in $md";; esac
   fi
 
   echo "== settings.json =="
   if [ ! -f "$CLAUDE_DIR/settings.json" ]; then
     echo "  none   $CLAUDE_DIR/settings.json does not exist"
-  elif [ -n "$PY" ]; then
-    py "$CLAUDE_DIR/settings.json" "$CLAUDE_DIR/spick-backup" "$BACKUP_DIR" "$MANIFEST" <<'PY'
+  else
+    local set_out
+    set_out=$(py "$CLAUDE_DIR/settings.json" "$STATE_DIR/backup" "$BACKUP_DIR" "$MANIFEST" <<'PY'
 import sys, re
 p, base, this_run, man = sys.argv[1:5]
 try:
@@ -405,8 +480,9 @@ if man and os.path.exists(man):
         s[k]["after"] = d.get(k)
     note(man, "settings", s)
 PY
-  else
-    echo "  python not found; remove the triage-hook.sh entry from $CLAUDE_DIR/settings.json by hand"
+) || fail "editing $CLAUDE_DIR/settings.json" $?
+    echo "$set_out"
+    case "$set_out" in *removed*|*restored*) changed "the spick hook or model/effortLevel in $CLAUDE_DIR/settings.json";; esac
   fi
 
   echo "== agents =="
@@ -416,9 +492,11 @@ PY
     if [ ! -e "$dst" ] && [ ! -L "$dst" ]; then
       echo "  none   $dst"
     elif cmp -s "$f" "$dst"; then
-      rm -f "$dst" && echo "  removed $dst"
+      rm -f "$dst" || fail "removing $dst"
+      echo "  removed $dst"; changed "removed $dst"
     elif [ "$force" = 1 ]; then
-      rm -f "$dst" && echo "  removed $dst (changed since install; --force)"
+      rm -f "$dst" || fail "removing $dst"
+      echo "  removed $dst (changed since install; --force)"; changed "removed $dst"
     else
       echo "  keep   $dst (changed since install; --force to remove)"
     fi
@@ -426,25 +504,25 @@ PY
 
   echo "== state files =="
   local p
-  for p in "$CLAUDE_DIR/.spick-mod-active" "$HOME/.claude/.spick-mod-active" "$CLAUDE_DIR/spick-quota.json"; do
-    if [ -e "$p" ]; then rm -f "$p" && echo "  removed $p"; fi
+  # the mod's session markers and the quota cache are rebuilt on their own; records and backups are kept
+  for p in "$STATE_DIR/mod-active" "$STATE_DIR/quota.json" "$STATE_DIR/quota.lock"; do
+    if [ -e "$p" ]; then
+      rm -rf "$p" || fail "removing $p"
+      echo "  removed $p"; changed "removed $p"
+    fi
   done
-  # the dashboard mod writes its spend records to $HOME/.claude/spick-spend (it does not read CLAUDE_CONFIG_DIR):
-  # that and $CLAUDE_DIR/spick-spend, once each (the same path unless CLAUDE_CONFIG_DIR points elsewhere)
-  local spend_dirs=("$CLAUDE_DIR/spick-spend")
-  if [ "$HOME/.claude/spick-spend" != "$CLAUDE_DIR/spick-spend" ]; then spend_dirs+=("$HOME/.claude/spick-spend"); fi
   if [ "$purge" = 1 ]; then
-    for p in "$CONFIG" "$CLAUDE_DIR/spick-quota.json" "${spend_dirs[@]}"; do
-      if [ -e "$p" ]; then rm -rf "$p" && echo "  removed $p (--purge)"; fi
+    # the whole state dir: quota cache, turn records, round-1 spend and gate logs, markers, backups (this run's too)
+    for p in "$CONFIG" "$STATE_DIR"; do
+      if [ -e "$p" ]; then
+        rm -rf "$p" || fail "removing $p"
+        echo "  removed $p (--purge)"; changed "removed $p"
+      fi
     done
   else
     [ -e "$CONFIG" ] && echo "  keep   $CONFIG (--purge to remove)"
-    for p in "${spend_dirs[@]}"; do
-      if [ -e "$p" ]; then echo "  keep   $p (--purge to remove)"; fi
-    done
+    [ -e "$STATE_DIR" ] && echo "  keep   $STATE_DIR (turn records, backups; --purge to remove)"
   fi
-  echo "  keep   $CLAUDE_DIR/spick-backup (never removed)"
-
   echo
   echo "done. Two things this script does not do:"
   echo "  claude plugin uninstall spick-dashboard"
@@ -455,5 +533,5 @@ case "${1:-}" in
   --check) check;;
   --install) shift; install "$@";;
   --uninstall) shift; uninstall "$@";;
-  *) echo "usage: setup.sh --check | --install [--lanes a,b] [--model m] [--effort e] [--force] | --uninstall [--purge] [--force]"; exit 2;;
+  *) echo "usage: setup.sh --check | --install [--lanes a,b] [--model m] [--effort e] [--force] [--no-explore] | --uninstall [--purge] [--force]"; exit 2;;
 esac

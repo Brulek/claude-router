@@ -22,6 +22,8 @@ import re
 import shutil
 import sys
 
+import paths
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 BUILTIN_PATH = os.path.join(HERE, "..", "assets", "builtin-lanes.json")
 
@@ -36,11 +38,11 @@ PRESETS_PATH = os.path.join(HERE, "..", "assets", "meter-presets.json")
 
 
 def config_dir():
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return paths.config_dir()
 
 
 def config_path():
-    return os.path.join(config_dir(), "spick.json")
+    return paths.path("spick.json")
 
 
 def read_config(path=None):

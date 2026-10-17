@@ -27,14 +27,15 @@ class Base(unittest.TestCase):
         self.dir = self.tmp.name
         self.env = dict(os.environ, CLAUDE_CONFIG_DIR=self.dir, HOME=self.dir)
 
-    def _run(self, *args):
+    def _run(self, *args, ok=True):
         prefix = tempfile.gettempdir()
         for key in ("CLAUDE_CONFIG_DIR", "HOME"):
             val = self.env[key]
             if not val.startswith(prefix) or os.path.realpath(val).startswith(REAL_CLAUDE):
                 self.fail(f"{key}={val!r} is not under the temp prefix {prefix!r}; refusing to run setup.sh")
         r = subprocess.run(["bash", SETUP, *args], env=self.env, capture_output=True, text=True, timeout=60)
-        self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
+        if ok:
+            self.assertEqual(r.returncode, 0, r.stdout + r.stderr)
         return r
 
     def run_setup(self, *extra):
@@ -55,8 +56,12 @@ class Base(unittest.TestCase):
             return f.read()
 
     def backups(self):
-        base = self.path("spick-backup")
+        base = self.path("spick", "backup")
         return sorted(os.path.join(base, d) for d in os.listdir(base)) if os.path.isdir(base) else []
+
+    def settings(self):
+        with open(self.path("settings.json")) as f:
+            return json.load(f)
 
     def manifest(self, backup_dir):
         with open(os.path.join(backup_dir, "manifest.json")) as f:
@@ -128,6 +133,20 @@ class TestBackup(Base):
         self.assertEqual(m2["agents_written"], [])  # agents exist and --force was not given
         self.assertEqual(m2["settings"]["model"], {"before": "haiku", "after": "haiku"})
 
+    def test_explore_is_installed_unless_no_explore(self):
+        self.assertIn("Explore.md", AGENTS)
+        self.run_setup()
+        with open(self.path("agents", "Explore.md")) as f:
+            head = f.read().split("---")[1]
+        self.assertIn("name: Explore", head)
+        self.assertIn("model: haiku", head)
+        self.assertIn("tools: Read, Grep, Glob, Bash", head)
+        os.unlink(self.path("agents", "Explore.md"))
+        r = self.run_setup("--no-explore")
+        self.assertFalse(os.path.exists(self.path("agents", "Explore.md")))
+        self.assertIn("skip   %s (--no-explore)" % self.path("agents", "Explore.md"), r.stdout)
+        self.assertTrue(os.path.exists(self.path("agents", "coder.md")))
+
     def test_hook_entry_exactly_once_next_to_other_hooks(self):
         other = {"hooks": [{"type": "command", "command": "echo mine"}]}
         self.put("settings.json", json.dumps({"hooks": {"UserPromptSubmit": [other]}}))
@@ -188,10 +207,6 @@ class TestAtomicWrite(Base):
 
 
 class TestUninstall(Base):
-    def settings(self):
-        with open(self.path("settings.json")) as f:
-            return json.load(f)
-
     def test_claude_md_without_a_block_comes_back_byte_for_byte(self):
         user_md = "# 我的规则\n\nKeep answers short.\n"
         self.put("CLAUDE.md", user_md)
@@ -270,7 +285,7 @@ class TestUninstall(Base):
         self.assertEqual(self.settings()["model"], "sonnet")
 
     def test_install_without_manifest_still_removes_the_rest(self):
-        # an install made before backups existed: no spick-backup/ at all
+        # an install made before backups existed: no manifest at all
         self.put("settings.json", json.dumps({"model": "sonnet"}))
         self.run_setup()
         for b in self.backups():
@@ -298,58 +313,132 @@ class TestUninstall(Base):
 
     def test_state_files_and_purge(self):
         self.run_setup()
-        os.makedirs(self.path(".claude"))
-        for p in (self.path(".spick-mod-active"), self.path(".claude", ".spick-mod-active"),
-                  self.path("spick-quota.json")):
+        os.makedirs(self.path("spick", "mod-active"))
+        for p in (self.path("spick", "mod-active", "s1"), self.path("spick", "quota.json")):
             with open(p, "w") as f:
                 f.write("x")
-        self.run_uninstall()
-        self.assertFalse(os.path.exists(self.path(".spick-mod-active")))
-        self.assertFalse(os.path.exists(self.path(".claude", ".spick-mod-active")))
-        self.assertFalse(os.path.exists(self.path("spick-quota.json")))
+        os.makedirs(self.path("spick", "turns"))
+        self.put(os.path.join("spick", "turns", "s1.jsonl"), "{}\n")
+        r = self.run_uninstall()
+        self.assertFalse(os.path.exists(self.path("spick", "mod-active")))
+        self.assertFalse(os.path.exists(self.path("spick", "quota.json")))
+        # turn records and backups stay without --purge
+        self.assertTrue(os.path.exists(self.path("spick", "turns", "s1.jsonl")))
         self.assertTrue(os.path.exists(self.path("spick.json")))
+        self.assertIn("(turn records, backups; --purge to remove)", r.stdout)
+        r = self.run_uninstall("--purge")
+        self.assertFalse(os.path.exists(self.path("spick.json")))
+        self.assertFalse(os.path.exists(self.path("spick")))
+        self.assertIn(f"  removed {self.path('spick')} (--purge)\n", r.stdout)
+
+class TestState(Base):
+    def test_round_1_state_files_move_into_the_state_dir_once(self):
+        self.put("spick-quota.json", '{"written_at": "x"}')
         os.makedirs(self.path("spick-spend"))
         self.put(os.path.join("spick-spend", "s1.json"), "{}")
-        self.run_uninstall("--purge")
+        self.put("spick-gate.jsonl", '{"a": 1}\n')
+        os.makedirs(self.path("spick-backup", "20261001-120000"))
+        self.put(os.path.join("spick-backup", "20261001-120000", "manifest.json"), "{}")
+        self.put(".spick-mod-active", "x")
+        r = self.run_setup()
+        for old in ("spick-quota.json", "spick-spend", "spick-gate.jsonl", "spick-backup", ".spick-mod-active"):
+            self.assertFalse(os.path.exists(self.path(old)), old)
+        self.assertEqual(self.read("spick", "quota.json"), '{"written_at": "x"}')
+        self.assertTrue(os.path.exists(self.path("spick", "spick-spend", "s1.json")))
+        self.assertEqual(self.read("spick", "spick-gate.jsonl"), '{"a": 1}\n')
+        # the old backup sits next to this run's
+        self.assertEqual(len(self.backups()), 2)
+        self.assertIn("moved  %s -> %s" % (self.path("spick-spend"), self.path("spick", "spick-spend")), r.stdout)
+        # nothing left to move: the second run says nothing about it
+        self.assertNotIn("round 1 ->", self.run_setup().stdout)
+
+    def test_a_log_already_in_place_keeps_both_halves(self):
+        os.makedirs(self.path("spick"))
+        self.put(os.path.join("spick", "spick-gate.jsonl"), '{"new": 1}\n')
+        self.put("spick-gate.jsonl", '{"old": 1}')
+        self.run_setup()
+        self.assertEqual(self.read("spick", "spick-gate.jsonl"), '{"old": 1}\n{"new": 1}\n')
+
+    def test_paths_py_and_setup_agree_on_the_state_dir(self):
+        def ask(name):
+            r = subprocess.run(["python3", os.path.join(HERE, "paths.py"), name], env=self.env, capture_output=True, text=True)
+            return r.stdout.strip()
+        self.assertEqual(ask("state"), self.path("spick"))
+        self.assertEqual(ask("turns"), self.path("spick", "turns"))
+        self.run_setup()
+        self.assertTrue(self.backups()[0].startswith(self.path("spick", "backup") + os.sep))
+
+    def test_installed_version_is_the_skill_version(self):
+        self.run_setup()
+        with open(os.path.join(HERE, "..", "assets", "VERSION")) as f:
+            version = f.read().strip()
+        self.assertEqual(version, "1.0.0")
+        self.assertEqual(json.loads(self.read("spick.json"))["installed_version"], version)
+
+
+class TestSteps(Base):
+    """Every write is checked: invalid JSON stops the run before anything is written; a failing step stops it with
+    a list of what was already changed, and never says done."""
+
+    def everything_untouched(self):
+        self.assertFalse(os.path.exists(self.path("CLAUDE.md")))
+        self.assertFalse(os.path.exists(self.path("agents")))
+        self.assertFalse(os.path.exists(self.path("spick")))
+
+    def test_invalid_settings_json_writes_nothing(self):
+        self.put("settings.json", '{"model": "sonnet",')
+        r = self._run("--install", "--lanes", "gemini", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("settings.json is not valid JSON", r.stderr)
+        self.assertIn("nothing written", r.stderr)
+        self.assertNotIn("done.", r.stdout)
+        self.everything_untouched()
+        self.assertEqual(self.read("settings.json"), '{"model": "sonnet",')
+
+    def test_spick_json_that_is_not_an_object_writes_nothing(self):
+        self.put("spick.json", "[1, 2]")
+        r = self._run("--install", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("spick.json is not a JSON object", r.stderr)
+        self.everything_untouched()
+
+    def test_a_failing_step_lists_what_was_already_changed(self):
+        os.mkdir(self.path("CLAUDE.md"))      # the block cannot be written into a directory
+        r = self._run("--install", "--lanes", "gemini", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertNotIn("done.", r.stdout)
+        self.assertIn("setup: the CLAUDE.md block failed (exit 1); not done.", r.stderr)
+        self.assertIn("already changed by this run:", r.stderr)
+        self.assertIn(self.path("agents", "coder.md"), r.stderr)
+        self.assertIn("the files as they were: " + self.backups()[0], r.stderr)
+        # the steps after it did not run
         self.assertFalse(os.path.exists(self.path("spick.json")))
-        self.assertFalse(os.path.exists(self.path("spick-spend")))
-        self.assertTrue(os.path.isdir(self.path("spick-backup")))
+        self.assertFalse(os.path.exists(self.path("settings.json")))
 
-    def test_purge_removes_spend_records_in_both_places(self):
-        # CLAUDE_CONFIG_DIR and HOME/.claude differ: the mod's HOME/.claude/spick-spend and CLAUDE_DIR/spick-spend
-        in_config = self.path("spick-spend")
-        in_home = self.path(".claude", "spick-spend")
-        for d in (in_config, in_home):
-            os.makedirs(d)
-            with open(os.path.join(d, "s1.json"), "w") as f:
-                f.write("{}")
-        r = self.run_uninstall()
-        self.assertTrue(os.path.isdir(in_config) and os.path.isdir(in_home))
-        self.assertIn(f"  keep   {in_config} (--purge to remove)\n", r.stdout)
-        self.assertIn(f"  keep   {in_home} (--purge to remove)\n", r.stdout)
-        r = self.run_uninstall("--purge")
-        self.assertFalse(os.path.exists(in_config))
-        self.assertFalse(os.path.exists(in_home))
-        self.assertEqual(r.stdout.count(f"  removed {in_config} (--purge)\n"), 1)
-        self.assertEqual(r.stdout.count(f"  removed {in_home} (--purge)\n"), 1)
+    def test_uninstall_with_invalid_settings_removes_nothing(self):
+        self.run_setup()
+        self.put("settings.json", "{oops")
+        r = self._run("--uninstall", ok=False)
+        self.assertEqual(r.returncode, 1)
+        self.assertIn("not valid JSON", r.stderr)
+        self.assertTrue(os.path.exists(self.path("agents", "coder.md")))
+        self.assertIn(START, self.read("CLAUDE.md"))
 
-    def test_purge_removes_spend_records_once_when_both_are_one_path(self):
-        # CLAUDE_CONFIG_DIR unset in real life means $HOME/.claude: the two paths are one
-        home = self.path("home")
-        claude = os.path.join(home, ".claude")
-        spend_dir = os.path.join(claude, "spick-spend")
-        os.makedirs(spend_dir)
-        with open(os.path.join(spend_dir, "s1.json"), "w") as f:
-            f.write("{}")
-        self.env = dict(self.env, HOME=home, CLAUDE_CONFIG_DIR=claude)
-        r = self.run_uninstall()
-        self.assertTrue(os.path.isdir(spend_dir))
-        self.assertEqual(r.stdout.count("spick-spend"), 1)
-        r = self.run_uninstall("--purge")
-        self.assertFalse(os.path.exists(spend_dir))
-        self.assertEqual(r.stdout.count("spick-spend"), 1)
-        self.assertIn(f"  removed {spend_dir} (--purge)\n", r.stdout)
+    def test_spick_json_carries_the_effort_defaults_from_rules_json(self):
+        self.run_setup()
+        with open(os.path.join(HERE, "..", "assets", "rules.json")) as f:
+            rules = json.load(f)
+        want = {k: v["default"] for k, v in rules["efforts"].items()}
+        self.assertEqual(want, {"coder": "medium", "planner": "high", "deep": "medium"})
+        self.assertEqual(json.loads(self.read("spick.json"))["efforts"], want)
 
+    def test_done_only_when_every_step_passed(self):
+        r = self.run_setup()
+        self.assertIn("\ndone. New sessions pick this up", r.stdout)
+        self.assertEqual(r.stderr, "")
+
+
+class TestUninstallMore(Base):
     def test_uninstall_writes_its_own_backup_manifest(self):
         self.run_setup()
         before_md = self.read("CLAUDE.md")

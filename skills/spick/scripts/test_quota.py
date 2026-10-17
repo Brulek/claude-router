@@ -255,9 +255,16 @@ class Line(unittest.TestCase):
             line = quota.build_line(doc, quota.parse_iso("2026-10-13T15:34:00Z"))
             self.assertEqual(line, "Quota (cache 4m old): deepseek: unknown (no data).", facts)
 
-    def test_collect_all_without_registry_adds_no_new_keys(self):
+    def test_collect_all_without_registry_says_so(self):
         doc = quota.collect_all({})
-        self.assertEqual(sorted(doc), ["providers", "written_at"])
+        self.assertEqual(sorted(doc), ["lanes", "providers", "registry", "written_at"])
+        self.assertEqual((doc["registry"], doc["lanes"]), (False, []))
+
+    def test_a_registry_with_every_lane_off_is_registry_true_and_no_lanes(self):
+        # the mod reads this as "no outside lane is enabled" (not as "no registry")
+        cfg = {"lane_registry": {k: {"enabled": False} for k in ("gemini", "grok", "codex")}}
+        doc = quota.collect_all({}, registry_lanes=lanes.load_effective(cfg))
+        self.assertEqual((doc["registry"], doc["lanes"]), (True, []))
 
     def test_collect_all_with_registry_adds_facts_and_lanes(self):
         reg = lanes.load_effective({"lane_registry": {"glm": {"kind": "api-key", "data": "text", "meter": {"type": "none"}}}})
@@ -265,6 +272,7 @@ class Line(unittest.TestCase):
         self.assertEqual([e["provider"] for e in doc["providers"]], ["glm"])
         self.assertEqual(doc["providers"][0]["facts"], ["no meter (declared plan only)"])
         self.assertEqual([ln["id"] for ln in doc["lanes"]], ["gemini", "grok", "codex", "glm"])
+        self.assertTrue(doc["registry"])
         self.assertNotIn("meter", doc["lanes"][0])
 
     def test_collect_all_lanes_carry_no_prefer(self):
@@ -300,7 +308,7 @@ class Line(unittest.TestCase):
                     os.environ["CLAUDE_CONFIG_DIR"] = old
             self.assertEqual([ln["id"] for ln in doc["lanes"]], ["gemini", "grok", "codex", "a", "b"])
             self.assertEqual([e["provider"] for e in doc["providers"]], ["a", "b"])
-            self.assertEqual(quota.read_cache(os.path.join(d, "spick-quota.json"))["lanes"], doc["lanes"])
+            self.assertEqual(quota.read_cache(os.path.join(d, "spick", "quota.json"))["lanes"], doc["lanes"])
 
     def test_background_refresh_can_be_switched_off_and_forced(self):
         with mock.patch.dict(os.environ, {"SPICK_NO_BG": "1"}):
@@ -312,6 +320,14 @@ class Line(unittest.TestCase):
             self.assertFalse(quota.background_refresh_if_stale())      # fresh cache: nothing to do
             self.assertTrue(quota.background_refresh_if_stale(force=True))
             self.assertEqual(popen.call_count, 1)
+
+    def test_cache_and_lock_live_in_the_state_dir(self):
+        # paths.py is the one rule: <CLAUDE_CONFIG_DIR>/spick/, ~/.claude/spick/ when the variable is unset or empty
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": d}):
+            self.assertEqual(quota.cache_path(), os.path.join(d, "spick", "quota.json"))
+            self.assertEqual(quota.lock_path(), os.path.join(d, "spick", "quota.lock"))
+        with tempfile.TemporaryDirectory() as h, mock.patch.dict(os.environ, {"CLAUDE_CONFIG_DIR": "", "HOME": h}):
+            self.assertEqual(quota.cache_path(), os.path.join(h, ".claude", "spick", "quota.json"))
 
     def test_stale_reset_and_unknown_are_stated_as_facts(self):
         line = quota.build_line(load("cache_sample.json"), quota.parse_iso("2026-10-13T15:34:00Z"))
@@ -353,7 +369,7 @@ class RegistryFactsSurvive(unittest.TestCase):
         self.addCleanup(patch.stop)
         self.addCleanup(self.tmp.cleanup)
         self.cfg = os.path.join(self.d, "spick.json")
-        self.cache = os.path.join(self.d, "spick-quota.json")
+        self.cache = os.path.join(self.d, "spick", "quota.json")
         self.write_cfg(list(self.FACTS))
 
     def write_cfg(self, ids):

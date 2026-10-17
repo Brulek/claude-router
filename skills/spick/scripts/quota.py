@@ -23,9 +23,10 @@ Usage:
   quota.py --line              the one checklist line from the cache; never waits for a refresh
   quota.py --touch             start a background refresh if the cache is older than 10 minutes
   quota.py --bg                (internal) the detached refresh
-  quota.py --relane            rebuild only the "lanes" part of the existing cache from spick.json (no
+  quota.py --relane            rebuild only the "registry" and "lanes" part of the cache from spick.json (no
                                collectors, no network, no subprocess); no cache file: does nothing
-Cache: $CLAUDE_CONFIG_DIR/spick-quota.json (default ~/.claude), written atomically.
+Cache: <state>/quota.json, lock <state>/quota.lock (paths.py: <state> is $CLAUDE_CONFIG_DIR/spick, default
+~/.claude/spick), written atomically.
 """
 import concurrent.futures
 import datetime
@@ -44,6 +45,7 @@ import urllib.request
 
 import invoke as invoke_mod   # the one key resolver (read_key) and the no-redirect handler
 import lanes as lanes_mod
+import paths
 
 FRESH_S = 30 * 60          # status word boundary: "fresh" below this age (a label, not a routing rule)
 CACHE_TTL_S = 10 * 60      # refresh in the background when the cache is older than this
@@ -60,15 +62,15 @@ PROVIDERS = ("claude", "codex", "gemini", "grok")
 # ---------- paths and small helpers ----------
 
 def config_dir():
-    return os.environ.get("CLAUDE_CONFIG_DIR") or os.path.expanduser("~/.claude")
+    return paths.config_dir()
 
 
 def cache_path():
-    return os.path.join(config_dir(), "spick-quota.json")
+    return paths.path("quota.json")
 
 
 def lock_path():
-    return os.path.join(config_dir(), "spick-quota.lock")
+    return paths.path("quota.lock")
 
 
 def iso(ts):
@@ -595,9 +597,18 @@ def meter_entry(lane, now):
     return e
 
 
+def set_lanes(doc, reg):
+    """Every cache says whether the user declared a lane_registry and which lanes are enabled: `registry` false and
+    `lanes` [] without one; `registry` true and the enabled lanes (possibly none: then no outside lane may be
+    called) with one. The mod's checklist reads both (quotaline.ts lanesFromCache)."""
+    doc["registry"] = reg is not None
+    doc["lanes"] = lanes_mod.cache_view(reg) if reg is not None else []
+    return doc
+
+
 def collect_all(subs, now=None, registry_lanes=None):
-    """registry_lanes None: the cache as before. A list (user declared lane_registry): entries also carry
-    `facts`, custom lanes get entries, and the doc carries a `lanes` list."""
+    """registry_lanes None: no lane_registry. A list (user declared lane_registry): entries also carry
+    `facts` and custom lanes get entries. The doc carries `registry` and `lanes` either way (set_lanes)."""
     now = time.time() if now is None else now
     by_id = {ln["id"]: ln for ln in registry_lanes or []}
 
@@ -627,10 +638,7 @@ def collect_all(subs, now=None, registry_lanes=None):
                 if registry_lanes is not None:
                     e.setdefault("facts", [])
                 out.append(finalize(e, now))
-    doc = {"written_at": iso(now), "providers": out}
-    if registry_lanes is not None:
-        doc["lanes"] = lanes_mod.cache_view(registry_lanes)
-    return doc
+    return set_lanes({"written_at": iso(now), "providers": out}, registry_lanes)
 
 
 def write_cache(doc, path=None):
@@ -737,17 +745,13 @@ def carry_forward(doc, prior):
 
 
 def relane(path=None):
-    """Rebuild only the "lanes" part of the existing cache from spick.json; written_at and providers stay.
+    """Rebuild only the "registry" and "lanes" part of the cache from spick.json; written_at and providers stay.
     No collectors, no network, no subprocess. No cache file, or spick.json unreadable: does nothing.
     Returns True if it wrote."""
     doc = read_cache(path)
     if doc is None or _config_unreadable():
         return False
-    reg = _effective_lanes()
-    if reg is None:
-        doc.pop("lanes", None)
-    else:
-        doc["lanes"] = lanes_mod.cache_view(reg)
+    set_lanes(doc, _effective_lanes())
     write_cache(doc, path)
     return True
 
@@ -777,10 +781,8 @@ def refresh(wait_for_lock=False):
             reg = fresh
         if _config_unreadable():
             return prior
-        if fresh is None:
-            doc.pop("lanes", None)
-        else:
-            doc["lanes"] = lanes_mod.cache_view(fresh)
+        set_lanes(doc, fresh)
+        if fresh is not None:
             carry_forward(doc, prior)
         write_cache(doc)
         return doc

@@ -41,7 +41,7 @@ Run `python3 scripts/add_lane.py --id <id> --name <display> --kind api-key|relay
 
 ## Step 5. Test
 
-Write `Reply with the single word OK.` to a scratchpad file. Run `python3 scripts/invoke.py --lane <id> --prompt-file <path>` (the lane default `max_tokens` of 400 applies). Report the exit code and one line.
+Write `Reply with the single word OK.` to a scratchpad file. Run `python3 scripts/invoke.py --lane <id> --prompt-file <path> --contains public` (the test prompt holds nothing private; the lane default `max_tokens` of 400 applies). Report the exit code and one line; 6 means the lane's `data` level refused the call, 7 that the answer hit the token limit.
 
 ## Step 6. Models (optional)
 

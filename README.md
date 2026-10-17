@@ -18,9 +18,9 @@ Spick keeps the main session cheap and spends Opus only on tasks that need it, s
 
 ## What it does
 
-- The main session (Haiku) reads each prompt and makes a single routing decision. It routes by the shape of the deliverable: a verdict goes to `deep`, a plan to `planner`, changed code to `coder`. The main session is the last line, for plain lookups.
-- A keyword pass over each prompt adds a `Hint` line to the checklist. The line names the default route. The main session keeps a hinted task only with a stated reason.
-- Subagents (`coder`, `planner`, `deep`) run on fixed models. Outside CLIs (Gemini, Grok, Codex) handle their specialised tasks.
+- The main session (Haiku) reads each prompt and makes a single routing decision. It routes by the shape of the deliverable: a verdict goes to `deep`, a decision about architecture, an interface or a data format to `planner`, code beyond one file to `coder`. Small work (a lookup, a one-file edit with a clear goal) stays in the main session, because every handoff has a cost.
+- A keyword pass over each prompt adds a `Hint` line to the checklist. The line names the default route. Words inside paths, URLs and code blocks, and words right after a negation (不要, don't), do not count. The main session keeps a hinted task only with a stated reason.
+- Subagents (`coder`, `planner`, `deep`, and `Explore` for searches) run on fixed models and end with a short Evidence block (checks run, files changed, limits) that the main session keeps. Outside CLIs (Gemini, Grok, Codex) handle their specialised tasks.
 - Each reply names its participants, in a label line or in the band.
 
 ## Quick start
@@ -77,6 +77,7 @@ flowchart TD
     BAND -->|"yes"| SHOWN
 ```
 
+- The policy is one file, `skills/spick/assets/rules.json`: the routing order, the effort defaults, the hint keywords and the checklist text. `scripts/render_rules.py` renders the hook's checklist, the mod's text and the tables in `SKILL.md` and the CLAUDE.md block from it.
 - Fallback chains: `skills/spick/references/providers.md`. Review triggers: `skills/spick/SKILL.md`.
 - Label line format: `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]`
 
@@ -84,15 +85,18 @@ flowchart TD
 
 | Task | Assigned to |
 |---|---|
-| Lookups: Q&A, file lookup, summaries | Main session (Haiku) |
-| Code changes | `coder` subagent (Sonnet) |
-| Planning and design | `planner` subagent (Opus) |
+| Lookups (Q&A, file lookup, summaries) and one-file edits with a clear goal | Main session (Haiku) |
+| Code changes beyond one file | `coder` subagent (Sonnet) |
+| Decisions on architecture, a public interface, a data format or a cross-module trade-off | `planner` subagent (Opus), then `coder` |
 | Judgements: comparisons, evaluations, diagnoses, complex reasoning, decisions, formal writing | `deep` subagent (Opus) |
+| Searching a repository for files and symbols | `Explore` subagent (Haiku) |
 | Web search, fact checking, long media | Gemini (`agy`) |
 | X / Twitter data | Grok (`grok`) |
 | Independent code review, image generation | Codex (`codex`) |
 
-Default effort: `coder` medium, `planner` high, `deep` medium (raised per task: high for hard or multi-file problems, xhigh for key decisions).
+Default effort: `coder` medium, `planner` high, `deep` medium (raised per task: high for hard or multi-file problems, xhigh for key decisions). The table, the efforts and the checklist text all come from one file, `skills/spick/assets/rules.json`.
+
+**Explore on Haiku.** Claude Code's built-in Explore subagent runs on the main session's model, so an Opus session greps on Opus. Setup installs `~/.claude/agents/Explore.md` (`model: haiku`, `effort: low`, tools Read, Grep, Glob, Bash); `--no-explore` skips it. The Claude Code subagent docs say a user or project subagent named `Explore` overrides the built-in and keeps its own model. That is the documented behaviour, checked against the docs on 2026-10-17, not observed at runtime: `claude agents` lists background sessions, not subagent definitions. "Read-only" is the tool list and the agent's instructions, a tool-level soft bound, not a permission: a Bash command can still write.
 
 ## Dashboard (optional)
 
@@ -137,7 +141,9 @@ bash ~/.claude/skills/spick/scripts/setup.sh --check
 bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
-Before it writes anything, `--install` copies `CLAUDE.md`, `settings.json` and `spick.json` into `~/.claude/spick-backup/<timestamp>/`, together with a `manifest.json` that records what the run changed.
+Before it writes anything, `--install` checks that `settings.json` and `spick.json` are valid JSON (if not, it stops with nothing changed), then copies `CLAUDE.md`, `settings.json` and `spick.json` into `~/.claude/spick/backup/<timestamp>/`, together with a `manifest.json` that records what the run changed. Every step is checked: a step that fails stops the run with exit 1, naming what was already changed, and `done` is printed only when every step passed. `--no-explore` skips the Haiku `Explore` subagent.
+
+State lives in `~/.claude/spick/` (with `CLAUDE_CONFIG_DIR` set, in `$CLAUDE_CONFIG_DIR/spick/`): the quota cache `quota.json`, one turn record per session in `turns/<sessionId>.jsonl`, the mod's session markers in `mod-active/`, and the backups. An install moves the files of earlier versions (`spick-quota.json`, `spick-spend/`, `spick-gate.jsonl`, `spick-backup/`) there once. `spick.json` stays in `~/.claude/`; it records the installed version, and the checklist says `spick: skill X installed Y, run spick setup` when the skill on disk is newer.
 
 In the desktop app, select Haiku once in the model menu.
 
@@ -159,14 +165,14 @@ It backs up first, like `--install`. Then it removes only what the install wrote
 
 - the block between the spick markers in `CLAUDE.md`;
 - the checklist hook in `settings.json`;
-- the three subagents.
+- the four subagents (`coder`, `planner`, `deep`, `Explore`);
+- the quota cache and the mod's session markers.
 
 What it leaves alone:
 
 - `model` and `effortLevel` go back to their value from before the install only if they still hold the value the install set.
 - A subagent file you edited is kept unless you pass `--force`.
-- `spick.json` is kept unless you pass `--purge`, which also removes `spick-quota.json` and `spick-spend/`.
-- `spick-backup/` is never removed.
+- `spick.json` and `~/.claude/spick/` (turn records, backups) are kept unless you pass `--purge`, which removes both.
 
 Two steps remain for you: `claude plugin uninstall spick-dashboard` and deleting `~/.claude/skills/spick`.
 
@@ -180,15 +186,16 @@ Two steps remain for you: `claude plugin uninstall spick-dashboard` and deleting
 | `/spick on\|force\|off` | Routing switch: `on` routes in a Haiku session only, `force` on any model |
 | `/spick review on\|off` | Codex review step |
 | `/spick gate on\|off` | The gate: a hinted verdict the main session kept is sent back once at stop time |
-| `/spick guard on\|off` | The guard: at most 3 source files edited by the main session per turn, and a turn that edited source without running a check is sent back once at stop time |
+| `/spick guard on\|off` | The guard: the main session edits at most 1 source file per turn itself (a second is refused and handed to `coder`), and a turn that edited source without a passing check is sent back once at stop time. The cap is a tool-level soft bound: edits made through Bash (`sed -i`, a redirection) are not counted |
 | `/spick lane <id>` | Shows one lane's record |
 | `/spick lane <id> on\|off` | Switches a lane on or off (field `enabled`, saved in `spick.json`) |
 | `/spick lane <id> <field> <value>` | Changes any field of a lane through `set_lane.py` (tags take a comma list) |
 | `/spick hide` / `show` | Hides or shows the band for the current session |
 | `/spick quota` | Refreshes the quota line |
 | `/spick spend` | What the sessions cost in the last 7 days, by lane (`scripts/spend.py`; `--days N`, `--by lane\|day\|session`, `--json` when run by hand) |
+| `/spick audit` | What the turn records show for the last 7 days: what ran for each hint kind, gate firings and their outcomes, edits without a passing check, cost by lane (`scripts/audit.py --days N`) |
 
-How `/spick spend` gets its data: the mod writes one file per session to `~/.claude/spick-spend/`, with a row per turn that carried usage and a row per outside CLI call (tokens 0, unpriced). Without the mod there is no spend record: the bash hook sees no usage.
+Where `/spick spend` and `/spick audit` get their data: the mod writes one turn record per session to `~/.claude/spick/turns/<sessionId>.jsonl`, a line per main turn with who ran, the usage, the gate and the checks. Sessions from earlier versions are read from the old per-session spend files. Without the mod there is no record: the bash hook sees no usage.
 
 Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini / Grok / Codex, `l` the lanes page (edit tags, data and the rest; no Input on mobile), `b` band, `q` refresh quota, `x` close.
 
@@ -197,7 +204,7 @@ Pane hotkeys: `r` routing, `v` review, `e` gate, `d` guard, `g` `k` `c` Gemini /
 - Claude Code 2.1 or later, bash and python3.
 - Optional: `codex`, `grok` and `agy`, each logged in.
 - A lane key stored as `keychain:<name>` works on macOS only; on Linux and Windows use `env:<VAR>`.
-- `CLAUDE_CONFIG_DIR` is honoured by setup, the hook and the scripts. The dashboard mod sees only `HOME`, so with `CLAUDE_CONFIG_DIR` set its marker (`.spick-mod-active`) and its spend records (`spick-spend/`) still live under `~/.claude`.
+- `CLAUDE_CONFIG_DIR` is honoured by setup, the hook, the scripts (`scripts/paths.py` is the one resolver) and the dashboard mod: state lives in `<config>/spick/`.
 
 ## FAQ
 
@@ -215,7 +222,7 @@ No. `codex`, `grok` and `agy` are optional; each one you want to use must be log
 
 ### What does setup change, and can I undo it?
 
-Before it writes anything, `--install` backs up `CLAUDE.md`, `settings.json` and `spick.json` into `~/.claude/spick-backup/<timestamp>/`. `--uninstall` removes only what the install wrote; see [Uninstall](#uninstall).
+Before it writes anything, `--install` backs up `CLAUDE.md`, `settings.json` and `spick.json` into `~/.claude/spick/backup/<timestamp>/`. `--uninstall` removes only what the install wrote; see [Uninstall](#uninstall).
 
 ### Can I use Spick without the dashboard mod?
 
@@ -229,6 +236,11 @@ A key stored as `keychain:<name>` works on macOS only. On Linux and Windows, use
 
 Spick does not change the main session's model. A mod can rewrite the model and effort of each request (`turn.step` in the engine types of Claude Code 2.1.299); claude-router and claude-agent-tools do that. Spick leaves it to them and composes with claude-router, so the main session runs on the lower-cost model and triages by checklist. The checklist is advice: the main session can still keep a task it should have delegated, which is what the Hint line and the deliverable-shaped item 2 are there to prevent.
 
+- The Hint line is a keyword pass, not a classifier: it misses verdicts phrased without its words and fires on a few it should not (版本号 reads as a web sign). Its labelled corpus is `skills/spick/scripts/testdata/hint_corpus.json`.
+- A lane's `data` level is a declared limit, not sensitive-data detection. `scripts/invoke.py` refuses a call above it (exit 6), takes a prompt without `--contains` as code, and scans for code-looking text under a `text` or `public` declaration; it does not look for secrets or personal data.
+- The guard's edit cap and the `Explore` agent's read-only tool list are tool-level soft bounds: a Bash command can still write files.
+- That a user-level `Explore` replaces the built-in one is what the Claude Code docs say; it has not been observed at runtime here.
+
 ## Related projects
 
 [alexei-led/claude-router](https://github.com/alexei-led/claude-router) switches the main session's model on each turn and can run alongside Spick.
@@ -237,7 +249,7 @@ Spick does not change the main session's model. A mod can rewrite the model and 
 
 Issues and pull requests are welcome.
 
-Layout: routing rules live in `skills/spick/`; the band and pane live in `mod/spick-dashboard/`.
+Layout: routing rules live in `skills/spick/`; the band and pane live in `mod/spick-dashboard/`. The routing policy is `skills/spick/assets/rules.json`: edit it, then run `python3 skills/spick/scripts/render_rules.py` (CI's unit tests run `--check`, which fails when a rendered copy drifts). The changes per version are in [CHANGELOG.md](CHANGELOG.md).
 
 CI (`.github/workflows/ci.yml`) runs the python unit tests and the mod tests. To run them locally, from the repo root:
 

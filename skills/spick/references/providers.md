@@ -15,7 +15,14 @@ Verified against these versions on 2026-10-13 (macOS). When a `--version` differ
 
 Models: Haiku 5.5 (`haiku`), Sonnet 5.5 (`sonnet`), Opus 5.5 (`opus`), Fable 5.1 (`fable`). Effort levels: low, medium, high, xhigh, max.
 
-- Subagent models are pinned in `~/.claude/agents/{coder,planner,deep}.md` (`model:` and `effort:` frontmatter). Override effort per call with the Agent tool's `effort` parameter.
+- Subagent models are pinned in `~/.claude/agents/{coder,planner,deep,Explore}.md` (`model:` and `effort:` frontmatter). Override effort per call with the Agent tool's `effort` parameter. The defaults come from `assets/rules.json` (`coder` medium, `planner` high, `deep` medium); setup copies them into `spick.json` as `efforts` for the mod.
+- `Explore` is Haiku at effort low with tools Read, Grep, Glob, Bash. The Claude Code subagent docs say a user or project agent named `Explore` replaces the built-in one, which otherwise runs on the main session's model; `setup.sh --install --no-explore` leaves the built-in in place.
+
+### Effort for the outside CLIs, per task
+
+- Gemini (`--effort`): low for quick lookups; medium for fact checks and summaries; high for long documents and multi-step research.
+- Codex (`-c model_reasoning_effort=`): medium for review and small fixes; high for tricky bugs on short context; low for long rewrites (see the pitfall below).
+- Grok (`--effort`): low to fetch posts; medium for sentiment summaries.
 - The main session cannot change its own model or effort; the user does it in the model menu. The desktop app's model picker remembers its own choice and overrides `settings.json`, so a user who once picked Fable keeps getting Fable until they pick Haiku once.
 - Quota source (local, no network): `~/.claude.json` → `cachedUsageUtilization`: `fetchedAtMs` (sample time) and `utilization.limits[]` (`kind` session / weekly_all / weekly_scoped, `percent`, `resets_at`, `scope.model.display_name`); older builds only have `utilization.five_hour|seven_day.utilization`. The CLI refreshes it while running, so it can be hours old.
 
@@ -147,12 +154,16 @@ Compare the JSON with the preset's `value_path` / `total_path` / `currency_path`
 `scripts/invoke.py` sends one prompt to a lane and prints the answer:
 
 ```
-python3 scripts/invoke.py --lane <id> --prompt-file <path> [--system-file <path>] [--model <m>] [--max-tokens <n>] [--timeout <s>] [--contains public|text|code]
+python3 scripts/invoke.py --lane <id> --prompt-file <path> [--system-file <path>] [--model <m>] [--max-tokens <n>] [--timeout <s>] [--contains public|text|code] [--override-data "<reason>"]
 ```
 
 `python3 scripts/invoke.py --lane <id> --list-models` is read-only: it GETs `{base_url}/models` with the lane's key (openai-chat lanes only) and prints the model ids, one per line, never the key. Pick a model for the task and pass it with `--model`; the lane's `invoke.model` stays the default. Exit codes are the same (3 on 401/403 or a missing key, 2 for a lane that is not openai-chat).
 
-Write the brief to a scratchpad file first and pass only the path; never put the brief on the command line and never pass secrets. `invoke` in the lane record is one of: `{"api": "openai-chat" | "anthropic-messages", "base_url": ..., "model": ...}` (POST `{base_url}/chat/completions`, or `{base_url}/v1/messages`) or `{"cli": "<command with {prompt_file}>"}` (run as argv without a shell; without `{prompt_file}` the prompt goes on stdin). `key_ref` sits at the top level of the lane record, next to `invoke`, never inside it (example: `{"kind": "api-key", "key_ref": "keychain:kimi", "invoke": {"api": "openai-chat", "base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2.6"}}`). A `key_ref` is required for an api lane except `kind: local`; `keychain:<name>` is read as service `<name>`, account `spick`. stdout is the answer only; stderr is one fact line (`spick-invoke: <id> <model> <in> in / <out> out tokens, <s>s`). `--contains` is a self-report: a lane whose declared `data` is lower gets one warning line and the call proceeds. Exit codes: 0 ok, 2 usage error or unknown lane, 3 web-only lane or missing key or auth 401/403, 4 quota or rate 402/429, 5 anything else. No retries, no streaming. Step 6 checks the answer as usual.
+Write the brief to a scratchpad file first and pass only the path; never put the brief on the command line and never pass secrets. `invoke` in the lane record is one of: `{"api": "openai-chat" | "anthropic-messages", "base_url": ..., "model": ...}` (POST `{base_url}/chat/completions`, or `{base_url}/v1/messages`) or `{"cli": "<command with {prompt_file}>"}` (run as argv without a shell; without `{prompt_file}` the prompt goes on stdin). `key_ref` sits at the top level of the lane record, next to `invoke`, never inside it (example: `{"kind": "api-key", "key_ref": "keychain:kimi", "invoke": {"api": "openai-chat", "base_url": "https://api.moonshot.cn/v1", "model": "kimi-k2.6"}}`). A `key_ref` is required for an api lane except `kind: local`; `keychain:<name>` is read as service `<name>`, account `spick`. stdout is the answer only (every text block, in order); stderr holds fact lines (`spick-invoke: <id> <model> <in> in / <out> out tokens, <s>s`).
+
+The data level is a declared limit, enforced fail-closed; it is not sensitive-data detection. `--contains` says the most this prompt holds (`public` < `text` < `code`); without it the prompt counts as `code`. A lane whose declared `data` is below that is refused with exit 6 and nothing is sent, so a `text` or `public` lane needs an explicit `--contains` at or below its level. Under such a declaration, a fenced block or three or more code-looking lines in the prompt or the `--system-file` is refused too. A lane without `data` takes anything. `--override-data "<reason>"` sends anyway, only when the user agreed, and prints `data override: ...; reason: <reason>` as a fact line.
+
+Exit codes: 0 ok, 2 usage error or unknown lane, 3 web-only lane or missing key or auth 401/403, 4 quota or rate 402/429, 5 anything else, 6 data level refused (nothing sent), 7 the answer stopped at the token limit (`finish_reason=length` or `stop_reason=max_tokens`): the partial text is on stdout and `INCOMPLETE` on stderr; rerun with a larger `--max-tokens` rather than relaying a stub. No retries, no streaming. Step 6 checks the answer as usual.
 
 Reasoning models (deepseek-flash, kimi-k2.6) spend output tokens on reasoning before the answer, so a small `--max-tokens` (for example 20) returns an empty answer. Use 400 or more even for a short answer.
 
@@ -177,7 +188,7 @@ Called end to end with a user key on 2026-10-14:
 }
 ```
 
-`plan` and `price` are free text, both optional. `scripts/quota.py` collects the raw facts into `~/.claude/spick-quota.json` (written atomically, refreshed in the background when older than 10 minutes, never awaited by the hook) and the checklist prints them as one `Quota` line. Nothing in the program judges them. `status` is only the age of the sample: `fresh` under 30 minutes, `stale` older, `unknown` no data. A window past its `resets_at` is reported with `used_pct` null and `reset` true.
+`plan` and `price` are free text, both optional. `scripts/quota.py` collects the raw facts into `~/.claude/spick/quota.json` (`$CLAUDE_CONFIG_DIR/spick/` when set; written atomically, refreshed in the background when older than 10 minutes, never awaited by the hook) and the checklist prints them as one `Quota` line. Nothing in the program judges them. `status` is only the age of the sample: `fresh` under 30 minutes, `stale` older, `unknown` no data. A window past its `resets_at` is reported with `used_pct` null and `reset` true. The cache also says `registry` (true when spick.json declares a `lane_registry`) and lists the enabled `lanes`; `registry: true` with an empty list means every lane is off, and the checklist then says no outside lane may be called.
 
 ## The guard's check commands
 
@@ -187,4 +198,4 @@ The dashboard mod's guard sends back a turn that edited source and ran no check.
 "guard": {"check_commands": ["^just check\\b", "bin/verify"]}
 ```
 
-Each entry is a JavaScript regex string tested against the whole Bash command. The mod reads the list once per session start; an entry that does not compile is ignored, with one toast naming it. The mod sees only `HOME`, so this is `~/.claude/spick.json` even when `CLAUDE_CONFIG_DIR` points elsewhere. Setup keeps the key when it rewrites the file.
+Each entry is a JavaScript regex string tested against the whole Bash command. The mod reads the list once per session start; an entry that does not compile is ignored, with one toast naming it. With `CLAUDE_CONFIG_DIR` set, the file is `$CLAUDE_CONFIG_DIR/spick.json`. Setup keeps the key when it rewrites the file.

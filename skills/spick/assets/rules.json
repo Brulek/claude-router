@@ -1,0 +1,73 @@
+{
+  "_": "The routing policy, the single source. scripts/render_rules.py renders assets/checklist.txt, the rules:start block of mod/spick-dashboard/hooks/checklist.ts, the hints:start block of hooks/hint.ts, and the rules:start blocks of SKILL.md and assets/claude-md-snippet.md; `render_rules.py --check` fails on drift. Edit here, then run render_rules.py.",
+  "version": 2,
+  "kinds": [
+    {"id": "x-data", "order": 1, "label": "X / Twitter data", "route": "lane:x-data", "default": "Grok", "fallback": "tell the user; never fake it with web search"},
+    {"id": "image", "order": 2, "label": "image generation or editing", "route": "lane:image", "default": "Codex codex-image, then Gemini", "fallback": "tell the user"},
+    {"id": "long", "order": 3, "label": "long video/audio, documents far beyond ~200 pages", "route": "lane:long-context", "default": "Gemini", "fallback": "agent:deep (documents only)"},
+    {"id": "search", "order": 4, "label": "live web, fact check, versions, prices", "route": "lane:search", "default": "Gemini agy", "fallback": "agent:general-purpose sonnet medium with WebSearch; judging the findings stays deep's"},
+    {"id": "verdict", "order": 5, "label": "compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing", "route": "agent:deep", "keep_if": "the answer is two numbers or a fact already on disk"},
+    {"id": "decision", "order": 6, "label": "a change that needs an architecture, public interface, data-format or cross-module decision the user did not make", "route": "agent:planner then agent:coder"},
+    {"id": "code", "order": 7, "label": "changed code beyond one file where the goal is clear; local layout, naming and file choice are the coder's", "route": "agent:coder"},
+    {"id": "review", "order": 8, "label": "independent review of a diff", "route": "lane:review", "default": "Codex", "fallback": "agent:deep"},
+    {"id": "lookup", "order": 9, "label": "the answer is already in a file here, a command's output or your own knowledge; a one-file edit", "route": "self"}
+  ],
+  "efforts": {
+    "coder": {"default": "medium", "low": "one-file mechanical edit, config, comments", "high": "multi-file, debugging, unexplained failures, performance"},
+    "planner": {"default": "high", "medium": "three steps or fewer", "xhigh": "architecture, wide blast radius, real trade-offs"},
+    "deep": {"default": "medium", "medium": "ordinary verdicts: a diagnosis within one file, a comparison of two small things, a review of a small diff", "high": "hard problems, multi-file debugging, first drafts of formal writing", "xhigh": "key decisions, final drafts, money or law", "max": "only when the user says \"extremely important\""}
+  },
+  "hints": {
+    "judgement": ["对比", "比较", "差距", "差异", "优劣", "利弊", "评估", "评价", "复盘", "诊断", "分析", "为什么", "为何", "原因", "根因", "哪个更", "哪个好", "哪种更", "值不值", "要不要", "该不该", "是否合理", "有没有问题", "有什么问题", "建议", "推荐", "怎么看", "看法", "判断", "对吗", "对不对", "行不行", "靠谱", "合适吗", "妥当", "好不好", "正确吗", "问题出在", "怎么回事", "怎么会",
+      "compare", "comparison", "versus", "vs", "gap", "gaps", "evaluate", "evaluation", "assess", "assessment", "critique", "diagnose", "diagnosis", "why", "root cause", "which is better", "should we", "should i", "recommend", "recommendation", "trade-off", "tradeoff", "tradeoffs", "pros and cons", "worth it", "analyse", "analyze", "analysis", "verdict", "opinion", "is it correct", "is this right", "look right", "what do you think", "thoughts", "sanity check", "make sense", "any issues", "any problems"],
+    "review": ["审查", "审阅", "评审", "review", "audit"],
+    "design": ["怎么设计", "设计", "方案", "架构", "怎么做", "如何做", "怎么实现", "如何实现", "规划", "技术选型",
+      "how should", "design", "architecture", "approach", "roadmap", "which file", "data model", "schema"],
+    "code": ["修改", "改成", "改为", "改一下", "修一下", "修复", "实现", "添加", "新增", "加一个", "加上", "加个", "删除", "去掉", "重构", "重写", "写一个", "写个", "做一个", "补上",
+      "fix", "implement", "add", "remove", "delete", "refactor", "rewrite", "rename", "write a", "create"],
+    "web": ["最新", "版本号", "价格", "搜一下", "搜索", "联网",
+      "latest", "newest", "price", "search the web", "google", "release notes", "current version"],
+    "x": ["推特", "推文", "twitter", "x.com", "tweet", "tweets"]
+  },
+  "negations": ["不要", "别", "不用", "无需", "don't", "do not", "no need to", "without"],
+  "phrases": {
+    "judgement": "judgement words ({t}) -> start from Agent(deep); pick the effort by the table",
+    "review": "review words ({t}) -> the review lane for a diff, else Agent(deep)",
+    "design": "design words ({t}) -> Agent(planner) before any coder",
+    "code": "edit words ({t}) -> Agent(coder) once nothing is left to decide",
+    "web": "web signs ({t}) -> the search lane fetches, judging what it finds is still deep's",
+    "x": "X words ({t}) -> the x-data lane"
+  },
+  "checklist": {
+    "title": "[spick triage - answer all three before the first tool call]",
+    "plan": "1. Plan mode? 3+ files, irreversible or wide action, ambiguous ask, new build, or a plan asked for -> EnterPlanMode, then planner inside it (headless: plan inline, stop before editing unless told to go ahead).",
+    "lane_head": "2. Lane? Route by the shape of the deliverable, top to bottom, first match wins:",
+    "bullets": [
+      {"name": "LANES", "kinds": ["x-data", "image", "long", "search"],
+       "builtin": "   - X data -> Grok; images -> Codex; long media, live web, facts -> Gemini (agy).",
+       "registry": "   - a task an outside lane is tagged for -> pick from the Lanes line by tag; never send above a lane's data: level.",
+       "none": "   - no outside lane is enabled: do not call Gemini, Grok or Codex; live web -> Agent(general-purpose, sonnet) with WebSearch; X data, images -> tell the user."},
+      {"name": "DEEP", "kinds": ["verdict"],
+       "text": "   - a verdict (compare, evaluate, find gaps, diagnose why, review code or a design, recommend, formal writing), or unsure how hard -> Agent(deep)."},
+      {"name": "PLANNER", "kinds": ["decision"],
+       "text": "   - a decision the user did not make (architecture, public interface, data format, cross-module trade-off) -> Agent(planner), then Agent(coder)."},
+      {"name": "CODER", "kinds": ["code"],
+       "text": "   - code beyond one file, goal clear -> Agent(coder); layout, naming, which file are its calls."},
+      {"name": "REVIEW", "kinds": ["review"],
+       "builtin": "   - a diff to review -> Codex, else Agent(deep).",
+       "registry": "   - a diff to review -> the lane tagged review, else Agent(deep).",
+       "none": "   - a diff to review -> Agent(deep)."},
+      {"name": "YOU", "kinds": ["lookup"],
+       "text": "   - the answer is in a file, a command's output or your knowledge, or a one-file edit, goal clear -> you: small work stays here; a kept verdict needs a `Kept:` line."}
+    ],
+    "tail": "   A prompt that mixes kinds is split by kind. Give every delegate an effort. A brief is a handoff packet, not your trail; a brief saying how (use X, then Y) is a design: planner. A check failing twice: Agent(coder) at high effort, or Agent(deep) if the cause is unknown.",
+    "goal": "3. Goal-shaped? A machine-checkable finish (tests, build, exit 0) after several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line.",
+    "label": "Reply starts with the deliverable; end with the label line: no delegate -> `[Model: {main} | Effort: medium]`; with delegates -> `[Model: {main} (medium) → coder Sonnet 5.5 (high) | {review}]` — {who}. Never write `→ none` or `→ 无`.",
+    "main_default": "Haiku 5.5",
+    "review_codex": "Review: Codex <model> (medium)",
+    "review_skipped": "Review: skipped",
+    "who_with_reviewer": "every participant, reviewer included, carries its own model and effort",
+    "who_plain": "every participant carries its own model and effort"
+  },
+  "budget": {"snippet_lines": 30, "snippet_words": 450, "checklist_lines": 14, "checklist_words": 320, "skill_words": 2000}
+}

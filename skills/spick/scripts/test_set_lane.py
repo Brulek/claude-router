@@ -338,12 +338,13 @@ class Relane(Base):
         doc = {"written_at": "2026-10-14T01:00:00Z", "providers": [{"provider": "claude", "facts": []}],
                "lanes": [{"id": "old", "kind": "local", "tags": [], "data": None}]}
         doc.update(extra or {})
-        with open(os.path.join(self.dir, "spick-quota.json"), "w") as f:
+        os.makedirs(os.path.join(self.dir, "spick"), exist_ok=True)
+        with open(os.path.join(self.dir, "spick", "quota.json"), "w") as f:
             json.dump(doc, f)
         return doc
 
     def read_cache(self):
-        with open(os.path.join(self.dir, "spick-quota.json")) as f:
+        with open(os.path.join(self.dir, "spick", "quota.json")) as f:
             return json.load(f)
 
     def test_relane_rebuilds_only_lanes_without_subprocess(self):
@@ -361,13 +362,21 @@ class Relane(Base):
     def test_relane_without_a_cache_does_nothing(self):
         self.base()
         self.assertFalse(quota.relane())
-        self.assertFalse(os.path.exists(os.path.join(self.dir, "spick-quota.json")))
+        self.assertFalse(os.path.exists(os.path.join(self.dir, "spick", "quota.json")))
 
-    def test_relane_drops_lanes_when_there_is_no_registry(self):
+    def test_relane_without_a_registry_says_so(self):
         self.write({"version": 1})
         self.cache()
         quota.relane()
-        self.assertNotIn("lanes", self.read_cache())
+        doc = self.read_cache()
+        self.assertEqual((doc["registry"], doc["lanes"]), (False, []))
+
+    def test_relane_with_every_lane_off_keeps_registry_true(self):
+        self.write({"version": 1, "lane_registry": {k: {"enabled": False} for k in ("gemini", "grok", "codex")}})
+        self.cache()
+        quota.relane()
+        doc = self.read_cache()
+        self.assertEqual((doc["registry"], doc["lanes"]), (True, []))
 
     def test_a_write_refreshes_the_cache_lanes_and_asks_for_a_background_refresh(self):
         self.base()

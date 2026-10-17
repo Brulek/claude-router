@@ -3,16 +3,24 @@
 
 Usage:
   invoke.py --lane ID --prompt-file PATH [--system-file PATH] [--model M]
-            [--max-tokens N] [--timeout S] [--contains public|text|code]
+            [--max-tokens N] [--timeout S] [--contains public|text|code] [--override-data REASON]
   invoke.py --lane ID --list-models [--timeout S]     (openai-chat lanes: print model ids, one per line)
 
-stdout: the answer text only.  stderr: one fact line.
+stdout: the answer text only.  stderr: fact lines.
 Exit codes: 0 ok; 2 usage error or unknown lane; 3 web-only lane, missing key, or auth 401/403;
-            4 quota or rate 402/429; 5 any other error (timeout, 5xx, bad JSON, failed command).
+            4 quota or rate 402/429; 5 any other error (timeout, 5xx, bad JSON, failed command);
+            6 data level refused (nothing was sent); 7 answer cut off at the token limit (the partial
+            answer is on stdout, INCOMPLETE on stderr).
 
-The program refuses only what cannot work: a web-only lane, or an api lane whose key is missing.
-It never judges the content or the service. Keys are read at call time and never reach argv,
-stdout, stderr or any file. No retries, no streaming.
+Data level (fail-closed). A lane's `data` (public < text < code) is the most the user allows it to receive; `--contains`
+declares what this prompt holds. It is a declared constraint, not sensitive-data detection. Without --contains the
+prompt is taken as `code`, the strictest, so a `text` or `public` lane needs an explicit --contains at or below its
+level. Under such a declaration the prompt file and the --system-file are still scanned for code-looking content
+(a fenced block, or three or more code-looking lines) and the call is refused when it is found. A lane without
+`data` takes anything. `--override-data "<reason>"` sends anyway and prints the reason as a fact line.
+
+The program refuses only what cannot work or what the user's declared limits forbid. It never judges the service.
+Keys are read at call time and never reach argv, stdout, stderr or any file. No retries, no streaming.
 """
 import argparse
 import json
@@ -33,6 +41,11 @@ BEARER_RE = re.compile(r"Bearer\s+\S+", re.I)
 MAX_ERR = 200
 DEFAULT_MAX_TOKENS = 4096
 APIS = ("openai-chat", "anthropic-messages")
+# a line that looks like code: a definition or import keyword at its start, or indented with code punctuation
+CODE_START_RE = re.compile(r"^\s*(def|class|function|import|from \S+ import|return|const|let|var|fn|func|package|#include)\b")
+CODE_PUNCT_RE = re.compile(r"(=>|[{};]\s*$|^\s*[}\]]|\b\w+\(.*\)\s*[:{]?\s*$)")
+FENCE_RE = re.compile(r"^\s*(```|~~~)", re.M)
+CODE_LINES = 3
 
 
 class Fail(Exception):
@@ -112,13 +125,50 @@ def post_json(url, headers, body, timeout, key):
 
 
 def _text_of(content):
+    """The answer text: a string, or every text block of a list in order (a thinking or tool block is skipped)."""
     if isinstance(content, str):
         return content
     if isinstance(content, list):
-        for part in content:
-            if isinstance(part, dict) and isinstance(part.get("text"), str) and part.get("type", "text") == "text":
-                return part["text"]
+        return "".join(part["text"] for part in content
+                       if isinstance(part, dict) and isinstance(part.get("text"), str) and part.get("type", "text") == "text")
     return ""
+
+
+def looks_like_code(text):
+    """A fenced block, or CODE_LINES or more lines that look like code. A heuristic for the declared-level check:
+    it catches pasted source under a text declaration, it does not find secrets."""
+    if FENCE_RE.search(text or ""):
+        return True
+    n = 0
+    for line in (text or "").splitlines():
+        if not line.strip():
+            continue
+        indented = line[:1] in (" ", "\t")
+        if CODE_START_RE.match(line) or (indented and CODE_PUNCT_RE.search(line)):
+            n += 1
+            if n >= CODE_LINES:
+                return True
+    return False
+
+
+def check_data(lane_id, data, contains, texts, override):
+    """Refuse (Fail 6) when what this call sends is above the lane's declared data level. Returns fact lines."""
+    levels = lanes.DATA_LEVELS
+    if data not in levels:
+        return []   # a lane without a declared level takes anything
+    declared = contains or "code"
+    sent = declared
+    seen = ""
+    if levels.index(declared) < levels.index("code") and any(looks_like_code(t) for t in texts if t):
+        sent, seen = "code", " (the prompt or system file looks like code)"
+    if levels.index(sent) <= levels.index(data):
+        return []
+    fact = "lane %s takes data:%s; this call sends %s%s%s" % (
+        lane_id, data, sent, seen, "" if contains else " (no --contains: taken as code)")
+    if not override:
+        raise Fail(6, "refused, nothing sent: %s. Pass --contains at or below %s if that is true, pick another lane, "
+                      "or --override-data \"<reason>\"" % (fact, data))
+    return ["data override: %s; reason: %s" % (fact, override)]
 
 
 def call_openai(base, key, model, system, prompt, max_tokens, timeout):
@@ -130,8 +180,9 @@ def call_openai(base, key, model, system, prompt, max_tokens, timeout):
         text = _text_of(d["choices"][0]["message"]["content"])
     except Exception:
         raise Fail(5, "no answer in response")
+    cut = d["choices"][0].get("finish_reason") == "length"
     u = d.get("usage") if isinstance(d.get("usage"), dict) else {}
-    return text, u.get("prompt_tokens"), u.get("completion_tokens")
+    return text, u.get("prompt_tokens"), u.get("completion_tokens"), cut
 
 
 def call_anthropic(base, key, model, system, prompt, max_tokens, timeout):
@@ -146,8 +197,9 @@ def call_anthropic(base, key, model, system, prompt, max_tokens, timeout):
         text = _text_of(d["content"])
     except Exception:
         raise Fail(5, "no answer in response")
+    cut = d.get("stop_reason") == "max_tokens"
     u = d.get("usage") if isinstance(d.get("usage"), dict) else {}
-    return text, u.get("input_tokens"), u.get("output_tokens")
+    return text, u.get("input_tokens"), u.get("output_tokens"), cut
 
 
 def call_cli(template, prompt_file, prompt, timeout):
@@ -226,15 +278,17 @@ def run(a):
     api, cli = inv.get("api"), inv.get("cli")
     if api not in APIS and not isinstance(cli, str):
         raise Fail(2, "lane %s has no invoke.api (%s) or invoke.cli" % (a.lane, " or ".join(APIS)))
-    # self-report only: warn, never refuse
-    data = lane.get("data")
-    if a.contains and data in lanes.DATA_LEVELS and lanes.DATA_LEVELS.index(data) < lanes.DATA_LEVELS.index(a.contains):
-        sys.stderr.write("spick-invoke: warning: lane %s declares data:%s but the prompt is marked %s\n" % (a.lane, data, a.contains))
     prompt = read_text(a.prompt_file, "prompt")
     system = read_text(a.system_file, "system") if a.system_file else None
+    if a.override_data is not None and not a.override_data.strip():
+        raise Fail(2, "--override-data needs a reason")
+    facts = check_data(a.lane, lane.get("data"), a.contains, (prompt, system), a.override_data)
+    for f in facts:
+        sys.stderr.write("spick-invoke: %s\n" % scrub(f))
 
     t0 = time.time()
     key = None
+    cut = False
     if api in APIS:
         base = inv.get("base_url")
         model = a.model or inv.get("model")
@@ -250,10 +304,10 @@ def run(a):
         max_tokens = a.max_tokens or inv.get("max_tokens") or DEFAULT_MAX_TOKENS
         fn = call_openai if api == "openai-chat" else call_anthropic
         try:
-            text, tin, tout = fn(base, key, model, system, prompt, int(max_tokens), a.timeout)
+            text, tin, tout, cut = fn(base, key, model, system, prompt, int(max_tokens), a.timeout)
         except Fail as f:
             raise Fail(f.code, scrub(f.msg, key))
-        if not text.strip():
+        if not text.strip() and not cut:
             raise Fail(5, "empty answer")
         tokens = "%s in / %s out tokens" % (tin, tout) if tin is not None and tout is not None else "tokens unknown"
     else:
@@ -264,6 +318,10 @@ def run(a):
         text = text.replace(key, "[redacted]")
     sys.stdout.write(text if text.endswith("\n") else text + "\n")
     sys.stderr.write("spick-invoke: %s %s %s, %.1fs\n" % (a.lane, model, tokens, time.time() - t0))
+    if cut:
+        # a reasoning model can spend the whole budget before answering: say so, never pass a stub off as the answer
+        sys.stderr.write("spick-invoke: INCOMPLETE: the answer stopped at the token limit (%s); raise --max-tokens\n" % max_tokens)
+        return 7
     return 0
 
 
@@ -276,7 +334,8 @@ def main(argv):
     p.add_argument("--max-tokens", type=int)
     p.add_argument("--timeout", type=float, default=300)
     p.add_argument("--list-models", action="store_true", help="print the lane's model ids (openai-chat only) and exit")
-    p.add_argument("--contains", help="self-report of the most the prompt holds: public, text or code")
+    p.add_argument("--contains", help="what the prompt holds at most: public, text or code (default: code)")
+    p.add_argument("--override-data", metavar="REASON", help="send although the data level forbids it; the reason is printed")
     a = p.parse_args(argv)
     try:
         return run(a)
