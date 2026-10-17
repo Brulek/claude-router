@@ -36,7 +36,8 @@ def _done(t):
     ds = t.get("delegates") or []
     live = ("completed", "running")
     deep = any(d.get("lane") == "deep" and d.get("status") in live for d in ds)
-    review = any(d.get("isReview") and d.get("status") == "completed" for d in ds)
+    # a review call counts from 200 characters of output (gate.ts MIN_REVIEW_CHARS); records before it lack the field
+    review = any(d.get("isReview") and d.get("status") == "completed" and (spend._num(d.get("outputChars")) is None or d["outputChars"] >= 200) for d in ds)
     hint = t.get("hint") or []
     needs_deep = "judgement" in hint
     if deep or (not needs_deep and review):

@@ -5,9 +5,9 @@ import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, Quota
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, sampleNote, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
-import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkOf, declaredChecks, editCapReason, escalationLine, uncheckedReason } from './guard'
+import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, asksAboutItself, checkOf, declaredChecks, editCapReason, escalationLine, oneCommand, uncheckedReason } from './guard'
 import { KEPT_RE, gateFiring, gateOutcome, keptLine, roleDone, sendBackText } from './gate'
-import type { DelegateStatus } from './gate'
+import type { ConfirmedBy, DelegateStatus } from './gate'
 import { findHints, lineOf } from './hint'
 import type { Hint } from './hint'
 import { readQuota } from './quota'
@@ -365,12 +365,17 @@ type DelegateRec = {
   turnId: string; isRecorded?: boolean
   /** a subagent's usage, summed over its turn.complete events; null for an outside CLI and until it reports */
   usage: UsageEntry | null
+  /** an Agent call: what confirmed it completed */
+  confirmedBy?: ConfirmedBy
+  /** an outside CLI call: the characters its result carried */
+  outputChars?: number
 }
 
 /** a delegate as the turn record lists it */
 const delegateEntry = (d: DelegateRec): DelegateEntry => ({
   id: d.id, lane: d.lane, model: d.model, ...(d.effort ? { effort: d.effort } : {}), ...(d.isReview ? { isReview: true } : {}),
-  status: d.status, ok: d.status === 'completed', startedAt: new Date(d.startedAt).toISOString(),
+  status: d.status, ok: d.status === 'completed', ...(d.confirmedBy ? { confirmedBy: d.confirmedBy } : {}),
+  ...(d.outputChars !== undefined ? { outputChars: d.outputChars } : {}), startedAt: new Date(d.startedAt).toISOString(),
   ms: d.endedAt === undefined ? null : Math.max(0, d.endedAt - d.startedAt), usage: d.usage, costUsd: d.usage?.costUsd ?? null,
 })
 
@@ -387,6 +392,22 @@ const checkEntry = (c: CheckRun, editCount: number): CheckEntry => ({
   exitOk: c.exitOk ?? null, editsDuring: c.editsDuring ?? null, afterLastEdit: isAfterLastEdit(c, editCount),
   ...(c.agentId ? { agentId: c.agentId } : {}),
 })
+
+/**
+ * The text a tool result carries: what the model read (`text`), else a Bash record's stdout and stderr, else a string
+ * result; '' when there is none.
+ */
+function resultText(r: { text?: string; result?: unknown } | undefined): string {
+  if (!r) return ''
+  if (typeof r.text === 'string') return r.text
+  const res = r.result
+  if (typeof res === 'string') return res
+  if (res && typeof res === 'object') {
+    const o = res as { stdout?: unknown; stderr?: unknown }
+    return `${typeof o.stdout === 'string' ? o.stdout : ''}${typeof o.stderr === 'string' ? o.stderr : ''}`
+  }
+  return ''
+}
 
 /** how a call that returned stands: refused, failed (an error result) or completed */
 const statusOf = (r: { deny?: string; isError?: true } | undefined): DelegateStatus => (r === undefined ? 'failed' : r.deny ? 'refused' : r.isError ? 'failed' : 'completed')
@@ -849,7 +870,14 @@ export const register: Register = on => {
         // until its own turn.complete, unless the call itself was refused or failed
         const status = statusOf(r)
         const isBackground = (e.run_in_background === true || backgroundCalls.has(id)) && status === 'completed'
-        if (!isBackground) settle(id, status, await $.clock.now())
+        const d = delegateOfCall.get(id)
+        if (!isBackground && d && status === 'completed') {
+          // still unsettled: no turn.complete of its subagent arrived before the call returned. The engine does not
+          // guarantee a foreground subagent's events reach the hooks first, so the call's own result is the honest
+          // fallback: completed when it is no error and carries text, failed when it is empty
+          d.confirmedBy = 'tool.result'
+          settle(id, resultText(r).trim() ? 'completed' : 'failed', await $.clock.now())
+        } else if (!isBackground) settle(id, status, await $.clock.now())
       } catch {}
       try {
         // a background agent returns at once but its subagent still runs: its lane stays until turn.complete. Background
@@ -906,9 +934,13 @@ export const register: Register = on => {
         const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview: cli.isReview, startedAt: await $.clock.now() }
         inFlight.set(id, entry)
         delegate = entry
-        // a review call: Codex with a review prompt, or a declared lane tagged review (invoke.py --lane <id>)
-        const isReview = cli.isReview || ((await lanesNow($))?.lanes ?? []).some(l => l.id === cli.lane && l.tags.includes('review'))
-        const d: DelegateRec = { id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview, startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
+        // a review call is the line's one command (commands piped into it allowed, nothing chained), not a question
+        // about the program itself (--help, --version): Codex with a review prompt, or a declared lane tagged review
+        // (invoke.py --lane <id>). A chain such as `true || codex exec "review"` hides whether it ran at all.
+        const one = oneCommand(e.command, true)
+        const single = one && !asksAboutItself(one.text) ? parseCli(one.typed) : null
+        const isReview = single?.lane === cli.lane && (single.isReview || ((await lanesNow($))?.lanes ?? []).some(l => l.id === cli.lane && l.tags.includes('review')))
+        const d: DelegateRec = { id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, ...(isReview ? { isReview } : {}), startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
         delegatesOfTurn.push(d)
         delegateOfCall.set(id, d)
         await refreshBand($, tracker, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
@@ -949,6 +981,9 @@ export const register: Register = on => {
       }
       if (isCli) {
         try {
+          // how much it printed: a review counts only from MIN_REVIEW_CHARS (gate.ts)
+          const d = delegateOfCall.get(id)
+          if (d) d.outputChars = resultText(r).length
           settle(id, statusOf(r), await $.clock.now())
           inFlight.delete(id)
           await refreshBand($, tracker)
@@ -1045,6 +1080,7 @@ export const register: Register = on => {
         const call = callOfAgent.get(e.agentId)
         // the subagent's own end decides its delegate's status: an answer completed it, anything else failed it
         const d = call !== undefined ? delegateOfCall.get(call) : undefined
+        if (d) d.confirmedBy = 'turn.complete'
         if (call !== undefined) settle(call, e.reason === 'answer' && !e.isAborted ? 'completed' : 'failed', await $.clock.now())
         // a background agent that outlived its main turn's line: one late line with the same turnId and its usage
         if (d?.isRecorded) {

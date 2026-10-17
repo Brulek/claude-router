@@ -91,7 +91,9 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 - The guard's edit cap is one source file per turn, judged relative to the session cwd (a worktree under
   `.claude/worktrees/` counts); a tool-level soft bound, Bash writes are not caught.
 - The gate asks for the role the hint names (judgement: `deep`; review: the review lane or `deep`); one send-back per
-  turn carries every reason.
+  turn carries every reason. A review call counts only as the line's one `codex exec` or review-lane command (a diff
+  piped into it allowed), with no error and at least 200 characters of output; a `deep` call counts when its
+  subagent ended without failure, or, with no such event before the call returned, on its own non-empty result.
 - A check counts only when the line is one simple command whose command word is the runner (one leading `cd x &&`
   and redirections allowed; a pipe, `;`, `&&` or `||` disqualifies it, since only the line's status is reported), it
   passed, and it started after the last completed source edit with no edit in flight or finishing while it ran. The

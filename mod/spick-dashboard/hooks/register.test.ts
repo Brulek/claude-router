@@ -68,6 +68,9 @@ test('a subagent turn.complete adds to its lane totals and leaves last alone', {
 })
 
 const DONE = { answer: 'ok', durationMs: 1, isAborted: false, reason: 'answer' as const, usage: USAGE }
+/** a tool result with a report in it: an Agent call's relay, or a review CLI's output past MIN_REVIEW_CHARS */
+const REPORT = 'Findings: the two error paths differ in how they surface a missing file. '.repeat(4)
+const ANSWERED = { result: {} as never, text: REPORT }
 // the kit's types carry no timers; the runner has them
 const timers = globalThis as unknown as { setTimeout: (f: () => void, ms: number) => void }
 const tick = () => new Promise<void>(r => timers.setTimeout(r, 1))
@@ -896,7 +899,7 @@ test('the gate stays quiet when something was delegated, on a short reply or a K
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
-  on('tool.call', async () => ({ result: {} as never }))
+  on('tool.call', async () => ANSWERED)
   await $.session.start(START)
   const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg: string) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
@@ -956,10 +959,14 @@ test('the gate asks for the role the hint names: deep that finished or still run
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
   on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: `ag-${e.tool_use_id}` }))
+  const holds = new Map<string, () => void>()
   on('tool.call', async ($, e) => {
     if (e.tool_use_id.startsWith('refused')) return { deny: 'not allowed' }
     if (e.tool_use_id.startsWith('failed')) return { isError: true as const, result: 'boom', text: 'boom' }
-    return { result: {} as never }
+    if (e.tool_use_id.startsWith('empty')) return { result: {} as never, text: '' }
+    if (e.tool_use_id.startsWith('hold')) await new Promise<void>(r => holds.set(e.tool_use_id, r))
+    if (e.tool_use_id.startsWith('short')) return { result: {} as never, text: 'Usage: codex exec [OPTIONS] [PROMPT]' }
+    return ANSWERED
   })
   await $.session.start(START)
   const turn = async (id: string, text = VERDICT) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
@@ -981,6 +988,18 @@ test('the gate asks for the role the hint names: deep that finished or still run
       await $.turn.complete({ turnId: 'sub', agentId: 'ag-fg1', ...DONE })
       await $.tool.call({ ...agentCall('fg1', 'deep') })
     }, false],
+    // no completion event before the call returned: the call's own result decides
+    ['a foreground deep with no completion event that returned a report', () => $.tool.call({ ...agentCall('fg2', 'deep') }), false],
+    ['a foreground deep with no completion event that returned nothing', () => $.tool.call({ ...agentCall('empty1', 'deep') }), true],
+    // the engine's order: the call starts, its subagent spawns and ends, then the call returns
+    ['a foreground deep whose subagent errored, though the call returned text', async () => {
+      const call = $.tool.call({ ...agentCall('hold3', 'deep') })
+      while (!holds.has('hold3')) await tick()
+      await spawn('hold3', false)
+      await $.turn.complete({ turnId: 'sub', agentId: 'ag-hold3', answer: '', durationMs: 1, isAborted: false, reason: 'error' })
+      holds.get('hold3')!()
+      await call
+    }, true],
   ]
   for (const [i, [name, act, gated]] of cases.entries()) {
     await turn(`t${i}`)
@@ -997,6 +1016,31 @@ test('the gate asks for the role the hint names: deep that finished or still run
   await turn('r2', 'review this diff please')
   await $.tool.call({ tool: 'Bash', tool_use_id: 's9', command: 'agy -p "check"' })
   expect(await stop()).toContain('hinted as a review (review) and no review lane call returned cleanly and no deep run completed')
+  await $.turn.complete({ turnId: 'r2', ...DONE })
+  // a review CLI call counts only as the line's one command, run for real, with real output
+  const reviews: [string, string, boolean][] = [
+    ['a single codex review', 'codex exec --sandbox read-only "Review this diff" < /dev/null', false],
+    ['the diff piped into it', 'git diff | codex exec --sandbox read-only "审查这个改动"', false],
+    ['a chain that may skip it', 'true || codex exec "review"', true],
+    ['a chain after it', 'codex exec "review the diff"; true', true],
+    ['its output piped away', 'codex exec "review the diff" | tail -1', true],
+    ['a question about the program', 'codex exec --help review', true],
+  ]
+  for (const [i, [name, command, gated]] of reviews.entries()) {
+    await turn(`v${i}`, 'review this diff please')
+    await $.tool.call({ tool: 'Bash', tool_use_id: `v${i}`, command })
+    const block = await stop()
+    expect([name, block === undefined ? 'quiet' : 'gated']).toEqual([name, gated ? 'gated' : 'quiet'])
+    await $.turn.complete({ turnId: `v${i}`, ...DONE })
+  }
+  // a review that printed a usage line only, and one that failed
+  await turn('w1', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'short1', command: 'codex exec "review the diff" < /dev/null' })
+  expect(await stop()).toContain('spick gate')
+  await $.turn.complete({ turnId: 'w1', ...DONE })
+  await turn('w2', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'failed9', command: 'codex exec "review the diff" < /dev/null' })
+  expect(await stop()).toContain('spick gate')
 })
 
 test('each gate firing and what became of it is in the turn record\'s gateEvents; design words are never gated', async ($, on) => {
@@ -1009,7 +1053,7 @@ test('each gate firing and what became of it is in the turn record\'s gateEvents
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
-  on('tool.call', async () => ({ result: {} as never }))
+  on('tool.call', async () => ANSWERED)
   await $.session.start(START)
   const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg: string, active = false) => (await $.classic.Stop({ stop_hook_active: active as false, last_assistant_message: msg })).block
@@ -1484,9 +1528,9 @@ test('a main turn writes one line to <state>/turns/<session>.jsonl: delegates wi
     context: { lastInput: 42_100 }, ms: 9000,
   })
   expect(line!.delegates).toEqual([
-    { id: 'tu1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', status: 'completed', ok: true, startedAt: new Date(1000).toISOString(), ms: 0,
+    { id: 'tu1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', status: 'completed', ok: true, confirmedBy: 'turn.complete', startedAt: new Date(1000).toISOString(), ms: 0,
       usage: { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0, costUsd: expect.any(Number) }, costUsd: expect.any(Number) },
-    { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
+    { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, outputChars: 0, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
   ])
   expect((line as { agentUsage: { input: number } }).agentUsage.input).toBe(1_000_000)
   expect((line as { checks: unknown[] }).checks).toEqual([{ command: 'python3 -m pytest -q', startedAt: new Date(1000).toISOString(), finishedAt: new Date(1000).toISOString(), exitOk: true, editsDuring: 0, afterLastEdit: true }])

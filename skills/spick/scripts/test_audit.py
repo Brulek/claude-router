@@ -124,6 +124,14 @@ class TestText(Base):
         self.assertEqual(cm.exception.code, 2)
 
 
+class TestReviewDone(unittest.TestCase):
+    def test_a_review_call_counts_from_200_characters_of_output(self):
+        t = lambda n: {"hint": ["review"], "delegates": [dict({"lane": "Codex", "isReview": True, "status": "completed"}, **({} if n is None else {"outputChars": n}))]}  # noqa: E731
+        self.assertEqual(audit._done(t(200)), "delegated")
+        self.assertEqual(audit._done(t(36)), "neither")
+        self.assertEqual(audit._done(t(None)), "delegated")
+
+
 class TestCovered(unittest.TestCase):
     def test_a_check_covers_only_when_it_passed_and_ran_after_the_last_completed_edit(self):
         c = lambda **k: {"checks": [dict({"command": "pytest", "editsDuring": 0}, **k)]}  # noqa: E731

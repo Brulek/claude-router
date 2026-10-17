@@ -3,7 +3,7 @@
 // two sessions ending turns together never share a file, and $.fs.write writes a whole file only, so a write reads
 // the session's file, appends and writes it back. A background agent that finishes after its main turn's line adds a
 // `late: true` line with the same turnId; readers merge by turnId and the delegate's id. Pure; register.tsx gathers.
-import type { DelegateStatus } from './gate'
+import type { ConfirmedBy, DelegateStatus } from './gate'
 
 export const SCHEMA_VERSION = 2
 
@@ -23,6 +23,10 @@ export type DelegateEntry = {
   status: DelegateStatus
   /** completed */
   ok: boolean
+  /** an Agent call: what confirmed its completion (gate.ts ConfirmedBy) */
+  confirmedBy?: ConfirmedBy
+  /** an outside CLI call: the characters it printed (a review counts from MIN_REVIEW_CHARS) */
+  outputChars?: number
   startedAt: string
   /** wall time while it ran; null while it still runs */
   ms: number | null

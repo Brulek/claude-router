@@ -80,7 +80,7 @@ export function parseCli(command: string): CliLane | null {
     if (effort) out.effort = effort
     if (hit.lane === 'Codex') {
       const prompts = [...text.matchAll(/"(\d+)"/g)].map(m => quoted[Number(m[1])] ?? '')
-      out.isReview = prompts.some(p => /\breview\b/i.test(p))
+      out.isReview = prompts.some(p => /\breview\b|审查|评审/i.test(p))
     }
     return out
   }

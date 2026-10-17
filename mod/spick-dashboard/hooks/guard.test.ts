@@ -1,5 +1,5 @@
 import { test, expect } from 'claude-code/testing'
-import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkCommand, checkOf, declaredChecks, escalationLine, editCapReason, isCheckCommand, uncheckedReason } from './guard'
+import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, asksAboutItself, checkCommand, checkOf, oneCommand, declaredChecks, escalationLine, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 
 test('the edit cap is one source file per turn', () => {
   expect(EDIT_CAP).toBe(1)
@@ -61,6 +61,16 @@ test('only one simple command counts: a pipe, a list or a second line hides the 
   ]) expect([c, isCheckCommand(c)]).toEqual([c, false])
   // the command keeps its redirections, the key leaves them out
   expect(checkOf('cd pkg && pytest tests/a.py > out.txt 2>&1')).toEqual({ command: 'pytest tests/a.py > out.txt 2>&1', key: 'pkg pytest tests/a.py' })
+})
+
+test('oneCommand: one command, or with feedIn the last of a plain pipeline; anything chained is several', () => {
+  expect(oneCommand('codex exec "review" < /dev/null')?.typed).toBe('codex exec "review" < /dev/null')
+  expect(oneCommand('git diff | codex exec "review"')).toBeNull()
+  expect(oneCommand('git diff | codex exec "review"', true)?.typed).toBe('codex exec "review"')
+  expect(oneCommand('git diff HEAD~1 | head -c 90000 | codex exec "a | b"', true)?.typed).toBe('codex exec "a | b"')
+  for (const c of ['true || codex exec "review"', 'codex exec "review" && echo', 'git diff | codex exec "r"; true', 'a | b || c']) expect([c, oneCommand(c, true)]).toEqual([c, null])
+  expect(asksAboutItself('codex exec --help review')).toBe(true)
+  expect(asksAboutItself('codex exec "0"')).toBe(false)
 })
 
 test('declared check commands: each regex string compiled on its own, a bad one reported and ignored', () => {
