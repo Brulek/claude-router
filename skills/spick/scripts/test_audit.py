@@ -124,6 +124,20 @@ class TestText(Base):
         self.assertEqual(cm.exception.code, 2)
 
 
+class TestDelegates(Base):
+    def test_nested_late_and_timed_out_delegates_are_counted(self):
+        sys.path.insert(0, HERE)
+        from test_spend import nested_turn_lines
+        os.makedirs(self.dir, exist_ok=True)
+        with open(os.path.join(self.dir, "nnnn.jsonl"), "w") as f:
+            f.write(nested_turn_lines())
+        f = self.figures()
+        self.assertEqual(f["delegates"], {"total": 3, "nested": 1, "late": 1, "timedOut": 0})
+        self.assertEqual(f["costByLane"]["coder"]["costUsd"], 1.25)
+        _, out, _ = self.run_main()
+        self.assertIn("delegates: 3; started inside a subagent 1, ended after their turn's line 1, timed out 0", out.splitlines())
+
+
 class TestReviewDone(unittest.TestCase):
     def test_a_review_call_counts_from_200_characters_of_output(self):
         t = lambda n: {"hint": ["review"], "delegates": [dict({"lane": "Codex", "isReview": True, "status": "completed"}, **({} if n is None else {"outputChars": n}))]}  # noqa: E731

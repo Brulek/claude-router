@@ -9,6 +9,8 @@ spend.py reads the same files for cost). This report answers the questions the r
   - gate firings and their outcomes; a `kept` after a `sent-back` is a false positive candidate;
   - turns that edited source with no passing check after the last edit;
   - escalations on a twice-failed check, and whether a coder or deep followed;
+  - delegates: how many, how many were started inside a subagent (nested), ended after their turn's line (late)
+    or still read timed-out;
   - cost by lane and by hint kind (outside CLI calls report no usage: counted, unpriced);
   - the longest sessions by context size (the main loop's largest prompt).
 
@@ -108,6 +110,14 @@ def figures(turns, days, now):
     edit_turns = [t for t in real if (t.get("edits") or {}).get("files")]
     unchecked = [{"sessionId": t.get("sessionId"), "turnId": t.get("turnId"), "files": t["edits"]["files"]} for t in edit_turns if not _covered(t)]
 
+    ds = [d for t in win for d in t.get("delegates") or [] if isinstance(d, dict)]
+    delegates = {
+        "total": len(ds),
+        "nested": sum(1 for d in ds if d.get("parent")),
+        "late": sum(1 for d in ds if d.get("late")),
+        "timedOut": sum(1 for d in ds if d.get("status") == "timed-out"),
+    }
+
     esc = [t["escalation"] for t in real if isinstance(t.get("escalation"), dict)]
     escalations = {"count": len(esc), "followed": sum(1 for e in esc if e.get("followed"))}
 
@@ -140,7 +150,7 @@ def figures(turns, days, now):
         "days": days, "turns": len(real), "sessions": len(sessions),
         "byHint": by_kind, "verdicts": verdicts, "gate": gate,
         "edits": {"turns": len(edit_turns), "unchecked": len(unchecked), "uncheckedTurns": unchecked},
-        "escalations": escalations,
+        "escalations": escalations, "delegates": delegates,
         "costByLane": by_lane, "costByKind": by_kind_cost,
         "longestSessions": longest,
     }
@@ -170,6 +180,8 @@ def text(f):
     out.append(f"edits: {e['turns']} turn{'s' if e['turns'] != 1 else ''} edited source; {e['unchecked']} with no passing check after the last edit")
     x = f["escalations"]
     out.append(f"escalations: {x['count']}; a coder or deep followed {x['followed']}")
+    d = f["delegates"]
+    out.append(f"delegates: {d['total']}; started inside a subagent {d['nested']}, ended after their turn's line {d['late']}, timed out {d['timedOut']}")
     out.append("cost by lane: " + ", ".join(f"{lane} {_money(b)}" for lane, b in sorted(f["costByLane"].items(), key=lambda kv: (-(kv[1]["costUsd"] or 0), kv[0]))))
     out.append("cost by hint kind: " + ", ".join(f"{kind} {_money(b)}" for kind, b in sorted(f["costByKind"].items(), key=lambda kv: (-(kv[1]["costUsd"] or 0), kv[0]))))
     out.append("longest sessions by context:")

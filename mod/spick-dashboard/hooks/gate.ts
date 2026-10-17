@@ -4,8 +4,11 @@
 // the gate on, a substantive turn, no Kept: line). The Hint findings come from hint.ts.
 import type { Hint, HintKind } from './hint'
 
-/** how a delegate (an Agent call or an outside CLI call) stands */
-export type DelegateStatus = 'completed' | 'running' | 'failed' | 'refused'
+/**
+ * how a delegate (an Agent call or an outside CLI call) stands; timed-out: no completion signal for 30 minutes (a
+ * later completion still updates it, and the record gets a late line)
+ */
+export type DelegateStatus = 'completed' | 'running' | 'failed' | 'refused' | 'timed-out'
 
 /**
  * What confirmed a completed Agent call: its subagent's turn.complete without failure, or, when the call returned before

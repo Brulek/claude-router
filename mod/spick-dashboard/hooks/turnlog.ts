@@ -17,6 +17,8 @@ export type DelegateEntry = {
   id: string
   /** a subagent type, or an outside CLI's lane (Gemini, Grok, Codex, a registry id) */
   lane: string
+  /** a delegate started from inside a subagent: that subagent's id (the delegate counts for the main turn) */
+  parent?: string
   model: string
   effort?: string
   isReview?: boolean

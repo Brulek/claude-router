@@ -1555,6 +1555,61 @@ test('a background agent that finishes after its main turn\'s line adds a late l
   expect(late.delegate).toMatchObject({ id: 'tu1', lane: 'deep', status: 'completed', ok: true, usage: { input: 1_000_000, output: 100_000 } })
 })
 
+test('a delegate started inside a subagent is recorded for the main turn, with its parent; its usage lands on it', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  const { lines } = recordWorld(on)
+  const tools = gatedTools(on)
+  on('agent.spawn', async ($, e) => ({ model: e.subagentType === 'deep' ? 'claude-opus-5-5' : 'claude-sonnet-5-5', agentId: `ag-${e.tool_use_id}` }))
+  const spawn = (id: string, type: string) => $.agent.spawn({ tool_use_id: id, prompt: 'p', description: 'd', subagentType: type, provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: false, fork: false })
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  const coder = $.tool.call({ ...agentCall('c1', 'coder'), effort: 'high' })
+  await tools.held('c1')
+  await spawn('c1', 'coder')
+  // inside the coder: a deep call and a Gemini call
+  const deep = $.tool.call({ ...agentCall('d1', 'deep'), agentId: 'ag-c1' })
+  await tools.held('d1')
+  await spawn('d1', 'deep')
+  await $.turn.complete({ turnId: 'sub-d', agentId: 'ag-d1', ...DONE, usage: { ...USAGE, model: 'claude-opus-5-5' } })
+  tools.release('d1')
+  await deep
+  const cli = $.tool.call({ tool: 'Bash', tool_use_id: 'g1', command: 'agy -p "look it up"', agentId: 'ag-c1' })
+  await tools.held('g1')
+  tools.release('g1')
+  await cli
+  await $.turn.complete({ turnId: 'sub-c', agentId: 'ag-c1', ...DONE })
+  tools.release('c1')
+  await coder
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  const ds = lines()[0]!.delegates
+  expect(ds.map(d => [d.id, d.lane, d.status, (d as { parent?: string }).parent ?? null])).toEqual([
+    ['c1', 'coder', 'completed', null], ['d1', 'deep', 'completed', 'ag-c1'], ['g1', 'Gemini', 'completed', 'ag-c1'],
+  ])
+  expect(ds[1]).toMatchObject({ confirmedBy: 'turn.complete', usage: { input: 1_000_000, output: 100_000 } })
+  expect((lines()[0] as { agentUsage: { input: number } }).agentUsage.input).toBe(2_000_000)
+})
+
+test('a delegate with no completion signal for 30 minutes reads timed-out; when it completes later a late line carries its usage', async ($, on) => {
+  const clock = mock.clock(on, { now: 1000 })
+  const { lines } = recordWorld(on)
+  on('tool.call', async () => ({ result: {} as never }))
+  on('agent.spawn', async () => ({ model: 'claude-sonnet-5-5', agentId: 'slow' }))
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'd', subagentType: 'coder', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: true, fork: false })
+  await $.tool.call({ ...agentCall('tu1', 'coder'), run_in_background: true })
+  await clock.advance(31 * 60_000)
+  // any tool call sweeps the stale ones
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'ls' })
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  expect(lines()[0]?.delegates[0]).toMatchObject({ id: 'tu1', lane: 'coder', status: 'timed-out', ok: false, usage: null })
+  // it finishes after all: the index entry was kept, so its usage lands on a late line of t1
+  await $.turn.complete({ turnId: 'sub', agentId: 'slow', ...DONE, usage: { ...USAGE, model: 'claude-sonnet-5-5' } })
+  const late = lines()[1] as Record<string, unknown> & { delegate: Record<string, unknown> }
+  expect(late).toMatchObject({ late: true, turnId: 't1' })
+  expect(late.delegate).toMatchObject({ id: 'tu1', status: 'completed', ok: true, confirmedBy: 'turn.complete', usage: { input: 1_000_000 } })
+})
+
 test('a failed check, then the second failure, are in the record with the escalation and whether a coder followed', async ($, on) => {
   mock.clock(on, { now: 1000 })
   const { lines } = recordWorld(on)

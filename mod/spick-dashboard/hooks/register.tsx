@@ -363,6 +363,8 @@ type DelegateRec = {
   id: string; lane: string; model: string; effort?: string; isReview?: boolean; startedAt: number; endedAt?: number; status: DelegateStatus
   /** the main turn that started it, and whether that turn's line is written (a later end then adds a late line) */
   turnId: string; isRecorded?: boolean
+  /** started from inside a subagent: that subagent's id */
+  parent?: string
   /** a subagent's usage, summed over its turn.complete events; null for an outside CLI and until it reports */
   usage: UsageEntry | null
   /** an Agent call: what confirmed it completed */
@@ -373,7 +375,7 @@ type DelegateRec = {
 
 /** a delegate as the turn record lists it */
 const delegateEntry = (d: DelegateRec): DelegateEntry => ({
-  id: d.id, lane: d.lane, model: d.model, ...(d.effort ? { effort: d.effort } : {}), ...(d.isReview ? { isReview: true } : {}),
+  id: d.id, lane: d.lane, ...(d.parent ? { parent: d.parent } : {}), model: d.model, ...(d.effort ? { effort: d.effort } : {}), ...(d.isReview ? { isReview: true } : {}),
   status: d.status, ok: d.status === 'completed', ...(d.confirmedBy ? { confirmedBy: d.confirmedBy } : {}),
   ...(d.outputChars !== undefined ? { outputChars: d.outputChars } : {}), startedAt: new Date(d.startedAt).toISOString(),
   ms: d.endedAt === undefined ? null : Math.max(0, d.endedAt - d.startedAt), usage: d.usage, costUsd: d.usage?.costUsd ?? null,
@@ -409,11 +411,18 @@ function resultText(r: { text?: string; result?: unknown } | undefined): string 
   return ''
 }
 
+/** a delegate whose main turn's line is already written reports its end in one late line with that turnId */
+async function writeLate($: EngineInterface, w: TurnWriter, d: DelegateRec | undefined): Promise<void> {
+  if (!d?.isRecorded) return
+  const at = await $.clock.now()
+  await writeTurnLines($, w, [lineText(lateLine({ at, sessionId: w.sessionId, turnId: d.turnId, delegate: delegateEntry(d) }))]).catch(() => undefined)
+}
+
 /** how a call that returned stands: refused, failed (an error result) or completed */
 const statusOf = (r: { deny?: string; isError?: true } | undefined): DelegateStatus => (r === undefined ? 'failed' : r.deny ? 'refused' : r.isError ? 'failed' : 'completed')
 
-/** `onTimeout` hears each call that timed out, so its delegate record reads failed */
-type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean; onTimeout: (id: string) => void }
+/** `onTimeout` hears each call that timed out and when, so its delegate record reads timed-out */
+type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean; onTimeout: (id: string, at: number) => void }
 
 /** put the lane that works now on the band and publish the Running list */
 async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecord) => Partial<TurnRecord>): Promise<void> {
@@ -422,14 +431,14 @@ async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecor
 }
 
 /** Move calls with no completion signal for STALE_MS out of flight into `timedOut`. True when any moved. */
-async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>, onTimeout: (id: string) => void = () => {}): Promise<boolean> {
+async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>, onTimeout: (id: string, at: number) => void = () => {}): Promise<boolean> {
   const now = await $.clock.now()
   let moved = false
   for (const [id, l] of [...inFlight]) {
     if (l.startedAt === undefined || now - l.startedAt < STALE_MS) continue
     inFlight.delete(id)
     timedOut.set(id, { id, lane: l.lane, model: l.model, effort: l.effort, startedAt: l.startedAt, timedOutAt: now })
-    onTimeout(id)
+    onTimeout(id, now)
     moved = true
   }
   return moved
@@ -605,15 +614,42 @@ export const register: Register = on => {
   let delegate: Lane | null = null
   /** every delegate of the main turn and how it stands; the gate asks them whether the required role completed */
   let delegatesOfTurn: DelegateRec[] = []
-  /** tool_use_id -> its record, until it settles (a background agent's settles at its own turn.complete) */
+  /**
+   * tool_use_id -> its record, until it settles (a background agent's settles at its own turn.complete). A call that
+   * timed out stays here, marked timed-out, so a completion that comes after all still lands on it.
+   */
   const delegateOfCall = new Map<string, DelegateRec>()
-  const settle = (id: string, status: DelegateStatus, at: number): void => {
+  /** the main turns whose line is written: a delegate attributed to one of them reports its end in a late line */
+  const recordedTurns = new Set<string>()
+  const settle = (id: string, status: DelegateStatus, at: number): DelegateRec | undefined => {
     const d = delegateOfCall.get(id)
-    if (!d) return
-    // a refusal or failure the call reported stands; completion is never taken back
-    if (d.status === 'running') d.status = status
+    if (!d) return undefined
+    // a refusal or failure the call reported stands; completion is never taken back; a timeout is (it ended after all)
+    if (d.status === 'running' || d.status === 'timed-out') d.status = status
     d.endedAt = at
     delegateOfCall.delete(id)
+    return d
+  }
+  /** no completion signal for 30 minutes: timed-out, kept for a later completion */
+  const timeOut = (id: string, at: number): void => {
+    const d = delegateOfCall.get(id)
+    if (d?.status !== 'running') return
+    d.status = 'timed-out'
+    d.endedAt = at
+  }
+  /**
+   * A new delegate's record, attributed to a main turn: the current one, or for a call made inside a subagent (`agentId`)
+   * the turn that started that subagent (it may outlive its turn). One attributed to a turn already written ends in a
+   * late line; the others join the turn's list, the gate's included.
+   */
+  const addDelegate = (d: Omit<DelegateRec, 'turnId' | 'parent' | 'isRecorded'>, agentId: string | undefined): DelegateRec => {
+    const parentCall = agentId ? callOfAgent.get(agentId) : undefined
+    const parentRec = parentCall !== undefined ? delegateOfCall.get(parentCall) : undefined
+    const turnId = parentRec?.turnId ?? mainTurnId
+    const rec: DelegateRec = { ...d, turnId, ...(agentId ? { parent: agentId } : {}), ...(recordedTurns.has(turnId) ? { isRecorded: true } : {}) }
+    if (!rec.isRecorded) delegatesOfTurn.push(rec)
+    delegateOfCall.set(d.id, rec)
+    return rec
   }
   let agentsThisTurn = 0
   /** the Hint line's findings for the prompt just submitted, then for the turn it started (a delivery carries none) */
@@ -666,8 +702,8 @@ export const register: Register = on => {
   }
   /** calls that timed out (no completion signal for 30 minutes), listed in the pane until the next prompt drops them */
   const timedOut = new Map<string, RunningAgent>()
-  // a call with no completion signal for 30 minutes is a failed delegate
-  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen, onTimeout: id => settle(id, 'failed', Date.now()) }
+  // a call with no completion signal for 30 minutes is a timed-out delegate (never enough for the gate)
+  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen, onTimeout: timeOut }
 
   on('session.start', async ($, e, next) => {
     try {
@@ -852,11 +888,8 @@ export const register: Register = on => {
       const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn, startedAt: await $.clock.now() }
       inFlight.set(id, entry)
       delegate = entry
-      if (!e.agentId) {
-        const d: DelegateRec = { id, lane: entry.lane, model: e.model ?? '', effort: e.effort, startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
-        delegatesOfTurn.push(d)
-        delegateOfCall.set(id, d)
-      }
+      // a subagent's own Agent call is recorded too, under the main turn that started it
+      addDelegate({ id, lane: entry.lane, model: e.model ?? '', effort: e.effort, startedAt: entry.startedAt!, status: 'running', usage: null }, e.agentId)
       await refreshBand($, tracker, () => ({ agents: agentsThisTurn }))
     } catch {}
     // finally: an interrupted call must not leave the subagent's lane on the band
@@ -876,8 +909,8 @@ export const register: Register = on => {
           // guarantee a foreground subagent's events reach the hooks first, so the call's own result is the honest
           // fallback: completed when it is no error and carries text, failed when it is empty
           d.confirmedBy = 'tool.result'
-          settle(id, resultText(r).trim() ? 'completed' : 'failed', await $.clock.now())
-        } else if (!isBackground) settle(id, status, await $.clock.now())
+          await writeLate($, turnWriter, settle(id, resultText(r).trim() ? 'completed' : 'failed', await $.clock.now()))
+        } else if (!isBackground) await writeLate($, turnWriter, settle(id, status, await $.clock.now()))
       } catch {}
       try {
         // a background agent returns at once but its subagent still runs: its lane stays until turn.complete. Background
@@ -901,7 +934,7 @@ export const register: Register = on => {
       }
       if (e.background && !r.deny) backgroundCalls.add(e.tool_use_id)
       const d = delegateOfCall.get(e.tool_use_id)
-      if (d && r.deny) settle(e.tool_use_id, 'refused', await $.clock.now())
+      if (d && r.deny) await writeLate($, turnWriter, settle(e.tool_use_id, 'refused', await $.clock.now()))
       else if (d) { d.lane = e.subagentType; if (r.model) d.model = r.model }
       // the resolved type and model replace what the Agent call named (it may have named neither)
       const entry = inFlight.get(e.tool_use_id)
@@ -927,7 +960,8 @@ export const register: Register = on => {
     } catch {}
     const id = e.tool_use_id
     let isCli = false
-    if (!e.agentId) try {
+    // a subagent's CLI call too (a nested delegate, recorded under the main turn that started the subagent)
+    try {
       const cli = parseCli(e.command)
       if (cli) {
         isCli = true
@@ -940,9 +974,7 @@ export const register: Register = on => {
         const one = oneCommand(e.command, true)
         const single = one && !asksAboutItself(one.text) ? parseCli(one.typed) : null
         const isReview = single?.lane === cli.lane && (single.isReview || ((await lanesNow($))?.lanes ?? []).some(l => l.id === cli.lane && l.tags.includes('review')))
-        const d: DelegateRec = { id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, ...(isReview ? { isReview } : {}), startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
-        delegatesOfTurn.push(d)
-        delegateOfCall.set(id, d)
+        addDelegate({ id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, ...(isReview ? { isReview } : {}), startedAt: entry.startedAt!, status: 'running', usage: null }, e.agentId)
         await refreshBand($, tracker, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
         // outside CLIs report no usage: count the call, leave it unpriced
         await update($, totals, t => {
@@ -984,7 +1016,7 @@ export const register: Register = on => {
           // how much it printed: a review counts only from MIN_REVIEW_CHARS (gate.ts)
           const d = delegateOfCall.get(id)
           if (d) d.outputChars = resultText(r).length
-          settle(id, statusOf(r), await $.clock.now())
+          await writeLate($, turnWriter, settle(id, statusOf(r), await $.clock.now()))
           inFlight.delete(id)
           await refreshBand($, tracker)
         } catch {}
@@ -1081,12 +1113,9 @@ export const register: Register = on => {
         // the subagent's own end decides its delegate's status: an answer completed it, anything else failed it
         const d = call !== undefined ? delegateOfCall.get(call) : undefined
         if (d) d.confirmedBy = 'turn.complete'
-        if (call !== undefined) settle(call, e.reason === 'answer' && !e.isAborted ? 'completed' : 'failed', await $.clock.now())
-        // a background agent that outlived its main turn's line: one late line with the same turnId and its usage
-        if (d?.isRecorded) {
-          const at = await $.clock.now()
-          await writeTurnLines($, turnWriter, [lineText(lateLine({ at, sessionId: turnWriter.sessionId, turnId: d.turnId, delegate: delegateEntry(d) }))]).catch(() => undefined)
-        }
+        // an agent that outlived its main turn's line (in the background, or timed out first): one late line with the
+        // same turnId and its usage
+        if (call !== undefined) await writeLate($, turnWriter, settle(call, e.reason === 'answer' && !e.isAborted ? 'completed' : 'failed', await $.clock.now()))
         callOfAgent.delete(e.agentId)
         // a background agent's Agent call returned long ago; its lane leaves the band now
         if (call !== undefined && inFlight.delete(call)) {
@@ -1114,6 +1143,7 @@ export const register: Register = on => {
             usage: usage ? usageEntry(usage, estimateCost(usage.model, usage)) : null, lastInput: mainLastInput, ms: e.durationMs,
           })
           for (const d of delegatesOfTurn) d.isRecorded = true
+          recordedTurns.add(e.turnId)
           await writeTurnLines($, turnWriter, [lineText(line)]).catch(() => undefined)
         } catch {}
         const c = await read($, current)

@@ -129,7 +129,7 @@ flowchart TD
 
 **默认 effort。** 派 `coder`、`planner`、`deep` 时若没写 effort，按 `<config>/spick.json` 里 `efforts` 的默认值执行（未设置时 coder medium、planner high、deep medium）。
 
-**每轮记录。** 每个主会话轮次在 `<config>/spick/turns/<sessionId>.jsonl` 里记一行 JSON（`<config>` 为 `CLAUDE_CONFIG_DIR`，未设置时为 `~/.claude`）：Hint、实际由谁执行（每个委派的状态、模型、effort、用量与费用）、拦截的每次触发及其后续、`Kept:` 行、改过的文件、每次检查及其退出状态、升级提示、主循环用量与最近一次请求大小。后台代理在该轮结束后才完成时，会为同一轮追加一行 `late` 记录。`/spick spend` 汇总最近七天的费用（`scripts/spend.py`，也读取 0.x 版模组的按会话文件）；`/spick audit` 运行 `scripts/audit.py`：按 Hint 类别统计轮次与实际执行者、结论类请求的去向、拦截结果与疑似误判、改了源码却没有通过检查的轮次、升级提示、按通道和按类别的费用，以及上下文最大的几个会话。
+**每轮记录。** 每个主会话轮次在 `<config>/spick/turns/<sessionId>.jsonl` 里记一行 JSON（`<config>` 为 `CLAUDE_CONFIG_DIR`，未设置时为 `~/.claude`）：Hint、实际由谁执行（每个委派的状态、模型、effort、用量与费用；子代理自己发起的委派也会列出，`parent` 指明是哪个子代理）、拦截的每次触发及其后续、`Kept:` 行、改过的文件、每次检查及其退出状态、升级提示、主循环用量与最近一次请求大小。委派在该轮记录写入之后才结束时（后台代理，或 30 分钟没有完成信号、已记为 `timed-out` 的调用），会为同一轮追加一行带用量的 `late` 记录。`/spick spend` 汇总最近七天的费用（`scripts/spend.py`，也读取 0.x 版模组的按会话文件）；`/spick audit` 运行 `scripts/audit.py`：按 Hint 类别统计轮次与实际执行者、结论类请求的去向、拦截结果与疑似误判、改了源码却没有通过检查的轮次、升级提示、嵌套/迟到/超时的委派数、按通道和按类别的费用，以及上下文最大的几个会话。
 
 ## 安装
 

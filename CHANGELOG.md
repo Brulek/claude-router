@@ -87,7 +87,9 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 ### Dashboard mod
 
 - The turn record: one JSON line per main turn in `~/.claude/spick/turns/<sessionId>.jsonl` (who ran, usage, gate,
-  checks) replaces the spend files and the gate log; `/spick spend` and the new `/spick audit` read it.
+  checks) replaces the spend files and the gate log; `/spick spend` and the new `/spick audit` read it. Delegates a
+  subagent started are recorded with `parent`; a call silent for 30 minutes reads `timed-out` and, if it ends after
+  all, adds a `late` line with its usage.
 - The guard's edit cap is one source file per turn, judged relative to the session cwd (a worktree under
   `.claude/worktrees/` counts); a tool-level soft bound, Bash writes are not caught.
 - The gate asks for the role the hint names (judgement: `deep`; review: the review lane or `deep`); one send-back per

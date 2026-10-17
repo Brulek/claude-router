@@ -3,8 +3,9 @@
 
 The mod (mod/spick-dashboard, hooks/turnlog.ts) keeps one turn record per session at
 <config>/spick/turns/<sessionId>.jsonl (<config> is CLAUDE_CONFIG_DIR, else ~/.claude): one JSON line per main turn
-with the main loop's usage and every delegate (subagents with usage, outside CLI calls without), and a `late: true`
-line when a background agent finished after its turn's line. Each becomes a row here: the main loop's usage (a turn
+with the main loop's usage and every delegate (subagents with usage, outside CLI calls without; a delegate started
+inside a subagent carries `parent` and counts like any other), and a `late: true` line when a delegate ended after its
+turn's line (a background agent, or one that timed out and finished after all). Each becomes a row here: the main loop's usage (a turn
 with none, such as an interrupt, has no row) and one per delegate (an outside CLI call: tokens 0, costUsd null).
 Sessions from before the turn record (mod 0.x) wrote <config>/spick-spend/<sessionId>.json, {"sessionId", "cwd",
 "startedAt", "rows": [...]}; those are read too, also where setup moved them (<config>/spick/spick-spend/). Without
@@ -56,7 +57,7 @@ def _num(v):
 
 def load_turns(directory):
     """(turns, skipped): every main turn of every *.jsonl file, late lines merged into their turn by turnId and
-    delegate id (the late copy wins); lines that are not JSON objects are counted. A late line whose turn is missing
+    delegate id (the late copy wins, marked `late`); lines that are not JSON objects are counted. A late line whose turn is missing
     becomes a turn of its own with only that delegate."""
     turns, late, skipped = {}, [], 0
     for path in sorted(glob.glob(os.path.join(directory, "*.jsonl"))):
@@ -90,7 +91,7 @@ def load_turns(directory):
         t = turns.get(key)
         if t is None:
             t = turns[key] = {"sessionId": key[0], "turnId": key[1], "at": line.get("at"), "delegates": [], "lateOnly": True}
-        t["delegates"] = [x for x in t["delegates"] if x.get("id") != d.get("id")] + [d]
+        t["delegates"] = [x for x in t["delegates"] if x.get("id") != d.get("id")] + [dict(d, late=True)]
     return list(turns.values()), skipped
 
 
