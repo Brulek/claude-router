@@ -1,8 +1,49 @@
+import argparse
+import contextlib
+import io
 import json
+import os
+import stat
+import tempfile
+import threading
 import unittest
+from pathlib import Path
 
 import common
+import grade
 import run
+
+
+def make_stub(d, body, code=0):
+    """A stand-in `claude` executable: prints `body` (a dict, or a raw string) and exits with `code`."""
+    d = Path(d)
+    (d / "out.json").write_text(body if isinstance(body, str) else json.dumps(body), encoding="utf-8")
+    stub = d / "claude-stub"
+    stub.write_text(f'#!/bin/sh\ncat "$(dirname "$0")/out.json"\nexit {code}\n', encoding="utf-8")
+    stub.chmod(stub.stat().st_mode | stat.S_IEXEC)
+    return str(stub)
+
+
+def good_result(text="星期二", **kw):
+    r = {"type": "result", "is_error": False, "result": text, "session_id": "s1", "total_cost_usd": 0.01,
+         "num_turns": 1, "modelUsage": {"claude-haiku-5-5": {}}, "subagent_stats": {"spawned": 0, "by_type": {}}}
+    r.update(kw)
+    return r
+
+
+def one_run(tmp, stub, arm="haiku-bare", timeout=30):
+    """do_run on T2 with the stub, then grade_run on what it wrote; returns the grade."""
+    out = Path(tmp) / "out"
+    (out / "_arms").mkdir(parents=True, exist_ok=True)
+    (out / "_arms" / f"{arm}.json").write_text("{}")
+    (out / "_arms" / "agents.json").write_text("{}")
+    args = argparse.Namespace(out=str(out), force=True, claude_bin=stub, timeout=timeout)
+    with contextlib.redirect_stdout(io.StringIO()):
+        run.do_run((arm, "T2", 1), args, dict(os.environ), out / "_arms" / "agents.json", out / "_arms",
+                   threading.Lock())
+    rdir = out / arm / "T2" / "run-1"
+    rec = json.loads((rdir / "result.json").read_text(encoding="utf-8"))
+    return grade.grade_run(rdir, rec, common.load_tasks()["T2"])
 
 
 class Agents(unittest.TestCase):
@@ -58,6 +99,45 @@ class Arms(unittest.TestCase):
     def test_allowed_tools_flag_is_last(self):
         c = self.cmd("opus-free")
         self.assertTrue(set(c[c.index("--allowedTools") + 1:]) <= set(run.ALLOW + ["Agent"]))
+
+
+class ExitStatus(unittest.TestCase):
+    """A run that crashed, errored or timed out is never a pass, whatever the answer text says."""
+
+    def test_clean_run_with_the_right_answer_passes(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = one_run(d, make_stub(d, good_result()))
+        self.assertTrue(g["pass"])
+        self.assertFalse(g["error"])
+        self.assertIsNone(g["error_reason"])
+
+    def test_nonzero_exit_with_correct_answer_is_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = one_run(d, make_stub(d, good_result(), code=1))
+        self.assertFalse(g["pass"])
+        self.assertTrue(g["error"])
+        self.assertIn("exit_code=1", g["error_reason"])
+
+    def test_is_error_result_with_correct_answer_is_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = one_run(d, make_stub(d, good_result(is_error=True)))
+        self.assertFalse(g["pass"])
+        self.assertEqual(g["error_reason"], "is_error")
+
+    def test_timeout_is_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            stub = Path(d) / "slow"
+            stub.write_text("#!/bin/sh\nsleep 5\n")
+            stub.chmod(0o755)
+            g = one_run(d, str(stub), timeout=1)
+        self.assertFalse(g["pass"])
+        self.assertIn("timeout", g["error_reason"])
+
+    def test_unparsable_output_is_an_error(self):
+        with tempfile.TemporaryDirectory() as d:
+            g = one_run(d, make_stub(d, "not json"))
+        self.assertFalse(g["pass"])
+        self.assertEqual(g["error_reason"], "no result json")
 
 
 if __name__ == "__main__":

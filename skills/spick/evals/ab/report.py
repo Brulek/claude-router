@@ -145,7 +145,7 @@ def render(out_dir, today):
     if failed:
         L += ["## Failed runs", ""]
         for rid, g in sorted(failed):
-            why = "error/timeout" if g["error"] else ", ".join(
+            why = f"error ({g.get('error_reason') or 'unknown'})" if g["error"] else ", ".join(
                 f"{k}={g[k]}" for k in ("visible_pass", "hidden_pass", "tests_untouched", "chars", "forbidden_found",
                                         "judge_overall") if k in g) or "check failed"
             L.append(f"- `{rid}`: {why}")

@@ -187,13 +187,30 @@ def explore_ran(res):
     return ran, any("haiku" in m for m in (res.get("modelUsage") or {}))
 
 
+def error_reason(meta, res):
+    """Why a run counts as an error, or None. A non-zero exit, an is_error result, a timeout or an unparsable result is
+    never a pass, however right the answer text looks (a crashed run can still have printed a correct answer)."""
+    reasons = []
+    if meta.get("timed_out"):
+        reasons.append("timeout")
+    code = meta.get("exit_code")  # None on timeout, absent in results written before the field existed
+    if code not in (0, None):
+        reasons.append(f"exit_code={code}")
+    if res.get("is_error"):
+        reasons.append("is_error")
+    if not res:
+        reasons.append("no result json")
+    return ", ".join(reasons) or None
+
+
 def run_metrics(rec, task):
     meta, res = rec["meta"], rec.get("result") or {}
+    reason = error_reason(meta, res)
     models = sorted((res.get("modelUsage") or {}).keys())
     answer = res.get("result") or ""
     return {
         "arm": meta["arm"], "task": meta["task"], "run": meta["run"],
-        "error": bool(res.get("is_error")) or not res or meta.get("timed_out", False),
+        "error": reason is not None, "error_reason": reason,
         "timed_out": meta.get("timed_out", False),
         "cost": res.get("total_cost_usd"), "wall": meta.get("wall_seconds"),
         "turns": res.get("num_turns"), "models": models,
