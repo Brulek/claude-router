@@ -25,6 +25,8 @@ export type TurnRecord = {
   /** attention cause, shown in color on the band and in the pane's note column */
   note?: Note
   costUsd?: number | null
+  /** the main loop's last prompt size in tokens (input, cache read and cache write of its latest step) */
+  contextTokens?: number
 }
 
 /** a delegate (Agent or outside CLI call) the pane's Running section lists */

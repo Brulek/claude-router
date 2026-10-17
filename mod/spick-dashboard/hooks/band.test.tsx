@@ -515,6 +515,45 @@ for (const surface of ['terminal', 'desktop'] as const) {
 const paneTexts = async ($: Engine) => paneLinesAt($, 80)
 const hasRunning = (lines: string[]) => lines.some(l => l.startsWith('Running'))
 
+test('the band shows the main loop\'s last prompt size; a Haiku session past 80k gets the warning, active and idle; Sonnet never', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  let promptSize = 0
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('turn.step', async function* ($, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const,
+      usage: { model: e.model, input_tokens: 200, output_tokens: 50, cache_read_input_tokens: promptSize - 1200, cache_creation_input_tokens: 1000 } }
+  })
+  const W = { ...BAND, bodyColumns: 120 }
+  const band = async () => {
+    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface: 'terminal', component: 'AbovePrompt', props: W })
+    const line = await bandOf(ui, W.bodyColumns)
+    await ui.unmount()
+    return line
+  }
+  const step = async (id: string, model: string, size: number) => {
+    promptSize = size
+    for await (const _ of $.turn.step({ turnId: id, index: 0, model, effort: 'medium', messageCount: 1 })) { /* drain */ }
+  }
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await step('t1', 'claude-haiku-5-5', 42_000)
+  expect(await band()).toContain('ctx 42k')
+  expect(await band()).not.toContain('Haiku bills')
+  await step('t1', 'claude-haiku-5-5', 85_000)
+  const hot = await band()
+  expect(hot).toContain('ctx 85k')
+  expect(hot).toMatch(/context 85k: Haiku bills 5x above 100k; \/clear or delegate$/)
+  // idle after the turn: the warning stays where the user decides on /clear
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 1, isAborted: false, reason: 'answer', usage: USAGE })
+  expect(await band()).toContain('context 85k: Haiku bills 5x above 100k')
+  // the same size on Sonnet: the size, no warning
+  await $.turn.start({ text: 'go', turnId: 't2' })
+  await step('t2', 'claude-sonnet-5-5', 150_000)
+  const sonnet = await band()
+  expect(sonnet).toContain('ctx 150k')
+  expect(sonnet).not.toContain('Haiku bills')
+})
+
 test('12 concurrent coders: the band reads coder ×12 with the oldest one\'s time; the pane lists 5 rows and "and 7 more"', async ($, on) => {
   const clock = agentHooks(on)
   await spawnCoders($, clock, 12)

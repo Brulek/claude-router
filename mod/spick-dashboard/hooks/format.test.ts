@@ -3,7 +3,7 @@ import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
   fmtDuration, fmtAge, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE, runningLines,
   tagLine, wrapWords, usageLines, quotaCells, recentLines, clockOf, LABEL_W, HOTKEY_W, NARROW_BELOW,
-  colWidths, usageRows, recentRows, runningRows, quotaWindows,
+  colWidths, usageRows, recentRows, runningRows, quotaWindows, fmtTokens, promptTokens, contextNote, HAIKU_WARN_AT,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -481,4 +481,32 @@ test('recentLines aligns time, lane, model, effort and duration; narrow drops th
   ])
   // a turn without an effort leaves the column empty, not "undefined"
   expect(recentLines([{ ...rows[0]!, effort: undefined }], false)[0]).not.toContain('undefined')
+})
+
+test('fmtTokens reads 950, 12k, 85k, 1.2M', () => {
+  expect(fmtTokens(950)).toBe('950')
+  expect(fmtTokens(12_400)).toBe('12k')
+  expect(fmtTokens(84_600)).toBe('85k')
+  expect(fmtTokens(1_234_567)).toBe('1.2M')
+})
+
+test('promptTokens counts fresh input, cache reads and cache writes', () => {
+  expect(promptTokens({ input_tokens: 1200, output_tokens: 900, cache_read_input_tokens: 80_000, cache_creation_input_tokens: 3000 })).toBe(84_200)
+})
+
+test('contextNote warns a Haiku session above 80k only, in the spec\'s words', () => {
+  expect(HAIKU_WARN_AT).toBe(80_000)
+  expect(contextNote(85_000, 'claude-haiku-5-5')).toEqual({ kind: 'warning', text: 'context 85k: Haiku bills 5x above 100k; /clear or delegate' })
+  expect(contextNote(80_000, 'claude-haiku-5-5')).toBeNull()
+  expect(contextNote(150_000, 'claude-sonnet-5-5')).toBeNull()
+  expect(contextNote(undefined, 'claude-haiku-5-5')).toBeNull()
+})
+
+test('the band shows ctx from 70 columns and gives it up first when space runs short', () => {
+  const v = { lane: MAIN_LANE, model: 'Haiku 5.5', agents: 0, isIdle: false, durationMs: 12000, contextTokens: 42_000 }
+  expect(L(bandSegments(v, 100))).toBe('SPICK   Working · Haiku 5.5 · 12s · ctx 42k')
+  expect(L(bandSegments(v, 60))).not.toContain('ctx')
+  expect(L(bandSegments({ ...v, isIdle: true }, 100))).toContain('ctx 42k')
+  // squeezed: ctx goes before the elapsed time
+  expect(L(bandSegments(v, 72, 30))).toBe('SPICK   Working · Haiku 5.5 · 12s')
 })

@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
-import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
+import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
 import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkOf, declaredChecks, editCapReason, escalationLine, uncheckedReason } from './guard'
 import { appendGateLog, gateLogPath } from './gatelog'
@@ -564,6 +564,8 @@ export const register: Register = on => {
   const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
   let mainModel = ''
   let mainEffort: string | undefined
+  /** the main loop's last prompt size in tokens, from its latest step's usage; undefined until one reported it */
+  let mainLastInput: number | undefined
   /** the last elapsed-time stamp written to `current` */
   let lastTickMs = 0
   /** when the mod-active marker was last written */
@@ -712,7 +714,7 @@ export const register: Register = on => {
       // a mod loaded mid-session saw no session.start: ask for the cwd once
       if (!guardTurn.cwd) guardTurn.cwd = await $.session.cwd().catch(() => '')
       lastTickMs = startedAt
-      await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0 }))
+      await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0, contextTokens: mainLastInput }))
       await sweep($, tracker)
       await refreshBand($, tracker)
       // the TTL gates it: at most one read per ten minutes, so the band's quota meters stay current
@@ -736,7 +738,15 @@ export const register: Register = on => {
       yield chunk
       try { lastTickMs = Math.max(lastTickMs, await tick($, lastTickMs)) } catch {}
     }
-    return await stream.result
+    const result = await stream.result
+    // the main loop's prompt size, from the step's own usage: the band shows it, and warns a Haiku session past 80k
+    try {
+      if (!e.agentId && result.usage) {
+        mainLastInput = promptTokens(result.usage)
+        await setCurrent($, { contextTokens: mainLastInput })
+      }
+    } catch {}
+    return result
   })
 
   // any tool call, from any loop, ticks the elapsed time; the main session's own calls are counted for the gate
@@ -1069,12 +1079,14 @@ export const register: Register = on => {
     if (e.props.hasSurvey || (await read($, hidden))) return next(e)
     const c = await read($, current)
     const l = await read($, last)
+    // a Haiku session past 80k gets the context warning where no other cause holds the right group
+    const ctxNote = contextNote(c ? c.contextTokens : l?.contextTokens, mainModel) ?? undefined
     const view: BandView | null = c
       ? { lane: c.lane, model: c.model, agents: c.agents, agentIndex: c.agentIndex, isReview: c.isReview, isIdle: false, count: c.laneCount,
           // several of one lane: the time is the oldest of them; one agent or none: the turn's, as before
-          durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - (c.laneCount !== undefined && c.laneCount > 1 && c.laneSince !== undefined ? c.laneSince : c.startedAt)), note: c.note, mainModel: mainModel ? modelName(mainModel) : undefined }
+          durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - (c.laneCount !== undefined && c.laneCount > 1 && c.laneSince !== undefined ? c.laneSince : c.startedAt)), note: c.note ?? ctxNote, mainModel: mainModel ? modelName(mainModel) : undefined, contextTokens: c.contextTokens }
       : l
-        ? { lane: l.lane, model: l.model, agents: 0, isIdle: true }
+        ? { lane: l.lane, model: l.model, agents: 0, isIdle: true, note: ctxNote, contextTokens: l.contextTokens }
         : null
     // routing off is shown once the model is known (under auto it depends on it)
     const ctl = await read($, controls)
