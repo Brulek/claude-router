@@ -125,7 +125,7 @@
     "ideal_tier": "sonnet",
     "template": "T8/template",
     "grader": "hidden_tests",
-    "prompt": "shelf 包（models.py、store.py、report.py）需要加上“标签”功能：1) Item 增加可选字段 tags（字符串列表，默认空列表，各实例互不共享）；2) Store.add_item 增加可选参数 tags=None，保存的是传入列表的副本；3) Store 新增 items_with_tag(tag)，返回带有该标签（精确匹配，区分大小写）的条目，按名称升序；4) report 中带标签的条目在行尾追加 ' [标签1,标签2]'（标签按字母升序、逗号分隔、无空格），没有标签的条目格式不变。tests/test_shelf.py 已有的测试要通过，不要修改 tests 目录里的任何文件。完成后用一句话说明你改了哪几个文件。",
+    "prompt": "shelf 包（models.py、store.py、report.py）需要加上“标签”功能：1) Item 增加可选字段 tags（字符串列表，默认空列表，各实例互不共享）；2) Store.add_item 增加可选参数 tags=None，保存的是传入列表的副本；3) Store 新增 items_with_tag(tag)，返回带有该标签（精确匹配，区分大小写）的条目，按名称升序；4) report 中带标签的条目在行尾追加 ' [标签1,标签2]'（标签按字母升序、逗号分隔、无空格），没有标签的条目格式不变。tests/test_shelf.py 已有的测试要通过，不要修改 tests 目录里的任何文件。不需要再向我确认，直接实现。完成后用一句话说明你改了哪几个文件。",
     "check": {
       "hidden": "T8/hidden/test_hidden.py",
       "hidden_dest": "tests/test_hidden.py",

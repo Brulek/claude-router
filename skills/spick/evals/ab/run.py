@@ -27,7 +27,6 @@ ALLOW = ["Read", "Edit", "Write", "Glob", "Grep", "Bash(python3:*)", "Bash(pytes
          "Bash(shasum:*)"]
 SESSION_VARS = {"CLAUDECODE", "CLAUDE_CODE_SESSION_ID", "CLAUDE_CODE_HOST_SESSION_ID", "CLAUDE_CODE_CHILD_SESSION",
                 "CLAUDE_CODE_MESSAGING_SOCKET", "CLAUDE_CODE_MESSAGING_TOKEN"}
-BARE_SETTINGS = {"disableAllHooks": True}
 
 
 def setup_venv():
@@ -63,21 +62,28 @@ def render_agents():
     return json.dumps(agents, ensure_ascii=False)
 
 
-def spick_settings():
-    hook = common.SKILL / "scripts" / "triage-hook.sh"
-    return json.dumps({"hooks": {"UserPromptSubmit": [{"hooks": [
-        {"type": "command", "command": f"bash '{hook}'"}]}]}})
+def arm_settings(cfg):
+    """Settings JSON per arm: hooks off or the checkout's hook; the global mod is disabled in every arm."""
+    s = {"enabledPlugins": {common.GLOBAL_MOD_KEY: False}}
+    if cfg["hooks_off"]:
+        s["disableAllHooks"] = True
+    if cfg["hook"]:
+        hook = common.SKILL / "scripts" / "triage-hook.sh"
+        s["hooks"] = {"UserPromptSubmit": [{"hooks": [{"type": "command", "command": f"bash '{hook}'"}]}]}
+    return s
 
 
 def build_cmd(arm, prompt, agents_file, settings_file, binary="claude"):
-    model, spick = common.ARMS[arm]
-    cmd = [binary, "-p", prompt, "--output-format", "json", "--permission-mode", "acceptEdits", "--model", model]
-    if spick:
-        cmd += ["--settings", str(settings_file), "--agents", str(agents_file)]
-        allow = ALLOW + ["Agent"]
-    else:
-        cmd += ["--settings", json.dumps(BARE_SETTINGS), "--disallowedTools", "Agent"]
-        allow = ALLOW
+    cfg = common.ARMS[arm]
+    cmd = [binary, "-p", prompt, "--output-format", "json", "--permission-mode", "acceptEdits",
+           "--model", cfg["model"], "--settings", str(settings_file)]
+    if cfg["agents"]:
+        cmd += ["--agents", str(agents_file)]
+    if cfg["mod"]:
+        cmd += ["--plugin-dir", str(common.MOD_DIR)]
+    if not cfg["agent_tool"]:
+        cmd += ["--disallowedTools", "Agent"]
+    allow = ALLOW + (["Agent"] if cfg["agent_tool"] else [])
     return cmd + ["--allowedTools"] + allow  # variadic flag goes last
 
 
@@ -94,7 +100,7 @@ def run_claude(cmd, cwd, env, timeout):
         return out or "", err or "", None, True
 
 
-def do_run(job, args, env, agents_file, settings_file, lock):
+def do_run(job, args, env, agents_file, settings_dir, lock):
     arm, tid, n = job
     task = common.load_tasks()[tid]
     rdir = Path(args.out) / arm / tid / f"run-{n}"
@@ -107,7 +113,7 @@ def do_run(job, args, env, agents_file, settings_file, lock):
         shutil.copytree(common.TASKS_DIR / task["template"], work)
     else:
         work.mkdir(parents=True)
-    cmd = build_cmd(arm, task["prompt"], agents_file, settings_file, args.claude_bin)
+    cmd = build_cmd(arm, task["prompt"], agents_file, settings_dir / f"{arm}.json", args.claude_bin)
     started = datetime.now(timezone.utc).isoformat(timespec="seconds")
     t0 = time.time()
     out, err, code, timed_out = run_claude(cmd, work, env, args.timeout)
@@ -123,8 +129,8 @@ def do_run(job, args, env, agents_file, settings_file, lock):
                  "exit_code": code, "timed_out": timed_out, "stderr_tail": err[-600:],
                  "cmd": cmd[:2] + ["<prompt>"] + cmd[3:]},
         "result": result,
-        # the mod writes this line at turn end; headless runs may have none
-        "turn_record": common.find_turn_record(session) if common.ARMS[arm][1] else None,
+        # the mod writes <state>/turns/<sessionId>.jsonl at turn end; headless runs may have none
+        "turn_records": common.find_turn_records(session) if arm in common.SPICK_ARMS else None,
     }
     (rdir / "result.json").write_text(json.dumps(rec, ensure_ascii=False, indent=2), encoding="utf-8")
     cost = (result or {}).get("total_cost_usd")
@@ -138,7 +144,7 @@ def do_run(job, args, env, agents_file, settings_file, lock):
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--setup", action="store_true", help="create the pytest venv and exit")
-    ap.add_argument("--arms", default=",".join(common.ARMS))
+    ap.add_argument("--arms", default=",".join(common.DEFAULT_ARMS), help="comma list; known: " + ", ".join(common.ARMS))
     ap.add_argument("--tasks", default=",".join(common.load_tasks()))
     ap.add_argument("--runs", type=int, default=1)
     ap.add_argument("--parallel", type=int, default=2)
@@ -168,12 +174,11 @@ def main():
     args.out = str(out)
     arms_dir = out / "_arms"
     arms_dir.mkdir(parents=True, exist_ok=True)
-    settings_file = arms_dir / "spick-settings.json"
     agents_file = arms_dir / "spick-agents.json"
-    settings_file.write_text(spick_settings(), encoding="utf-8")
     agents_file.write_text(render_agents(), encoding="utf-8")
+    for arm, cfg in common.ARMS.items():
+        (arms_dir / f"{arm}.json").write_text(json.dumps(arm_settings(cfg), indent=2), encoding="utf-8")
 
-    # a runner started from inside Claude Code must not make its runs look like children of that session
     env = {k: v for k, v in os.environ.items() if k not in SESSION_VARS}
     env["PATH"] = f"{common.VENV / 'bin'}{os.pathsep}{env.get('PATH', '')}"  # same pytest for agent and grader
 
@@ -181,12 +186,12 @@ def main():
     jobs = [(a, t, n) for n in range(1, args.runs + 1) for t in tids for a in arms]
     if args.dry_run:
         for arm, tid, n in jobs:
-            print(arm, tid, n, build_cmd(arm, tasks[tid]["prompt"], agents_file, settings_file))
+            print(arm, tid, n, build_cmd(arm, tasks[tid]["prompt"], agents_file, arms_dir / f"{arm}.json", args.claude_bin))
         return 0
     lock = threading.Lock()
     print(f"{len(jobs)} runs, parallel {args.parallel}, out {out}", flush=True)
     with ThreadPoolExecutor(max_workers=args.parallel) as ex:
-        for msg in ex.map(lambda j: do_run(j, args, env, agents_file, settings_file, lock), jobs):
+        for msg in ex.map(lambda j: do_run(j, args, env, agents_file, arms_dir, lock), jobs):
             if msg:
                 print(msg, flush=True)
     print("ALL DONE", flush=True)

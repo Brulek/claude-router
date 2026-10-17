@@ -9,13 +9,25 @@ SKILL = HERE.parents[1]  # skills/spick
 TASKS_DIR = HERE / "tasks"
 VENV = HERE / ".venv"
 
+# The globally installed copy of the mod (key in ~/.claude/plugins/installed_plugins.json). Every arm disables it so
+# no arm gets the mod by accident; haiku-spick loads the checkout's copy with --plugin-dir instead.
+GLOBAL_MOD_KEY = "spick-dashboard@spick"
+MOD_DIR = SKILL.parents[1] / "mod" / "spick-dashboard"
+
+# model: --model alias; hook: UserPromptSubmit hook of this checkout; mod: checkout mod via --plugin-dir;
+# agents: skills/spick/assets/agents rendered into --agents; agent_tool: Agent allowed (else --disallowedTools Agent);
+# hooks_off: disableAllHooks (the user's global spick hook included)
 ARMS = {
-    # name -> (model alias passed to --model, whether the spick hook and agents are loaded)
-    "haiku-spick": ("haiku", True),
-    "haiku-bare": ("haiku", False),
-    "sonnet-bare": ("sonnet", False),
-    "opus-bare": ("opus", False),
+    "haiku-spick": dict(model="haiku", hook=True, mod=True, agents=True, agent_tool=True, hooks_off=False),
+    "haiku-hook": dict(model="haiku", hook=True, mod=False, agents=True, agent_tool=True, hooks_off=False),
+    "haiku-bare": dict(model="haiku", hook=False, mod=False, agents=False, agent_tool=False, hooks_off=True),
+    "sonnet-bare": dict(model="sonnet", hook=False, mod=False, agents=False, agent_tool=False, hooks_off=True),
+    "opus-bare": dict(model="opus", hook=False, mod=False, agents=False, agent_tool=False, hooks_off=True),
+    "sonnet-free": dict(model="sonnet", hook=False, mod=False, agents=False, agent_tool=True, hooks_off=True),
+    "opus-free": dict(model="opus", hook=False, mod=False, agents=False, agent_tool=True, hooks_off=True),
 }
+SPICK_ARMS = [a for a, c in ARMS.items() if c["hook"] or c["mod"]]
+DEFAULT_ARMS = ["haiku-spick", "haiku-bare", "sonnet-bare", "opus-bare"]  # the headline four; the rest are extras
 
 
 def load_tasks():
@@ -50,23 +62,22 @@ def strip_markers(text):
     return text.strip()
 
 
-def find_turn_record(session_id):
-    """Last line of turns.jsonl whose sessionId matches; None when the file or the line is absent."""
-    path = claude_dir() / "spick" / "turns.jsonl"
-    if not session_id or not path.exists():
+def find_turn_records(session_id):
+    """Lines of <state>/turns/<sessionId>.jsonl (one file per session; a late agent appends a `late` line);
+    None when the file is absent, which is normal for a headless run."""
+    path = claude_dir() / "spick" / "turns" / f"{session_id}.jsonl"
+    if not session_id or not path.is_file():
         return None
-    found = None
+    recs = []
     try:
         for line in path.read_text(encoding="utf-8").splitlines():
             try:
-                rec = json.loads(line)
+                recs.append(json.loads(line))
             except ValueError:
                 continue
-            if rec.get("sessionId") == session_id or rec.get("session_id") == session_id:
-                found = rec
     except OSError:
         return None
-    return found
+    return recs or None
 
 
 def run_dirs(out):
