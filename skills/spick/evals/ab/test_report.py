@@ -84,6 +84,28 @@ class Stats(unittest.TestCase):
         self.assertIn("| opus-bare | 1/1 | 1/1 | >=$0.200 | >=$0.200 |", text)
         self.assertNotIn("$0.000", text)
 
+    def test_a_missing_delegate_record_is_an_unknown_floor_not_zero(self):
+        runs = {"haiku-spick/T1/run-1": g("haiku-spick", "T1", True, cost=0.10, cost_floor=None),
+                "haiku-spick/T1/run-2": dict(g("haiku-spick", "T1", True, cost=0.30, cost_floor=False), run=2)}
+        c = report.aggregate(runs)[("haiku-spick", "T1")]
+        self.assertEqual((c["cost_floor"], c["floor_unknown"]), (False, 1))
+        s = report.arm_summary(runs, "haiku-spick")
+        self.assertEqual(s["floor_unknown"], 1)
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {}}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("| haiku-spick | 2/2 | 2/2 | $0.400 ? (1/2 floor unknown) | $0.200 ? (1/2 floor unknown) |", text)
+        self.assertIn("| $0.200 ? (1/2 floor unknown) |", text.split("## Per arm and task")[1])
+        self.assertEqual(report.fmt_cost(None, False, 1, 2, 1), "unknown (1/2 priced) ? (1/2 floor unknown)")
+        # a floor known for every run prints no ?
+        self.assertNotIn("?", report.fmt_cost(0.1, True, 1, 1, 0))
+
+    def test_grades_written_before_the_field_read_a_spick_run_without_a_record_as_unknown(self):
+        self.assertIsNone(report.run_floor(g("haiku-spick", "T1", True, unpriced_delegates=None)))
+        self.assertTrue(report.run_floor(g("haiku-spick", "T1", True, outside_calls=1)))
+        self.assertFalse(report.run_floor(g("haiku-spick", "T1", True, turn_record=True, outside_calls=0, unpriced_delegates=0)))
+        self.assertFalse(report.run_floor(g("haiku-bare", "T1", True)))
+
     def test_explore_column_counts_verified_haiku_and_flags_unknown(self):
         runs = {"haiku-spick/T1/run-1": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku=True),
                 "haiku-spick/T1/run-2": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku="unknown"),
@@ -116,6 +138,44 @@ class Probe(unittest.TestCase):
 
     def test_missing_probe_file_is_said_out_loud(self):
         self.assertIn("Arm start-up probe: none recorded", self.render(None))
+
+
+def probe(ok=True, head="abcdef0123456789", check="record"):
+    return {"ok": ok, "check": check, "detail": "x", "at": "2026-10-17T00:00:00+00:00", "claude_version": "2.9.9",
+            "checkout_head": head}
+
+
+class CellProbe(unittest.TestCase):
+    def cell(self, *probes):
+        return report.cell_probe([g("a", "T1", True, probe=p) for p in probes])
+
+    def test_every_run_passing_at_one_head_is_verified(self):
+        self.assertEqual(self.cell(probe(), probe()), "verified at HEAD abcdef012345")
+
+    def test_runs_from_another_invocation_make_a_mixed_cell(self):
+        self.assertEqual(self.cell(probe(), probe(ok=False)), "mixed (1 of 2 verified at HEAD abcdef012345)")
+        self.assertEqual(self.cell(probe(), probe(), None), "mixed (2 of 3 verified at HEAD abcdef012345)")
+        # two passing probes at different heads are not one verified cell
+        self.assertEqual(self.cell(probe(), probe(head="1234567890abcdef")), "mixed (1 of 2 verified at HEAD abcdef012345)")
+
+    def test_no_passing_probe_says_why(self):
+        self.assertEqual(self.cell(None, None), "not verified (2 without a probe)")
+        self.assertEqual(self.cell(probe(ok=False), None), "not verified (1 invalid, 1 without a probe)")
+        self.assertEqual(self.cell(probe(head=None)), "not verified (1 HEAD unknown)")
+
+    def test_a_best_effort_arm_is_accepted_not_verified(self):
+        self.assertEqual(self.cell(probe(check="best-effort")), "accepted, not verified at HEAD abcdef012345")
+
+    def test_the_rendered_row_carries_the_cell_probe(self):
+        runs = {"haiku-bare/T1/run-1": dict(g("haiku-bare", "T1", True, probe=probe()), run=1),
+                "haiku-bare/T1/run-2": dict(g("haiku-bare", "T1", True, probe=None), run=2)}
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {}}))
+            # the latest probe passed: it must not vouch for the run made without one
+            Path(d, "_probe.json").write_text(json.dumps({"checkout_head": "abcdef0123456789", "arms": {"haiku-bare": probe()}}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("| 0/2 | 0/2 | mixed (1 of 2 verified at HEAD abcdef012345) |", text)
+        self.assertIn("Arm start-up probe of the latest invocation only", text)
 
 
 class Render(unittest.TestCase):

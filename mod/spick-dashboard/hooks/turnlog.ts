@@ -27,8 +27,10 @@ export type DelegateEntry = {
   ok: boolean
   /** an Agent call: what confirmed its completion (gate.ts ConfirmedBy) */
   confirmedBy?: ConfirmedBy
-  /** an outside CLI call: the characters it printed (a review counts from MIN_REVIEW_CHARS) */
+  /** an outside CLI call: the characters it printed */
   outputChars?: number
+  /** an outside CLI call: whether its output reads as a report (gate.ts isReport); a review counts only then */
+  isReport?: boolean
   startedAt: string
   /** wall time while it ran; null while it still runs */
   ms: number | null

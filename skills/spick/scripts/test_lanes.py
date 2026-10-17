@@ -165,6 +165,29 @@ class Line(unittest.TestCase):
         self.assertEqual(lanes.build_line([]), "")
 
 
+class Variant(unittest.TestCase):
+    """builtin only with no lane_registry and every built-in on; else registry with the enabled lanes, none when empty"""
+
+    def v(self, cfg):
+        name, ls = lanes.variant(cfg)
+        return name, [ln["id"] for ln in ls]
+
+    def test_no_registry_and_every_builtin_on_is_builtin(self):
+        for cfg in ({}, None, {"lanes": {"gemini": True, "grok": True, "codex": True}}, {"lanes": {"gemini": "no"}}):
+            self.assertEqual(self.v(cfg), ("builtin", ["gemini", "grok", "codex"]), cfg)
+
+    def test_a_builtin_switched_off_without_a_registry_is_the_enabled_subset(self):
+        self.assertEqual(self.v({"lanes": {"grok": False}}), ("registry", ["gemini", "codex"]))
+
+    def test_every_builtin_switched_off_without_a_registry_is_none(self):
+        self.assertEqual(self.v({"lanes": {"gemini": False, "grok": False, "codex": False}}), ("none", []))
+
+    def test_a_registry_is_registry_or_none(self):
+        self.assertEqual(self.v({"lane_registry": {}}), ("registry", ["gemini", "grok", "codex"]))
+        off = {k: {"enabled": False} for k in ("gemini", "grok", "codex")}
+        self.assertEqual(self.v({"lane_registry": off}), ("none", []))
+
+
 class Cli(unittest.TestCase):
     def run_cli(self, cfg, *args):
         with tempfile.TemporaryDirectory() as d:
@@ -185,6 +208,13 @@ class Cli(unittest.TestCase):
         self.assertIn("lane glm: field notes looks like a secret", r.stdout)
         self.assertNotIn(secret, r.stdout + r.stderr)
         self.assertEqual(self.run_cli({}, "--validate").stdout.strip(), "ok")
+
+    def test_variant(self):
+        self.assertEqual(self.run_cli({}, "--variant").stdout, "builtin\n")
+        self.assertEqual(self.run_cli({"lanes": {"gemini": False, "grok": False, "codex": False}}, "--variant").stdout, "none\n")
+        r = self.run_cli({"lanes": {"gemini": False}}, "--variant")
+        self.assertEqual(r.stdout, "registry\nLanes (user-declared; data = most that may be sent): "
+                                   "grok x-data data:code · codex code,review,image data:code\n")
 
     def test_json(self):
         out = json.loads(self.run_cli({"lanes": {"gemini": True, "grok": False, "codex": False}}, "--json").stdout)

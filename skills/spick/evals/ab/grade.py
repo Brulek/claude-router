@@ -186,6 +186,16 @@ def unpriced_delegates(turn_records):
     return sum(1 for r in turn_records for d in (r.get("delegates") or []) if d.get("costUsd") is None)
 
 
+def run_cost_floor(arm, turn_records):
+    """Whether total_cost_usd is the run's whole cost: True when part of it bills elsewhere (an outside-CLI delegate,
+    or a delegate with no cost), False when the record shows none, None ("unknown") when a spick arm's turn record
+    is missing, so its delegates cannot be counted: a missing record is not zero calls. Arms without spick collect
+    no record (run.py) and have no lane of their own to bill outside, so their figure stands."""
+    if arm in common.SPICK_ARMS and not turn_records:
+        return None
+    return (outside_calls(turn_records) or 0) > 0 or (unpriced_delegates(turn_records) or 0) > 0
+
+
 def _explore_entries(res):
     """(by_type present, entries) for Explore-type agents in the result's subagent_stats.by_type."""
     stats = res.get("subagent_stats") or {}
@@ -263,8 +273,11 @@ def run_metrics(rec, task):
         "turn_record": rec.get("turn_records") is not None,
         "outside_calls": outside_calls(rec.get("turn_records")),
         "unpriced_delegates": unpriced_delegates(rec.get("turn_records")),
+        "cost_floor": run_cost_floor(meta["arm"], rec.get("turn_records")),
         "explore_ran": explore_ran(res), "explore_haiku": explore_haiku(res, rec.get("turn_records")),
         "subagent_types": (res.get("subagent_stats") or {}).get("by_type") or {},
+        # the start-up probe this run was made under (run.py probe_stamp); None for runs made before the field
+        "probe": meta.get("probe") if isinstance(meta.get("probe"), dict) else None,
     }
 
 

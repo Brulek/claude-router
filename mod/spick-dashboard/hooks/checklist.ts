@@ -75,7 +75,7 @@ export const LANE_BULLET_REGISTRY = LANE_BULLET_LANES_REGISTRY
 
 /** what the quota cache says about declared lanes (quotaline.ts lanesFromCache) */
 export type LanesState = { registry: boolean; lanes: readonly LaneInfo[] }
-/** builtin: no lane_registry; registry: declared lanes, some enabled; none: a registry with every lane off */
+/** builtin: no lane_registry and every built-in on; registry: some lanes enabled; none: no lane enabled (lanes.py variant) */
 export type LaneVariant = 'builtin' | 'registry' | 'none'
 const isLanesState = (x: unknown): x is LanesState => typeof x === 'object' && x !== null && !Array.isArray(x) && 'registry' in x
 

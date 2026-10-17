@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import sys
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -26,10 +27,25 @@ def mean(values):
     return sum(values) / len(values) if values else None
 
 
+def run_floor(g):
+    """A run's cost_floor from grade.py: True (part bills elsewhere), False (the figure is whole) or None (unknown: a
+    spick arm without its turn record). grades.json written before the field is read by the same rule."""
+    if "cost_floor" in g:
+        return g["cost_floor"]
+    if (g.get("outside_calls") or 0) > 0 or (g.get("unpriced_delegates") or 0) > 0:
+        return True
+    return None if g.get("arm") in common.SPICK_ARMS and not g.get("turn_record") else False
+
+
 def cost_floor(gs):
     """The Claude-side cost is a floor when a run called an outside CLI (it bills elsewhere) or had a delegate
     whose cost is unknown."""
-    return any((g.get("outside_calls") or 0) > 0 or (g.get("unpriced_delegates") or 0) > 0 for g in gs)
+    return any(run_floor(g) is True for g in gs)
+
+
+def floor_unknown(gs):
+    """The runs whose floor is unknown: their cost may be the whole or a floor, nothing tells which."""
+    return sum(1 for g in gs if run_floor(g) is None)
 
 
 def cost_summary(gs):
@@ -53,10 +69,11 @@ def aggregate(runs):
             "completed": sum(1 for g in gs if not g["error"]),
             "cost_total": total, "cost_priced": priced, "cost_coverage": priced / len(gs),
             "cost_mean": total / len(gs) if total is not None else None,
-            "cost_floor": cost_floor(gs),
+            "cost_floor": cost_floor(gs), "floor_unknown": floor_unknown(gs),
             "wall_mean": mean([g["wall"] for g in gs]),
             "models": sorted({m for g in gs for m in g["models"]}),
             "labels": sum(1 for g in gs if g["label_line"]), "kept": sum(1 for g in gs if g["kept_line"]),
+            "probe": cell_probe(gs),
             "runs": gs,
         }
     return out
@@ -74,7 +91,7 @@ def arm_summary(runs, arm):
         "cost_total": total, "cost_priced": priced, "cost_coverage": priced / len(gs) if gs else None,
         # failures are paid for too: total spend over successful deliveries
         "cost_per_success": (total / passed) if passed and total is not None else None,
-        "cost_floor": cost_floor(gs),
+        "cost_floor": cost_floor(gs), "floor_unknown": floor_unknown(gs),
         "wall_p50": percentile(walls, 50), "wall_p95": percentile(walls, 95),
         "subagent_runs": sum(1 for g in gs if g.get("subagents")),
         "explore_runs": sum(1 for g in gs if g.get("explore_ran")),
@@ -84,12 +101,44 @@ def arm_summary(runs, arm):
     }
 
 
-def fmt_cost(v, floor=False, priced=None, n=None):
+def probe_state(g):
+    """(state, head) of the probe a run was made under: verified, accepted (a best-effort arm), invalid (the probe
+    failed) or none (the run carries no probe)."""
+    p = g.get("probe")
+    if not isinstance(p, dict):
+        return "none", None
+    if not p.get("ok"):
+        return "invalid", p.get("checkout_head")
+    return ("accepted" if p.get("check") == "best-effort" else "verified"), p.get("checkout_head")
+
+
+def cell_probe(gs):
+    """A cell is verified only when every run in it carries a passing probe of the same checkout HEAD: runs resumed
+    from an earlier invocation keep their own probe, so the latest _probe.json cannot vouch for them."""
+    states = [probe_state(g) for g in gs]
+    m = len(states)
+    for state, word in (("verified", "verified"), ("accepted", "accepted, not verified")):
+        heads = Counter(h for s, h in states if s == state and h)
+        if heads:
+            head, n = heads.most_common(1)[0]
+            if n == m:
+                return f"{word} at HEAD {head[:12]}"
+            if state == "verified":
+                return f"mixed ({n} of {m} verified at HEAD {head[:12]})"
+    counts = Counter(s for s, _ in states)
+    parts = [f"{counts[s]} {w}" for s, w in (("invalid", "invalid"), ("none", "without a probe"),
+                                                 ("accepted", "best-effort"), ("verified", "HEAD unknown")) if counts[s]]
+    return f"not verified ({', '.join(parts)})"
+
+
+def fmt_cost(v, floor=False, priced=None, n=None, unknown=0):
     """A missing figure with unpriced runs reads "unknown (priced/n priced)"; with every run priced (no success to
-    divide by) it stays n/a."""
+    divide by) it stays n/a. `unknown` runs with an unknown floor add "? (k/n floor unknown)": the figure may leave
+    out what bills elsewhere, and nothing says whether it does."""
+    tail = f" ? ({unknown}/{n} floor unknown)" if unknown else ""
     if v is None:
-        return f"unknown ({priced}/{n} priced)" if n and priced < n else "n/a"
-    return f"{'>=' if floor else ''}${v:.3f}"
+        return (f"unknown ({priced}/{n} priced)" if n and priced < n else "n/a") + tail
+    return f"{'>=' if floor else ''}${v:.3f}{tail}"
 
 
 def fmt_s(v):
@@ -104,7 +153,7 @@ CAVEATS = """\
 - The user's global `~/.claude/CLAUDE.md` is loaded by `claude -p` in every arm, so the bare arms still read the spick routing block. `--disallowedTools Agent` keeps `*-bare` arms from acting on it; `*-free` arms may. Read the bare arms as "no spick machinery", not "no spick text".
 - One judge (Codex, medium effort) scores T5 and T7, blind and with shuffled letters, but it is a single judge: its verdicts carry its own bias and noise. Treat a judged pass rate as a signal, not a measurement. T6 is graded by rules only.
 - n is small. With 3 runs per cell one flaky run moves a pass rate by a third; do not read differences smaller than that.
-- Costs are `total_cost_usd` from Claude Code. A delegate on an outside CLI (Gemini, Grok, Codex) bills on its own subscription, so it is not in that figure; cells with such calls show `>=`, and an arm whose turn records are missing cannot be told apart from one with no outside calls.
+- Costs are `total_cost_usd` from Claude Code. A delegate on an outside CLI (Gemini, Grok, Codex) bills on its own subscription, so it is not in that figure; cells with such calls show `>=`, and a spick-arm run whose turn record is missing cannot be told apart from one with no outside calls, so its cost carries `?`.
 - Turn records (`~/.claude/spick/turns/<sessionId>.jsonl`) are written by the mod; a headless run may have none. Their absence is not an error and leaves the turn-record column at 0.
 - The mod arm relies on `disableAllHooks: true` leaving the mod's own prompt hook alone and on `--plugin-dir` taking precedence over the disabled global copy. The start-up probe above is the check on both; the Explore and turn-record columns below are further runtime evidence.
 - The global marker `~/.claude/spick/mod-active/<sessionId>` or the v1 `~/.claude/.spick-mod-active` file may silence the hook of this checkout in `haiku-hook`, and the user's global v1 hook may print as well. `haiku-hook` is a best-effort ablation arm.
@@ -122,14 +171,16 @@ CANNOT = """\
 
 
 def probe_lines(out_dir):
-    """Caveat bullets from <out>/_probe.json: version, checkout head and what each arm's start-up probe showed."""
+    """Caveat bullets from <out>/_probe.json: version, checkout head and what each arm's start-up probe showed in the
+    latest invocation only (each cell's own probes are in the per-task table)."""
     path = Path(out_dir) / "_probe.json"
     if not path.exists():
         return ["- **Arm start-up probe: none recorded** (`_probe.json` is missing), so nothing here shows that the arms "
                 "started as their names say."]
     info = json.loads(path.read_text(encoding="utf-8"))
     head = (info.get("checkout_head") or "unknown")[:12]
-    L = [f"- Arm start-up probe (claude `{info.get('claude_version') or 'version unknown'}`, checkout `{head}`"
+    L = [f"- Arm start-up probe of the latest invocation only; the per-task table reads each run's own "
+         f"(claude `{info.get('claude_version') or 'version unknown'}`, checkout `{head}`"
          f"{', run with --allow-unverified' if info.get('allow_unverified') else ''}):"]
     for arm, p in (info.get("arms") or {}).items():
         state = "INVALID" if not p.get("ok") else ("accepted, not verified" if p.get("check") == "best-effort" else "verified")
@@ -153,19 +204,20 @@ def render(out_dir, today):
     for a in arms:
         s = arm_summary(runs, a)
         L.append(f"| {a} | {fmt_rate(s['passed'], s['graded'])} | {fmt_rate(s['completed'], s['n'])} | "
-                 f"{fmt_cost(s['cost_total'], s['cost_floor'], s['cost_priced'], s['n'])} | "
-                 f"{fmt_cost(s['cost_per_success'], s['cost_floor'], s['cost_priced'] if s['passed'] else s['n'], s['n'])} | "
+                 f"{fmt_cost(s['cost_total'], s['cost_floor'], s['cost_priced'], s['n'], s['floor_unknown'])} | "
+                 f"{fmt_cost(s['cost_per_success'], s['cost_floor'], s['cost_priced'] if s['passed'] else s['n'], s['n'], s['floor_unknown'])} | "
                  f"{fmt_s(s['wall_p50'])} | {fmt_s(s['wall_p95'])} |")
     L += ["", "Quality counts graded runs only (a judged cell whose judge call failed is left out). Completion is runs that "
           "returned a result without error or timeout. Cost per successful delivery is the arm's whole spend, failures "
           "included, over its passes. A cost is `unknown (n/m priced)` when some runs carry no priced cost (a failed or "
           "unparsed run): a sum over the priced runs alone would understate it. `>=` marks a floor: an outside-CLI call or "
-          "a delegate with an unknown cost bills outside the figure.", ""]
+          "a delegate with an unknown cost bills outside the figure. `?` marks a cost with runs whose floor is unknown "
+          "(`k/n floor unknown`): a spick arm's run without its turn record, whose outside calls cannot be counted.", ""]
 
     L += ["## Per arm and task", "",
           "Every cell is kept, including the ones where an arm loses (marked LOSES: pass rate below the best arm on that task).", "",
-          "| task | arm | pass | completed | mean cost | mean wall | models | label line | Kept: line |",
-          "|---|---|---|---|---|---|---|---|---|"]
+          "| task | arm | pass | completed | mean cost | mean wall | models | label line | Kept: line | start-up probe |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for t in tids:
         best = max((c["passed"] / c["graded"] for k, c in cells.items() if k[1] == t and c["graded"]), default=None)
         for a in arms:
@@ -174,10 +226,12 @@ def render(out_dir, today):
                 continue
             loses = best is not None and c["graded"] and c["passed"] / c["graded"] < best
             L.append(f"| {t} {tasks[t]['name']} | {a} | {fmt_rate(c['passed'], c['graded'])}{' LOSES' if loses else ''} | "
-                     f"{fmt_rate(c['completed'], c['n'])} | {fmt_cost(c['cost_mean'], c['cost_floor'], c['cost_priced'], c['n'])} | "
+                     f"{fmt_rate(c['completed'], c['n'])} | {fmt_cost(c['cost_mean'], c['cost_floor'], c['cost_priced'], c['n'], c['floor_unknown'])} | "
                      f"{fmt_s(c['wall_mean'])} | {', '.join(m.replace('claude-', '') for m in c['models']) or '-'} | "
-                     f"{c['labels']}/{c['n']} | {c['kept']}/{c['n']} |")
-    L.append("")
+                     f"{c['labels']}/{c['n']} | {c['kept']}/{c['n']} | {c['probe']} |")
+    L += ["", "The start-up probe column reads each run's own probe (written into its result.json when it ran): a cell is "
+          "verified only when every run in it passed its probe at the same checkout HEAD; runs kept from an earlier "
+          "invocation carry that invocation's probe, or none.", ""]
 
     failed = [(rid, g) for rid, g in runs.items() if g["pass"] is False]
     if failed:

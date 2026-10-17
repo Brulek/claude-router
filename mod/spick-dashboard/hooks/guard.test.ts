@@ -59,6 +59,12 @@ test('only one simple command counts: a pipe, a list or a second line hides the 
     'true || pytest', 'false || pytest', 'pytest; true', 'pytest | cat', 'npm test | tail -5', 'npm test 2>&1 | tail -5', 'pytest && echo ok',
     'git status\nnpm test', 'pytest &', '(pytest)', 'cd a && cd b && pytest', 'cd x; pytest', 'echo `pytest`',
   ]) expect([c, isCheckCommand(c)]).toEqual([c, false])
+  // a redirection's target ends at an operator: what follows it is still a second command
+  for (const c of [
+    'pytest >/dev/null||true', 'pytest >/dev/null;true', 'pytest 2>/dev/null&&true', 'pytest >out|cat', 'pytest >$(mktemp)',
+    'pytest >&3', 'cd a;b && pytest', 'pytest >/dev/null&',
+  ]) expect([c, checkOf(c)]).toEqual([c, null])
+  expect(checkOf('pytest 2>&1 >/dev/null')).toEqual({ command: 'pytest 2>&1 >/dev/null', key: ' pytest' })
   // the command keeps its redirections, the key leaves them out
   expect(checkOf('cd pkg && pytest tests/a.py > out.txt 2>&1')).toEqual({ command: 'pytest tests/a.py > out.txt 2>&1', key: 'pkg pytest tests/a.py' })
 })

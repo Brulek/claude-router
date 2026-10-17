@@ -11,8 +11,8 @@ Targets (the text between the markers is replaced; the rest of each file is hand
                                                and triage_hints.json, so both Hint implementations pass the same cases
 
 checklist.txt is printed by triage-hook.sh line by line. A line starting with `{a,b}` is printed (without the tag)
-only in the variants named: `builtin` (no lane_registry in spick.json), `registry` (declared lanes, some enabled),
-`none` (a registry with no enabled lane). The line `{hint}` is where the Hint line goes. Nothing else is special.
+only in the variants named (lanes.py variant): `builtin` (no lane_registry in spick.json and no built-in switched
+off), `registry` (some lanes enabled), `none` (no lane enabled). The line `{hint}` is where the Hint line goes. Nothing else is special.
 
 Usage:
   render_rules.py           write every target

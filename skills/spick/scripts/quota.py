@@ -598,17 +598,18 @@ def meter_entry(lane, now):
 
 
 def set_lanes(doc, reg):
-    """Every cache says whether the user declared a lane_registry and which lanes are enabled: `registry` false and
-    `lanes` [] without one; `registry` true and the enabled lanes (possibly none: then no outside lane may be
-    called) with one. The mod's checklist reads both (quotaline.ts lanesFromCache)."""
+    """Every cache says whether the lanes differ from the built-in set and which are enabled: `registry` false and
+    `lanes` [] for the builtin variant (no lane_registry, every built-in switch on); `registry` true and the enabled
+    lanes (possibly none: then no outside lane may be called) when there is a lane_registry or any built-in is
+    switched off (lanes.variant). The mod's checklist reads both (quotaline.ts lanesFromCache)."""
     doc["registry"] = reg is not None
     doc["lanes"] = lanes_mod.cache_view(reg) if reg is not None else []
     return doc
 
 
 def collect_all(subs, now=None, registry_lanes=None):
-    """registry_lanes None: no lane_registry. A list (user declared lane_registry): entries also carry
-    `facts` and custom lanes get entries. The doc carries `registry` and `lanes` either way (set_lanes)."""
+    """registry_lanes None: the builtin variant. A list (a lane_registry, or a built-in switched off): entries
+    also carry `facts` and custom lanes get entries. The doc carries `registry` and `lanes` either way (set_lanes)."""
     now = time.time() if now is None else now
     by_id = {ln["id"]: ln for ln in registry_lanes or []}
 
@@ -699,9 +700,11 @@ def release_lock(path=None):
 
 
 def _effective_lanes():
-    """Effective lanes for the cache, or None when spick.json has no lane_registry."""
+    """The enabled lanes for the cache, or None for the builtin variant (no lane_registry and no built-in switched
+    off; lanes.variant): a built-in switched off without a registry is a declared lane set, not "no registry"."""
     cfg = lanes_mod.read_config(os.path.join(config_dir(), "spick.json"))
-    return lanes_mod.load_effective(cfg) if lanes_mod.has_registry(cfg) else None
+    name, lanes = lanes_mod.variant(cfg)
+    return None if name == "builtin" else lanes
 
 
 def _lane_ids(lanes):

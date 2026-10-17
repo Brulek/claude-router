@@ -39,13 +39,21 @@ if [ -f "$cfg" ] && [ -n "$skill_version" ]; then
 fi
 # The checklist is assets/checklist.txt, rendered from assets/rules.json by render_rules.py (the mod's checklist.ts
 # carries the same lines). A line tagged {builtin}, {registry} or {none} prints only in that lane variant; {hint} is
-# where the Hint line goes. builtin: no lane_registry in spick.json; registry: declared lanes, some enabled; none: a
-# registry with every lane off (then no outside CLI may be called).
+# where the Hint line goes. The variant is lanes.py's (--variant, the rule quota.py and the mod share): builtin when
+# spick.json has no lane_registry and no built-in switched off; registry when some lanes are enabled; none when
+# nothing is (then no outside CLI may be called). A built-in switched off must not get the builtin wording, which
+# names all three.
 variant=builtin
 lanes_line=""
-if [ -f "$cfg" ] && grep -q '"lane_registry"' "$cfg" 2>/dev/null; then
-  [ -n "$py" ] && lanes_line=$("$py" "$here/lanes.py" --line 2>/dev/null)
-  if [ -n "$lanes_line" ] || [ -z "$py" ]; then variant=registry; else variant=none; fi
+if [ -f "$cfg" ]; then
+  out=""
+  [ -n "$py" ] && out=$("$py" "$here/lanes.py" --variant 2>/dev/null)
+  { IFS= read -r v; IFS= read -r lanes_line; } <<< "$out"
+  case "$v" in
+    builtin|registry|none) variant=$v ;;
+    # no python, or lanes.py failed: a declared registry still gets the registry wording, without its Lanes line
+    *) lanes_line=""; grep -q '"lane_registry"' "$cfg" 2>/dev/null && variant=registry ;;
+  esac
 fi
 # the Hint line: keywords found in the prompt and the default route they imply; nothing when none matched
 hint=""

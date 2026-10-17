@@ -73,10 +73,18 @@ export function checkCommand(command: string, declared: readonly RegExp[] = []):
   return checkOf(command, declared)?.command ?? null
 }
 
-/** command separators and grouping outside quotes, after redirections are taken out: any one means several commands */
-const SEPARATOR = /\|\||&&|;|\||&|\n|\(|\)|`/
-/** a redirection with its target (`> out.txt`, `2>>log`, `< in`), so a target is no check target */
-const REDIRECT = /\d*(?:>>?|<)\s*(?:&\d+-?|\S+)|&>>?\s*\S+/g
+/**
+ * Control operators and grouping outside quotes: any one means several commands. Tested before redirections are
+ * stripped, on the line with the `&` of `>&`, `<&` and `&>` taken out, so a redirection target can never swallow an
+ * operator (`pytest >/dev/null||true`).
+ */
+const SEPARATOR = /\|\||&&|;|\||&|\n|\$\(|\(|\)|`/
+/** the `&` inside a redirection operator (`2>&1`, `<&0`, `&>log`), which is not a background `&` */
+const REDIRECT_AMP = /[<>]&|&>/g
+/** a redirection with its target (`> out.txt`, `2>>log`, `< in`, `2>&1`), so a target is no check target */
+const REDIRECT = /\d*(?:>>?|<)\s*(?:&[12]\b|[^\s;&|<>]+)|&>>?\s*[^\s;&|<>]+/g
+/** whether the line holds a control operator outside a redirection */
+const chained = (s: string): boolean => SEPARATOR.test(s.replace(REDIRECT_AMP, '>'))
 
 /** the line as one simple command (see oneCommand) */
 export type OneCommand = {
@@ -105,15 +113,17 @@ export function oneCommand(command: string, feedIn = false): OneCommand | null {
   let masked = (command ?? '').replace(QUOTED, m => `"${quoted.push(m) - 1}"`).replace(/\\\n/g, ' ').trim()
   // one leading `cd <dir> &&` moves where it runs; it is not a second command (cd's own failure stops the line)
   let dir = ''
-  const cd = masked.match(/^cd\s+(\S+)\s*&&\s*/)
+  const cd = masked.match(/^cd\s+([^\s;&|<>()`$]+)\s*&&\s*/)
   if (cd) { dir = cd[1]!; masked = masked.slice(cd[0].length) }
-  // redirections are not separators: 2>&1, >&2, &> and &>> must not read as a background & or a second command
-  let bare = masked.replace(REDIRECT, ' ')
+  // control operators first, then redirections: a redirection's target must not hide a `||` or `;` behind it
   // a pipeline of plain pipes only (no ||, no other separator): keep its last command, redirections and all
-  if (feedIn && bare.includes('|') && !bare.includes('||') && !SEPARATOR.test(bare.replace(/\|/g, ' '))) {
+  if (feedIn && masked.includes('|') && !masked.includes('||') && !chained(masked.replace(/\|/g, ' '))) {
     masked = masked.slice(masked.lastIndexOf('|') + 1).trim()
-    bare = masked.replace(REDIRECT, ' ')
   }
+  if (chained(masked)) return null
+  // 2>&1, >&2, &> and &>> are redirections, not a background & or a second command
+  const bare = masked.replace(REDIRECT, ' ')
+  // a redirection this does not take apart (`>&3`, `>&-`) leaves an & behind: refuse rather than guess
   if (SEPARATOR.test(bare)) return null
   const { text, raw, isTestScript } = commandText(bare)
   if (!text) return null

@@ -90,9 +90,13 @@ test('a missing, corrupt or empty cache gives no line', () => {
   expect(quotaLineFromCache('{"providers":[{"provider":"claude"}]}', NOW)).toBeNull()
 })
 
-test('with a cold cache spick.json decides, by lanes.py\'s rule: no registry is the built-in lanes; a registry with nothing enabled is none', () => {
+test('with a cold cache spick.json decides, by lanes.py\'s rule: builtin only with no registry and every built-in on; nothing enabled is none', () => {
   const cfg = (o: unknown) => JSON.stringify(o)
-  expect(lanesFromConfig(cfg({ lanes: { gemini: false, grok: false, codex: false } }))).toEqual({ registry: false, lanes: [] })
+  expect(lanesFromConfig(cfg({}))).toEqual({ registry: false, lanes: [] })
+  expect(lanesFromConfig(cfg({ lanes: { gemini: true, grok: true, codex: true } }))).toEqual({ registry: false, lanes: [] })
+  // a built-in switched off without a registry is not the built-in wording (it names all three): the enabled subset
+  expect(lanesFromConfig(cfg({ lanes: { gemini: false, grok: false, codex: false } }))).toEqual({ registry: true, lanes: [] })
+  expect(lanesFromConfig(cfg({ lanes: { grok: false } }))).toEqual({ registry: true, lanes: [BUILTIN_LANES[0], BUILTIN_LANES[2]] })
   expect(lanesFromConfig(cfg({ lanes: { gemini: false, grok: false, codex: false }, lane_registry: {} }))).toEqual({ registry: true, lanes: [] })
   expect(lanesFromConfig(cfg({ lane_registry: { gemini: { enabled: false }, grok: { enabled: false }, codex: { enabled: false }, glm: { enabled: false, tags: ['cheap'] } } }))).toEqual({ registry: true, lanes: [] })
   // the registry's enabled wins over the old switch; a registry record overrides fields one at a time

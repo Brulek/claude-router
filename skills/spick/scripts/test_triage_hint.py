@@ -137,6 +137,19 @@ class Hook(unittest.TestCase):
         self.assertIn("| Review: skipped]", none)
         self.assertNotIn("Lanes (", none)
 
+    def test_builtins_switched_off_without_a_registry_are_not_the_builtin_variant(self):
+        # every built-in off in "lanes" alone: no outside lane, never the built-in bullet that names all three
+        hint = th.hint_line(PROMPT_1)
+        all_off = self.run_hook(cfg={"lanes": {"gemini": False, "grok": False, "codex": False}})
+        self.assertEqual(self.checklist_lines(all_off), rr.checklist_variant(RULES, "none", hint))
+        self.assertNotIn("Lanes (", "\n".join(all_off))
+        one_off = self.run_hook(cfg={"lanes": {"gemini": False}})
+        self.assertEqual(self.checklist_lines(one_off), rr.checklist_variant(RULES, "registry", hint))
+        self.assertIn("Lanes (user-declared; data = most that may be sent): grok x-data data:code · "
+                      "codex code,review,image data:code", one_off)
+        on = self.run_hook(cfg={"lanes": {"gemini": True, "grok": True, "codex": True}})
+        self.assertEqual(self.checklist_lines(on), rr.checklist_variant(RULES, "builtin", hint))
+
     def test_item_2_then_the_hint_then_item_3(self):
         lines = self.run_hook()
         tail = next(i for i, line in enumerate(lines) if line.startswith("   A prompt that mixes kinds"))
