@@ -28,7 +28,7 @@ Once per session: `test -f <config>/spick.json` (`<config>` is `$CLAUDE_CONFIG_D
 | 4 | live web, fact check, versions, prices | the lane tagged `search` (default Gemini agy) | `Agent(general-purpose, model sonnet, effort medium)` with WebSearch; judging the findings stays deep's |
 | 5 | compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing | `deep` | keep it, with a `Kept:` line, when the material is small (a few files, under ~200 lines, a short text): say so in the line |
 | 6 | a change that needs an architecture, public interface, data-format or cross-module decision the user did not make | `planner` then `coder` | - |
-| 7 | changed code beyond one file where the goal is clear, or a bug with a failing test; local layout, naming and file choice are the coder's | `coder` | - |
+| 7 | changed code beyond one file where the goal is clear, or a bug with a failing test (Haiku coder first, Sonnet after a failed check); layout, naming and file choice are the coder's | `coder` | - |
 | 8 | independent review of a diff | the lane tagged `review` (default Codex) | `deep` |
 | 9 | the answer is already in a file here, a command's output or your own knowledge; a one-file edit | you | - |
 
@@ -39,19 +39,19 @@ Once per session: `test -f <config>/spick.json` (`<config>` is `$CLAUDE_CONFIG_D
 | `deep` | medium | medium: ordinary verdicts: a diagnosis within one file, a comparison of two small things, a review of a small diff; high: hard problems, multi-file debugging, first drafts of formal writing; xhigh: key decisions, final drafts, money or law; max: only when the user says "extremely important" |
 <!-- rules:end -->
 
-**Not dispatching is the default for small work.** Delegation costs a handoff: brief, cold context, relay. A one-file edit, a question a file or command answers, a tidy-up: do it yourself. A verdict over small material (a few files, under ~200 lines) is yours with a `Kept:` line; large material or high stakes go to `deep`; a failing-test bug goes to `coder` first. Reading files on the way does not make a verdict a lookup; unsure how hard: `deep`.
+**Not dispatching is the default for small work.** Delegation costs a handoff: brief, cold context, relay. A one-file edit, a lookup, a tidy-up: do it yourself. A verdict over small material (a few files, under ~200 lines) is yours with a `Kept:` line; large material or high stakes go to `deep`; a failing-test bug goes to a Haiku `coder` first (`model: haiku`; the test is the check), Sonnet at high only after a failed check. Reading files on the way does not make a verdict a lookup; unsure: `deep`.
 
-**The planner threshold is narrow.** `planner` is for a decision the user did not make about architecture, a public interface, a data format or a cross-module trade-off. Local layout, naming and which file to touch are `coder`'s own calls; send `coder` the goal, not a design.
+**The planner threshold is narrow.** `planner` is for a decision the user did not make about architecture, a public interface, a data format or a cross-module trade-off. Local layout, naming and which file to touch are `coder`'s calls; send it the goal, not a design.
 
-**The Hint line** names prompt keywords and the route they imply (words in paths, URLs, code blocks or after a negation such as 不要 / don't do not count). Follow it, or keep the task with a `Kept:` line. With the dashboard mod, a hinted verdict kept without that line is sent back once at stop time.
+**The Hint line** names prompt keywords and the route they imply (words in paths, URLs, code blocks or after a negation do not count). Follow it, or keep the task with a `Kept:` line; with the mod, a hinted verdict kept without that line is sent back once at stop time.
 
-**Outside lanes.** Among lanes tagged for the task: one whose `data:` is below what the task sends (`public` < `text` < `code`) is out; `scripts/invoke.py` refuses it (exit 6) unless you pass `--override-data "<reason>"`, only on the user's say-so; every call and override is logged (`<config>/spick/invoke.jsonl`, listed by `/spick audit`) - a declared limit, not a detector. Prefer matching tags, then Quota and notes; a `web-only` lane gets a paste-ready prompt, never a call. A failed or over-quota lane: choose again. "Extremely important", or beyond Opus: `deep`, then suggest switching the session to Fable.
+**Outside lanes.** Among lanes tagged for the task: one whose `data:` is below what the task sends (`public` < `text` < `code`) is out; `scripts/invoke.py` refuses it (exit 6) unless you pass `--override-data "<reason>"`, only on the user's say-so; every call and override is logged (`/spick audit` lists them) - a declared limit, not a detector. Prefer matching tags, then Quota and notes; a `web-only` lane gets a paste-ready prompt. A failed or over-quota lane: choose again. "Extremely important", or beyond Opus: `deep`, then suggest switching the session to Fable.
 
 A mixed prompt is split by kind: a lane searches, `coder` codes with the result in its brief, `deep` judges.
 
 ## Step 1b - plan mode or goal mode?
 
-**Plan mode** (`EnterPlanMode`) is an approval gate: `planner` writes the plan, you put it in the plan file and call `ExitPlanMode`; after approval `coder` executes it. Enter it for 3+ files or several modules, an irreversible or wide action (review triggers 1-3), an ambiguous ask, a new build, or 方案 / 规划 / 怎么做 / "how should we". Not for one-file fixes, chores, questions or pure writing. Headless (no `EnterPlanMode`): plan inline, state your assumptions and stop before editing - unless the prompt already says to proceed ("do it", "no need to ask", "直接做"), then execute without the stop.
+**Plan mode** (`EnterPlanMode`) is an approval gate: `planner` writes the plan, you put it in the plan file and call `ExitPlanMode`; after approval `coder` executes it. Enter it for 3+ files or several modules, an irreversible or wide action (review triggers 1-3), an ambiguous ask, a new build, or 方案 / 规划 / 怎么做 / "how should we". Not for one-file fixes, chores or questions. Headless (no `EnterPlanMode`): plan inline, state your assumptions and stop before editing - unless the prompt already says to proceed ("do it", "直接做"), then execute without the stop.
 
 **Goal mode** you cannot enter. When the finish is machine-checkable (tests green, build ok, exit 0) and needs several edit-run cycles, or to execute an approved plan, hand the user one line in a code block:
 

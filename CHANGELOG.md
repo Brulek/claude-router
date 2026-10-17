@@ -128,3 +128,7 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 - A verdict over small material (a few files, under ~200 lines, a short text) stays with the main session, with a `Kept:` line; `deep` takes large material, money/law/interface stakes, a second failure, or a task the main session cannot size. The A/B of 2026-10-17 showed the old "every verdict to Opus" rule bought no measured quality on short tasks at 10-30x the cost.
 - A bug with a failing test goes to `coder` first; `deep` only after two failed checks (the guard's escalation line).
 - The Hint phrase for judgement words now says to size the material instead of starting from `deep`.
+
+### 1.0.0, routing policy v2.2 (2026-10-17, after A/B round 2)
+
+- A bug with a failing test goes to a Haiku `coder` first (`model: haiku`); the test is the check, and only a failed check sends it to the Sonnet `coder` at high effort. In two A/B rounds every one-file fix passed its hidden tests on Haiku.
