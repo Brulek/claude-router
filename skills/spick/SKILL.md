@@ -13,7 +13,7 @@ Commands and the file list: `references/commands.md`. Router mod, adding an outs
 
 ## Step 0 - is this machine set up?
 
-Once per session: `test -f ~/.claude/spick.json`. Missing means a first run: stop routing and follow `references/onboarding.md` (also on `spick setup`; `spick doctor` re-runs detection). Else read it; never use a disabled lane. A checklist line `spick: skill X installed Y, run spick setup` means the install is stale: tell the user once.
+Once per session: `test -f <config>/spick.json` (`<config>` is `$CLAUDE_CONFIG_DIR`, else `~/.claude`). Missing means a first run: stop routing and follow `references/onboarding.md` (also on `spick setup`; `spick doctor` re-runs detection). Else read it; never use a disabled lane. A checklist line `spick: skill X installed Y, run spick setup` means the install is stale: tell the user once.
 
 ## Step 1 - pick the lane
 

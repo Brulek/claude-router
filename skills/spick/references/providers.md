@@ -96,7 +96,7 @@ Pitfalls (all hit in practice):
 
 ## Lane registry
 
-Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`. The user may override any field of them, and add lanes of their own, under `lane_registry` in `~/.claude/spick.json`, keyed by lane id (lowercase letters, digits, hyphens). The one on/off switch is `lane_registry.<id>.enabled`; the older `lanes` booleans are still read for built-ins, and `enabled` wins when both exist. `scripts/set_lane.py` edits any field of any lane (and creates `lane_registry` on the first edit). If `lane_registry` is absent, nothing below applies and all output stays as before. `python3 scripts/lanes.py --validate` checks the file; secret-looking values are reported by field name, never echoed.
+Built-in lanes (gemini, grok, codex) are records in `assets/builtin-lanes.json`. The user may override any field of them, and add lanes of their own, under `lane_registry` in `<config>/spick.json`, keyed by lane id (lowercase letters, digits, hyphens). The one on/off switch is `lane_registry.<id>.enabled`; the older `lanes` booleans are still read for built-ins, and `enabled` wins when both exist. `scripts/set_lane.py` edits any field of any lane (and creates `lane_registry` on the first edit). If `lane_registry` is absent, nothing below applies and all output stays as before. `python3 scripts/lanes.py --validate` checks the file; secret-looking values are reported by field name, never echoed.
 
 | Field | Meaning |
 |---|---|
@@ -177,7 +177,7 @@ Called end to end with a user key on 2026-10-14:
 
 ## Subscriptions and the quota cache
 
-`~/.claude/spick.json` may carry a `subscriptions` object. Only the providers listed in it are collected and shown; a missing key means not subscribed. Write it with `scripts/set_subscription.py` (`--provider claude|codex|gemini|grok --plan "<text>" [--price "<text>"]`, `--remove`, `--list`, `--dry-run`; it backs up to `spick.json.bak` and validates), never by hand. The result looks like:
+`<config>/spick.json` may carry a `subscriptions` object. Only the providers listed in it are collected and shown; a missing key means not subscribed. Write it with `scripts/set_subscription.py` (`--provider claude|codex|gemini|grok --plan "<text>" [--price "<text>"]`, `--remove`, `--list`, `--dry-run`; it backs up to `spick.json.bak` and validates), never by hand. The result looks like:
 
 ```json
 "subscriptions": {
@@ -192,7 +192,7 @@ Called end to end with a user key on 2026-10-14:
 
 ## The guard's check commands
 
-The dashboard mod's guard sends back a turn that edited source and ran no check. It knows the common checks (test runners, builds such as `cargo build`, `go build`, `npm run build`, `xcodebuild`, `mvn package`, `gradle build`, `dotnet build`, linters, type checkers, `node --test`, a `*_test.py` script, a `./run-tests.sh`). A project whose check is something else declares it in `~/.claude/spick.json`:
+The dashboard mod's guard sends back a turn that edited source and ran no check. It knows the common checks (test runners, builds such as `cargo build`, `go build`, `npm run build`, `xcodebuild`, `mvn package`, `gradle build`, `dotnet build`, linters, type checkers, `node --test`, a `*_test.py` script, a `./run-tests.sh`). A project whose check is something else declares it in `<config>/spick.json`:
 
 ```json
 "guard": {"check_commands": ["^just check\\b", "bin/verify"]}

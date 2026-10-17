@@ -142,9 +142,9 @@ bash ~/.claude/skills/spick/scripts/setup.sh --check
 bash ~/.claude/skills/spick/scripts/setup.sh --install --lanes gemini,grok,codex --model haiku --effort medium
 ```
 
-`--install` 在写入任何文件之前，先检查 `settings.json` 和 `spick.json` 是否为合法 JSON（不合法就停下，什么都不改），再把 `CLAUDE.md`、`settings.json` 和 `spick.json` 复制到 `~/.claude/spick/backup/<时间戳>/`，并附一份 `manifest.json`，记录本次改动了什么。每一步都检查结果：某一步失败，就以退出码 1 停下，并列出已经改动的内容；只有全部步骤成功才会打印 `done`。加 `--no-explore` 则不安装跑在 Haiku 上的 `Explore` 子代理。
+`--install` 在写入任何文件之前，先检查 `settings.json` 和 `spick.json` 是否为合法 JSON（不合法就停下，什么都不改），再把 `CLAUDE.md`、`settings.json` 和 `spick.json` 复制到 `~/.claude/spick/backup/<时间戳>/`，并附一份 `manifest.json`，记录本次改动了什么。每一步都检查结果：某一步失败，就以退出码 1 停下，并列出已经改动的内容；只有全部步骤成功才会打印 `done`。已有的 spick hook 若指向别的路径（旧的检出目录），会改成当前这一份。已存在的子代理文件默认保留，加 `--force` 才覆盖；安装结束时会列出保留下来的文件。加 `--no-explore` 则不安装跑在 Haiku 上的 `Explore` 子代理。
 
-状态文件放在 `~/.claude/spick/`（设了 `CLAUDE_CONFIG_DIR` 时在 `$CLAUDE_CONFIG_DIR/spick/`）：额度缓存 `quota.json`、每个会话一份的回合记录 `turns/<sessionId>.jsonl`、mod 的会话标记 `mod-active/`，以及备份。安装时会把旧版本的文件（`spick-quota.json`、`spick-spend/`、`spick-gate.jsonl`、`spick-backup/`）一次性移进来。`spick.json` 仍在 `~/.claude/`，其中记录已安装的版本；磁盘上的技能更新后，清单会提示 `spick: skill X installed Y, run spick setup`。
+状态文件放在 `~/.claude/spick/`（设了 `CLAUDE_CONFIG_DIR` 时在 `$CLAUDE_CONFIG_DIR/spick/`）：额度缓存 `quota.json`、每个会话一份的回合记录 `turns/<sessionId>.jsonl`、mod 的会话标记 `mod-active/`，以及备份。安装时会把旧版本的文件（`spick-quota.json`、`spick-spend/`、`spick-gate.jsonl`、`spick-backup/`）一次性移进来。`spick.json` 仍在 `~/.claude/`（设了 `$CLAUDE_CONFIG_DIR` 时在那里）；全部步骤成功后，最后一步写入已安装的版本，同时写入 `installed`，记录本次写了什么、保留了什么（`{"agents": {"coder": "written|kept"}, "hook": "added|updated|kept", "snippet": "replaced|appended"}`）；磁盘上的技能更新后，清单会提示 `spick: skill X installed Y, run spick setup`。
 
 桌面版应用需在模型菜单中选择一次 Haiku。
 
