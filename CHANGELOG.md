@@ -133,6 +133,14 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 
 - A bug with a failing test goes to a Haiku `coder` first (`model: haiku`); the test is the check, and only a failed check sends it to the Sonnet `coder` at high effort. In two A/B rounds every one-file fix passed its hidden tests on Haiku.
 
+### 1.0.0, routing policy v2.3 (2026-10-17, after the real harness run)
+
+- A one-file bug with a failing test stays in the main session; the guard's one-file cap and its check-before-stop
+  rule already bound it, and in the real run the Haiku main session took every such bug itself and passed 9 of 9
+  hidden-test runs, following the v2.2 "Haiku coder first" rule once in nine chances. The coder bullet now reads "a
+  failing-test bug there" (in code beyond one file) and the main-session bullet "a one-file edit or fix". Nothing was
+  rerun for it: it describes the behaviour the matrix measured.
+
 ### 1.0.0, A/B harness against a real `claude` (2026-10-17)
 
 - First run of `skills/spick/evals/ab` against a real `claude` (2.1.302): the `haiku-spick` start-up probe failed

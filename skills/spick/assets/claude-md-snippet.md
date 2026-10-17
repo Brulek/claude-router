@@ -11,9 +11,9 @@ Applies to the main conversation only; a subagent ignores this block and follows
 | live web, fact check, versions, prices | the lane tagged `search` (default Gemini agy), else `Agent(general-purpose, sonnet)` with WebSearch |
 | compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing | `deep` |
 | a change that needs an architecture, public interface, data-format or cross-module decision the user did not make | `planner` then `coder` |
-| changed code beyond one file where the goal is clear, or a bug with a failing test (Haiku coder first, Sonnet after a failed check); layout, naming and file choice are the coder's | `coder` |
+| changed code beyond one file where the goal is clear (a failing-test bug there: Haiku coder first, Sonnet after a failed check); layout, naming and file choice are the coder's | `coder` |
 | independent review of a diff | the lane tagged `review` (default Codex), else `deep` |
-| the answer is already in a file here, a command's output or your own knowledge; a one-file edit | you |
+| the answer is already in a file here, a command's output or your own knowledge; a one-file edit or fix | you |
 
 Effort: give every delegate one (`coder` medium, `planner` high, `deep` medium by default); when torn, one notch up.
 <!-- rules:end -->

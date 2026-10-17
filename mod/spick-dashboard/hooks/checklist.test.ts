@@ -21,7 +21,7 @@ test('routing on: the three questions, the bash hook\'s substance, no notes', ()
   expect(block).toContain('(architecture, public interface, data format, cross-module trade-off) -> Agent(planner)')
   expect(block).toContain('Layout and naming are its calls.')
   // not dispatching is the default for small work, and the brief is a handoff packet
-  expect(block).toContain('or a one-file edit -> you')
+  expect(block).toContain('or a one-file edit or fix -> you')
   expect(block).toContain('A brief is a handoff packet, not your trail')
   // escalation on a fact: a check failing twice
   expect(block).toContain('A check failing twice: Agent(coder) at high, or Agent(deep) if the cause is unknown.')

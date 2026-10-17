@@ -28,11 +28,11 @@ export const LANE_BULLET_LANES_REGISTRY = "   - an outside lane's task -> the La
 export const LANE_BULLET_LANES_NONE = "   - no outside lane is enabled: do not call Gemini, Grok or Codex; live web -> Agent(general-purpose, sonnet) with WebSearch; X data, images -> tell the user."
 export const LANE_BULLET_DEEP = "   - a verdict (compare, evaluate, diagnose, review, recommend, formal writing): small material (a few files, under ~200 lines) -> you, with a `Kept:` line; large material, high stakes, a second failure or unsure -> Agent(deep)."
 export const LANE_BULLET_PLANNER = "   - a decision the user did not make (architecture, public interface, data format, cross-module trade-off) -> Agent(planner), then Agent(coder)."
-export const LANE_BULLET_CODER = "   - code beyond one file, goal clear -> Agent(coder); a bug with a failing test -> Agent(coder, model haiku) first, the test is the check; still failing -> Agent(coder) at high. Layout and naming are its calls."
+export const LANE_BULLET_CODER = "   - code beyond one file, goal clear -> Agent(coder); a failing-test bug there -> Agent(coder, model haiku) first, the test is the check; still failing -> Agent(coder) at high. Layout and naming are its calls."
 export const LANE_BULLET_REVIEW_BUILTIN = "   - a diff to review -> Codex, else Agent(deep)."
 export const LANE_BULLET_REVIEW_REGISTRY = "   - a diff to review -> the lane tagged review, else Agent(deep)."
 export const LANE_BULLET_REVIEW_NONE = "   - a diff to review -> Agent(deep)."
-export const LANE_BULLET_YOU = "   - the answer is in a file, a command's output or your knowledge, or a one-file edit -> you; a kept verdict needs a `Kept:` line."
+export const LANE_BULLET_YOU = "   - the answer is in a file, a command's output or your knowledge, or a one-file edit or fix -> you; a kept verdict needs a `Kept:` line."
 export const LANE_BULLETS_BUILTIN: readonly string[] = [LANE_BULLET_LANES_BUILTIN, LANE_BULLET_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_BUILTIN, LANE_BULLET_YOU]
 export const LANE_BULLETS_REGISTRY: readonly string[] = [LANE_BULLET_LANES_REGISTRY, LANE_BULLET_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_REGISTRY, LANE_BULLET_YOU]
 export const LANE_BULLETS_NONE: readonly string[] = [LANE_BULLET_LANES_NONE, LANE_BULLET_DEEP, LANE_BULLET_PLANNER, LANE_BULLET_CODER, LANE_BULLET_REVIEW_NONE, LANE_BULLET_YOU]
@@ -55,11 +55,11 @@ export const CHECKLIST_TEMPLATE: readonly string[] = [
   "{none}   - no outside lane is enabled: do not call Gemini, Grok or Codex; live web -> Agent(general-purpose, sonnet) with WebSearch; X data, images -> tell the user.",
   "   - a verdict (compare, evaluate, diagnose, review, recommend, formal writing): small material (a few files, under ~200 lines) -> you, with a `Kept:` line; large material, high stakes, a second failure or unsure -> Agent(deep).",
   "   - a decision the user did not make (architecture, public interface, data format, cross-module trade-off) -> Agent(planner), then Agent(coder).",
-  "   - code beyond one file, goal clear -> Agent(coder); a bug with a failing test -> Agent(coder, model haiku) first, the test is the check; still failing -> Agent(coder) at high. Layout and naming are its calls.",
+  "   - code beyond one file, goal clear -> Agent(coder); a failing-test bug there -> Agent(coder, model haiku) first, the test is the check; still failing -> Agent(coder) at high. Layout and naming are its calls.",
   "{builtin}   - a diff to review -> Codex, else Agent(deep).",
   "{registry}   - a diff to review -> the lane tagged review, else Agent(deep).",
   "{none}   - a diff to review -> Agent(deep).",
-  "   - the answer is in a file, a command's output or your knowledge, or a one-file edit -> you; a kept verdict needs a `Kept:` line.",
+  "   - the answer is in a file, a command's output or your knowledge, or a one-file edit or fix -> you; a kept verdict needs a `Kept:` line.",
   "   A prompt that mixes kinds is split by kind. Effort for every delegate. A brief is a handoff packet, not your trail; one saying how is a design: planner. A check failing twice: Agent(coder) at high, or Agent(deep) if the cause is unknown.",
   "{hint}",
   "3. Goal-shaped? A machine-checkable finish (tests, build, exit 0) needing several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line.",

@@ -50,7 +50,7 @@
     {
       "id": "code",
       "order": 7,
-      "label": "changed code beyond one file where the goal is clear, or a bug with a failing test (Haiku coder first, Sonnet after a failed check); layout, naming and file choice are the coder's",
+      "label": "changed code beyond one file where the goal is clear (a failing-test bug there: Haiku coder first, Sonnet after a failed check); layout, naming and file choice are the coder's",
       "route": "agent:coder"
     },
     {
@@ -64,7 +64,7 @@
     {
       "id": "lookup",
       "order": 9,
-      "label": "the answer is already in a file here, a command's output or your own knowledge; a one-file edit",
+      "label": "the answer is already in a file here, a command's output or your own knowledge; a one-file edit or fix",
       "route": "self"
     }
   ],
@@ -306,7 +306,7 @@
         "kinds": [
           "code"
         ],
-        "text": "   - code beyond one file, goal clear -> Agent(coder); a bug with a failing test -> Agent(coder, model haiku) first, the test is the check; still failing -> Agent(coder) at high. Layout and naming are its calls."
+        "text": "   - code beyond one file, goal clear -> Agent(coder); a failing-test bug there -> Agent(coder, model haiku) first, the test is the check; still failing -> Agent(coder) at high. Layout and naming are its calls."
       },
       {
         "name": "REVIEW",
@@ -322,7 +322,7 @@
         "kinds": [
           "lookup"
         ],
-        "text": "   - the answer is in a file, a command's output or your knowledge, or a one-file edit -> you; a kept verdict needs a `Kept:` line."
+        "text": "   - the answer is in a file, a command's output or your knowledge, or a one-file edit or fix -> you; a kept verdict needs a `Kept:` line."
       }
     ],
     "tail": "   A prompt that mixes kinds is split by kind. Effort for every delegate. A brief is a handoff packet, not your trail; one saying how is a design: planner. A check failing twice: Agent(coder) at high, or Agent(deep) if the cause is unknown.",
