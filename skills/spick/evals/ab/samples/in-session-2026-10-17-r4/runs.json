@@ -1,0 +1,73 @@
+{
+ "haiku-spick/T10/run-1": {
+  "agent": "a3bcf932ec1ae9633",
+  "nested": [
+   "a538d6f79ae522da9"
+  ],
+  "wall_s": 42.7,
+  "own_usage": {
+   "in": 24,
+   "out": 2149,
+   "cache_read": 973830,
+   "cache_write": 155166
+  },
+  "api_calls": 12,
+  "has_report": true
+ },
+ "haiku-spick/T10/run-2": {
+  "agent": "a7af23fbdc012483e",
+  "nested": [
+   "a73dc20fb63a42e1a"
+  ],
+  "wall_s": 39.3,
+  "own_usage": {
+   "in": 20,
+   "out": 505,
+   "cache_read": 710746,
+   "cache_write": 125174
+  },
+  "api_calls": 9,
+  "has_report": true
+ },
+ "haiku-spick/T10/run-3": {
+  "agent": "aeec3228e888b0898",
+  "nested": [
+   "aab7c46754f95ef44"
+  ],
+  "wall_s": 46.2,
+  "own_usage": {
+   "in": 26,
+   "out": 748,
+   "cache_read": 1093399,
+   "cache_write": 129766
+  },
+  "api_calls": 13,
+  "has_report": true
+ },
+ "haiku-bare/T10/run-1": {
+  "agent": "aaadbe263bd1af3aa",
+  "nested": [],
+  "wall_s": 30.9,
+  "own_usage": {
+   "in": 26,
+   "out": 1419,
+   "cache_read": 248322,
+   "cache_write": 34300
+  },
+  "api_calls": 13,
+  "has_report": true
+ },
+ "haiku-bare/T10/run-2": {
+  "agent": "a9193e343ea6b7353",
+  "nested": [],
+  "wall_s": 24.9,
+  "own_usage": {
+   "in": 20,
+   "out": 3531,
+   "cache_read": 172239,
+   "cache_write": 31057
+  },
+  "api_calls": 10,
+  "has_report": true
+ }
+}

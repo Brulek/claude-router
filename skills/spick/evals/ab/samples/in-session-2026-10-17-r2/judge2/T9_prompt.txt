@@ -1,0 +1,393 @@
+你是独立评审（第二裁判）。下面是同一任务的 10 份回答，标签为 A, B, C, D, E, F, G, H, I, J，你不知道它们由谁生成，也不要猜测来源。
+任务要求：审查 mod/ 下六个 TypeScript 模块中 guard、gate、turn 记录三块逻辑，找出最多 5 个真实缺陷，各给文件:行号、触发条件与后果。评分参考（四个已知缺陷，由独立评审在该版本代码上复现）：
+已知缺陷（评审参考，由独立评审在该版本代码上复现）：
+K1 检查误判：guard.ts:85 的 checkOf 把 `true || pytest`、`pytest; true`、`pytest | cat` 这类复合命令当作检查，而 register.tsx:888 只看整条 Bash 的退出状态；register.tsx:481 在 next(Edit) 之前就递增编辑计数，于是编辑尚未完成时跑的测试也被算作"编辑之后"（coversTurn:true）。
+K2 完成状态可伪造：format.ts:81 只要引号参数含 review 就算 review 调用，register.tsx:896 以整条 Bash 成功为完成，所以 `codex exec --help "review"`、`true || codex exec "review"` 都生成 completed review；register.tsx:795 前台 deep 仅凭工具返回非空就记 completed。
+K3 记账遗漏：register.tsx:781/849 只为主循环（!e.agentId）的 Agent/CLI 调用建 delegate 记录，嵌套委派不进 turn 记录；register.tsx:538/598 超时后删除索引，之后完成无法补写 late 行，用量丢失。
+K4 冷缓存回退：register.tsx:72 从 quota 缓存读 lane 状态，缓存缺失返回 null，checklist.ts:87 把 null 当作"无 registry"，于是配置里已禁用的 Gemini/Grok/Codex 又被推荐。
+
+请按 1-5 分分别给：召回（找到了几个已知缺陷；K1 与 K2 各算一分，K3 与 K4 各算半分，找全得 5）、准确（有无编造或误报的缺陷；与参考不同但有行号与触发条件、看起来成立的缺陷不扣分）、证据（行号与触发条件是否具体且与参考一致）、排序与后果是否合理、表达是否简洁。最后给 overall 1-5。
+只依据内容评分。
+
+=== 回答 A ===
+1. **register.tsx:397-408, 538-545, 598, 799, 994-1002 (超时记账)。超时会把仍在运行或随后正常完成的委派永久记成 `failed`。**
+   - 触发条件:一个 Agent 调用(前台或后台的 deep)超过 `STALE_MS`(30 分钟)没有完成信号,又在同一主回合内正常结束。
+   - 过程:`sweepStale` 把它移出 `inFlight`,`onTimeout` 调 `settle(id,'failed')`。`settle` 同时执行 `delegateOfCall.delete(id)`。
+   - 之后真正完成时,`turn.complete`(994、1001)和 `finally`(799)再调 `settle`,都因查不到记录而无效。注释写着"completion is never taken back",代码实际是把失败固化了。
+   - 后果:
+     - 门:`roleDone` 只认 `completed` 或 `running`,这个 deep 已是 `failed`,所以 stop 时门会误触发,把已交付的回合打回。
+     - 记账:`d` 为 undefined,usage 和成本永远记不上(995)。`isRecorded` 的迟到行也不再写(1004)。
+     - 回合记录:这条委派的 `ok=false`。
+   - 同处还有一个小问题:598 行的 `Date.now()` 与其余处用的 `$.clock.now()` 混用。时钟不一致时 `ms` 会被 `Math.max(0,…)` 钳成 0。
+
+2. **guard.ts:85-97(行 94 是唯一的退出码判断),配合 register.tsx:890。`checkOf` 只排除后面跟 `||` 的检查。检查后接 `;`、`&` 或后台运行时,退出码被丢掉,仍判为"检查通过"。**
+   - 触发条件:`pytest; echo done`、`tsc ; true`、`pytest &`。
+   - 过程:这些都解析为检查,但工具结果的退出状态是最后一条命令的,所以 `exitOk=true`。
+   - 后果:
+     - 失败的测试被当作"编辑后已通过检查",`isChecked` 为真,stop 不再被打回。
+     - 连续两次失败也不会累计到 `ESCALATE_AFTER`,因为 `r.isError` 为 false。
+   - 文档注释只承认管道 `|` 是已知盲区,实际 `;` 和 `&` 同样漏。
+
+3. **register.tsx:778-786 (嵌套委派)。子代理再起的 Agent 调用被当成主回合的委派来记。**
+   - 触发条件:coder 或 deep 子代理内部又调了 Agent(例如 Explore)。
+   - 具体缺陷:
+     - 780 行 `delegate = entry` 没有 `if (!e.agentId)` 保护,而旁边的 `DelegateRec`(781 行)和 CLI 分支(849 行)都有这个保护。
+     - 777 行的 `++agentsThisTurn` 同样把嵌套调用计入。
+   - 后果:
+     - 1040 行用 `delegate` 决定整个回合记在哪个 lane,于是整回合会被记在嵌套的 Explore 名下,而不是主会话真正委派的 coder 或 deep。
+     - 横幅上的 `agents` 数和 `agentIndex` 被虚增。
+   - 相关遗漏:嵌套子代理自己的 `turn.complete` 找不到 `DelegateRec`(994 行 `d` 为 undefined),它的 usage 只进 lane 总计,不进父委派。回合记录里该委派的成本和 token 偏低。
+
+4. **guard.ts:61。`isTestScript` 只判断"首词含 `/` 且文件名含 `test`"。**
+   - 触发条件:`./scripts/latest.sh`、`/usr/bin/attest`、`./fastest`、`./contest.sh`。"latest"、"attest"、"fastest"、"protest" 里都含 `test`,而 `/test/i` 没有词边界。
+   - 过程:这类命令被当成检查,并绕过 `RUNNERS` 和 `declared`。
+   - 后果:只要退出码为 0,就算"编辑后已通过检查",未验证的源码编辑会漏过 stop 时的 guard。
+   - 同类的小问题:`make test-data`、`make check-deps` 因为 `\b` 在 `-` 前成立而被误判为检查。
+
+5. **register.tsx:471-486 与 905-916。编辑在 `tool.call` 阶段就记入 `mainEdits`、`sourceEdits` 并 `editCount++`,此时 `next(e)` 还没执行。**
+   - 触发条件:Edit 之后实际失败,例如 `old_string` 不唯一或找不到,或后面的钩子拒绝。
+   - 后果:
+     - 失败的编辑也占用 `EDIT_CAP=1` 的名额,同回合改第二个文件会被误拒。
+     - `sourceEdits` 非空且 `editCount` 增加,让之前已通过的检查失去 `coversTurn`,回合被要求重跑检查,而文件其实没改。
+     - `agentFiles` 和 `files` 也会列出实际没改动的文件。
+   - 同函数还有一个小问题:`mainEdits` 按原始路径字符串比较(473 行),`./a.ts` 与绝对路径指向同一个文件时,会被当作两个文件而误触发上限。
+
+按要求未修改任何文件,也未运行测试。
+
+=== 回答 B ===
+找到 5 个缺陷（按严重度排序）。只读审查，未修改文件，未运行测试。文件路径均在 /private/tmp/claude-501/-Users-brulek-Documents-Developer/d15fe6ce-532d-4271-89ed-d39ed6c5f409/scratchpad/ab/r2/haiku-bare/T9/run-1/work/mod/ 下。
+
+1. register.tsx:231-235（turn 记录写入）— 读失败被当成空文件，随后整文件覆盖。
+触发：某个已有的 part 文件 $.fs.read 抛错（非 ENOENT 的读错误，或文件超限）。第 231 行 catch 把 prev 置为 ''，第 232 行 `prev.length === 0` 直接 break，第 235 行用 appendLines('', batch) 整文件写回。
+后果：该 session 此前所有 turn 记录被清空，spend.py / audit.py 的历史数据丢失。
+另：第 232 行的 TURNS_PART_BYTES（3.5M）按 UTF-16 字符数计，而注释说的是 4 MiB 字节上限；含大量中文的行会超限。
+UNSURE: $.fs.read 在超限或非 ENOENT 错误时是否抛错，需看引擎实现；turnlog.ts 不在本目录，未核实 appendLines。
+
+2. register.tsx:538-545、400-405、598、993-1002、894-900（超时后迟到完成的调用）— 记录仍为 failed。
+触发：前台 Agent 或 CLI 调用运行超过 STALE_MS（format.ts:259，30 分钟）；sweep 在子代理的 tool.call 上运行（第 764 行），因此会在调用未结束时把它判为超时（第 400-405 行调用 settle(...,'failed')，并从 delegateOfCall 删除）。之后调用正常返回，第 896 行与第 1002 行的 settle 都因找不到记录而直接返回；第 995 行的 d 为 undefined，usage 丢失。CLI 调用的超时行也不会被清除（第 894-900 行没有 timedOut.delete），直到下一个 prompt 才消失。
+后果：turn 记录中该 delegate 为 ok:false，且 gate.ts 的 roleDone 判为未完成，classic.Stop（第 951 行）会对一个实际已交付的 verdict 发出一次误判的 send-back。
+
+3. register.tsx:481-484 与 905-910（编辑计数先于执行）— 失败的 Edit/Write 仍被计入。
+触发：guardEdit 在 next(e) 之前把路径加入 mainEdits 与 sourceEdits；随后 Edit 因 old_string 不匹配等原因报错，或被其它 hook 拒绝。
+后果：一次没有真正落盘的编辑占满 EDIT_CAP=1，之后第二个真实文件被 cap 拒绝（editCapReason 说"already edited X itself"）；且只要 sourceEdits 非空，classic.Stop 第 952 行就会以"source files were edited"送回一次，要求跑检查，即使实际没有改动。
+
+4. guard.ts:53-54（命令前缀解析）— 包装器带参数时，真正的命令词会被漏掉。
+触发：`timeout 60 pytest`、`nice -n 10 pytest`（10 被当成命令词）、`sudo -u user pytest`、`pnpm -s test`。timeout 不在 PREFIX_WORDS 中；带值的标志只跳过以 - 开头的词，其后的值会终止解析。
+后果：真实跑过的检查不被 checkOf 认可，isChecked 为假，classic.Stop 第 952 行误发 "no check passed" 的送回。
+
+5. register.tsx:778-780 与 782-785、1040（嵌套委派的归属）— 嵌套 Agent 调用会把 `delegate` 设为自己，却不进入 delegatesOfTurn。
+触发：子代理再发起 Agent 调用（e.agentId 已设置），之后主循环没有新的委派。
+后果：第 1040 行 `who = delegate ?? mainLane()` 把 turn 记录的 lane/model 记为孙代理，而 gate 的 roleDone 只看 delegatesOfTurn，二者对"这一轮委派了什么"的判断不一致。
+UNSURE: 这是否为有意设计（"最近的委派"包含嵌套调用）；代码注释只写"latest delegate"，未说明。
+
+=== 回答 C ===
+共找到 5 处缺陷，按严重度排序（只读审查，未改文件、未跑测试）。注：register.tsx 实际 1,423 行，不是约 1,100 行。
+
+1. guard 误判通过：`;` 或换行后接的命令会让失败的检查被记为通过。
+- 位置：register.tsx:890-891（exitOk 取整条 Bash 结果的状态），guard.ts:85-98（checkOf 只返回第一个命中的检查，且只在 `||` 时跳过）。
+- 触发：`pytest -q; echo done`，或 `tsc; pytest` 其中 tsc 失败而 pytest 通过。shell 的退出码是最后一条命令的，所以整条结果 `!r.isError`，CheckRun 记为 exitOk=true 且 coversTurn 成立。
+- 后果：测试或类型检查实际失败，但 isChecked 为真，guard 不会把回合退回去，编辑过的源码可以带着失败的检查结束回合。注释（guard.ts:67-69）只说明了管道和 `||` 的盲点，没有覆盖 `;`。
+
+2. 跑满 30 分钟的委派被记为失败，之后即使完成也改不回来。
+- 位置：register.tsx:397-404（sweepStale 调 onTimeout）、598（onTimeout = settle(id,'failed')）、538-545（settle 设置 status 后 delegateOfCall.delete）、1002（turn.complete 时 settle 找不到记录，直接返回）、1004-1006（后记行仍写 failed）；gate.ts:31-32（roleDone 只认 completed 或 running）。
+- 触发：一个 deep 子代理（或 CLI 调用）运行超过 STALE_MS（format.ts:259，30 分钟），之后正常完成。
+- 后果：该委派在回合记录里一直是 failed，后记行也是 failed；回合结束时 roleDone('deep') 为假，gate 会误退回一次，并写出「no deep run completed」的错误说明。
+
+3. 被拒绝或失败的后台 Agent 调用一直留在 inFlight 里。
+- 位置：register.tsx:798（后台且 completed 才不 settle）与 804（isBackground 不看 status）、821（deny 时不加入 backgroundCalls）。
+- 触发：Agent 调用带 run_in_background:true 且被 deny（或报错）。
+- 后果：798 行把它 settle 成 refused/failed，但 804 行判为后台，不从 inFlight 删除。band 的 lane 仍显示它，运行列表里也保留它，直到 30 分钟后被 sweep 挪进 timedOut，显示成一个超时的运行中代理。
+
+4. 嵌套委派覆盖了主回合的 delegate（UNSURE：是否为设计意图需要作者确认）。
+- 位置：register.tsx:778-780（`delegate = entry` 对子代理发起的嵌套 Agent 调用也执行，没有 `!e.agentId` 判断，而 CLI 分支在 853-855 有判断）；1040（回合记在 `delegate ?? mainLane()` 下）。
+- 触发：子代理自己再调用一次 Agent（嵌套委派），且主回合之后没有新的委派。
+- 后果：回合记录的 lane/model 写成嵌套子代理的，而不是主会话的。嵌套调用也会计入 agentsThisTurn（778），使 band 的 agents 数偏大。
+
+5. guard 把非检查命令认作检查（低严重度）。
+- 位置：guard.ts:18（xcodebuild 正则不限子命令）、guard.ts:41（NOT_A_RUN 只认 `--version`，不认 `-version`）、guard.ts:61（isTestScript 用 /test/i 匹配基名）。
+- 触发：`xcodebuild -version`，或 `./scripts/update-latest.sh`（"latest" 含 "test"）。
+- 后果：这些命令退出码为 0，会被记为通过的检查，覆盖掉本该要求的检查。
+
+=== 回答 D ===
+共找到 5 个缺陷,按严重度排序。均为只读代码审查,未运行测试。
+
+**1. 超时的委派之后正常完成,仍被永久记为 failed,用量丢失,gate 误触发(turn 记账 + gate,高)**
+- 位置:`register.tsx:598`(`onTimeout` 调 `settle(id,'failed',Date.now())`),`register.tsx:538-545`(`settle` 末尾 `delegateOfCall.delete(id)`),`register.tsx:994-1002`(`turn.complete` 里 `delegateOfCall.get(call)`),`gate.ts:31-35`(`roleDone`)。
+- 触发条件:一个 deep/coder 子代理(后台代理尤其常见)运行超过 `STALE_MS`(30 分钟)。`sweepStale` 把它移出 `inFlight`,`onTimeout` 把记录定为 failed 并从 `delegateOfCall` 删除。它之后正常结束时:
+  - `turn.complete` 里 `d` 为 undefined,`d.usage` 不累加。
+  - `settle` 是空操作,状态不会改回 completed。
+  - `d?.isRecorded` 为假,不写迟到行。
+- 后果:
+  - turn 记录里这个委派永远是 failed,用量和费用丢失,`spend.py` 和 `audit.py` 的数字偏低。
+  - 同一轮若尚未 Stop,`roleDone('deep')` 为假。deep 其实交了结果,gate 仍会把这一轮打回。
+  - `timedOut` 里那一行被删,界面没有任何痕迹说明它完成了。
+
+**2. 嵌套委派(子代理再调 Agent)的记账不一致,用量和归属丢失(turn 记账,中高)**
+- 位置:`register.tsx:778-780`(`++agentsThisTurn`、`inFlight.set`、`delegate = entry` 对嵌套调用也执行),`register.tsx:781`(`if (!e.agentId)` 只保护 `delegatesOfTurn` 和 `delegateOfCall`),`register.tsx:994-995`。
+- 触发条件:子代理(带 `agentId`)自己调用 Agent。
+- 后果:
+  - 嵌套调用占用 `inFlight` 和 `agentsThisTurn`,还覆盖了 `delegate`。本轮最终记在嵌套代理的 lane 名下,而不是主会话直接派的委派(`register.tsx:1030` 附近的 `who = delegate ?? mainLane()`)。
+  - 它不在 `delegatesOfTurn` 里,`turn.complete` 时 `delegateOfCall.get(call)` 为 undefined。嵌套代理的 token 和费用既不进自己的条目,也不汇入父委派的 `usage`,turn 行的 `delegates` 少记了这部分成本。
+  - 对比 CLI 路径(`register.tsx:850` 附近)整体用 `!e.agentId` 排除嵌套,Agent 路径只排除了一半。
+
+**3. 失败或被拒的后台 Agent 调用会在 inFlight 里残留 30 分钟,最后变成"超时"(嵌套/超时记账,中)**
+- 位置:`register.tsx:798`(第一处 `isBackground` 带 `&& status === 'completed'`)对比 `register.tsx:804`(第二处不带)。
+- 触发条件:`run_in_background === true` 或 `backgroundCalls` 含此 id 的 Agent 调用,自身报错或被拒(`status` 为 failed 或 refused)。
+- 后果:
+  - 第一处判定"不是后台",`settle` 为 failed 或 refused,这一步正确。
+  - 第二处判定"是后台",不执行 `inFlight.delete(id)`,而且这个调用没有子代理,永远不会有 `turn.complete` 来清理。
+  - 条幅上挂着一个幽灵代理 30 分钟,期间 `dropFinishedCalls` 也删不掉它(`isRunningAgentCall` 为假时才会被删,但它只在下一次 turn.start/complete 时清理,轮内会一直显示)。
+  - 之后它又被 `sweepStale` 当作"超时"列出,并再次触发 `onTimeout`(此时是空操作)。
+  - 应让两处共用同一个 `isBackground` 判定。
+
+**4. 编辑在真正执行前就被计数,失败的编辑也会让"检查"失效(guard,中)**
+- 位置:`register.tsx:481-484`(`guardEdit` 里 `mainEdits/sourceEdits.add` 和 `editCount++`),`register.tsx:905-920`(`await guardEdit` 之后才 `next(e)`),`register.tsx:891` 与 `register.tsx:462`(`editsDuring` 与 `isChecked` 依赖 `editCount`)。
+- 触发条件:Edit/Write 在 `next` 阶段失败(例如 `old_string` 没匹配上、文件不存在、被后续 hook 拒绝),或模型对同一文件反复试错。
+- 后果:
+  - 没有落盘的编辑也让 `editCount++`。先跑过且通过的检查,其 `editsAtStart !== editCount`,`coversTurn` 变假。
+  - `isUnchecked` 为真,Stop 被打回一次,要求重跑检查。
+  - 一个纯失败的 Edit 也会让 `sourceEdits.size > 0`,对一个其实没改动任何源码的轮次触发"未验证"。
+  - `uncheckedReason` 里列出的文件也不是真被改过的文件。
+  - 应在 `next` 成功返回后再计数。
+- 另外两个同源的小问题:
+  - 路径未规范化(`register.tsx:481` 的 `path` 直接入 Set),`./a.ts`、`a.ts`、绝对路径会被当成两个文件。这会误触发编辑上限(`EDIT_CAP=1`),把同一个文件的第二次编辑拒掉。
+  - `NotebookEdit`(`register.tsx:917-921`)没有调 `noteEdit`,与 Edit/Write 不一致,影响很小。
+
+**5. `checkOf` 的 key 把带值的 flag 的值当成 target,同一个检查被拆成不同 key,升级计数失效(guard,低)**
+- 位置:`guard.ts:97`(`args.filter(a => !a.startsWith('-'))`),消费方在 `register.tsx:876-877`(`failures` 按 `run.key` 计数)。
+- 触发条件:`pytest -k foo tests/a.py` 失败一次,再 `pytest tests/a.py` 或 `pytest -k bar tests/a.py` 失败一次。flag 被丢掉,但它的值(`foo`、`bar`)留在 key 里。
+- 后果:同一组测试因改了 `-k`、`--maxfail 1`、`-n 4` 等带值参数就算"另一个检查"。`ESCALATE_AFTER=2` 迟迟不触发,模型会多修几轮才被要求升级。
+- 附带的同类漏判:
+  - `guard.ts:36-39` 的前缀表不认 `timeout 60 pytest` 和 `sudo -u user pytest`。检查被漏识别,只会让 Stop 多打回一次,影响不大。
+  - 带 `-version` 的 `xcodebuild` 不在 `NOT_A_RUN` 里,会被当成检查。
+
+补充说明:
+- gate 的判定本身(`gate.ts` 的 `roleDone`、`gateFiring`、`gateOutcome`)逻辑自洽。`running` 的 deep 视为完成是文档化的设计,不算缺陷。上面第 1 条是 gate 受 register.tsx 记账影响出错,而不是 gate.ts 自身的错。
+- UNSURE:第 1 条里"后台代理超过 30 分钟是否算正常"取决于产品意图。若 `STALE_MS` 本意就是"超过即失败",那至少"完成后不改回状态、丢用量"仍是缺陷。
+- UNSURE:`register.tsx:994-1002` 注释说用量是"summed over its turn.complete events",但第一次 `turn.complete` 就 `settle` 并 `callOfAgent.delete`,同一子代理(例如被 SendMessage 续跑)后续的 `turn.complete` 用量会丢。我没有引擎文档,无法确认续跑是否会产生多次 `turn.complete`,所以没有单独列为缺陷。
+
+审查的文件:`/private/tmp/claude-501/-Users-brulek-Documents-Developer/d15fe6ce-532d-4271-89ed-d39ed6c5f409/scratchpad/ab/r2/sonnet-bare/T9/run-1/work/mod/` 下的 `guard.ts`、`gate.ts`、`register.tsx`。`format.ts`、`checklist.ts`、`quotaline.ts` 未读(与这三块逻辑无直接关系)。没有修改任何文件。
+
+=== 回答 E ===
+共找到 5 个真实缺陷，按严重度从高到低排列。只读代码，未修改文件，未运行测试。文件均在 /private/tmp/claude-501/-Users-brulek-Documents-Developer/d15fe6ce-532d-4271-89ed-d39ed6c5f409/scratchpad/ab/r2/haiku-spick/T9/run-1/work/mod/ 下。主会话抽查了其中关键行（register.tsx:598、537-545、481-484；guard.ts:94；format.ts:259），与引用一致。
+
+1. 【高】运行超过 30 分钟的委派被永久记为 failed，之后真正完成也无法改回。
+ - register.tsx:598 的超时回调直接 settle(id,'failed')；register.tsx:538-545 的 settle 在改状态后把记录从 delegateOfCall 删除；register.tsx:764 的任意 tool.call 都会触发 sweep（子代理自己的调用也算）；register.tsx:993-1007 后续的 turn.complete 查 delegateOfCall 得到 undefined；gate.ts:32 只认 completed 或 running。
+ - 触发：deep 子代理或 CLI review 运行超过 STALE_MS（format.ts:259，30 分钟），且期间有工具调用（前台 deep 的工具调用同样触发）。
+ - 后果：gate 误判，roleDone('deep') 为 false，Stop 时发回并诱导再派一次 Opus；后台子代理超时后不写 late line，主行停在 running、ms 为 null；之后的 usage 挂不到记录上，spend 少算；超时用 Date.now() 而非 $.clock.now()。
+
+2. 【高】guard 把整条命令的退出码当成检查的退出码，只排除了 ||。
+ - guard.ts:94 只判断 parts[k+1] === '||'；guard.ts:85 按 ; & 换行切分后，后随分隔符一律不管；register.tsx:890 的 run.exitOk = !r.isError 取的是整条 Bash 结果；register.tsx:836-846 未读取 run_in_background。
+ - 触发：`npm test; echo "exit $?"`、`pytest > out.txt; tail out.txt`、`pytest; true`、`cargo test &`，或 Bash 设 run_in_background: true。
+ - 后果：测试失败也被记为 exitOk: true，coversTurn 为真，guard 放行。guard.ts:66-69 的注释只承认了管道这一盲区，与代码矛盾。
+ - 未完全确认：run_in_background 那半条依赖 Bash 事件信封带该字段（目录内无 engine 类型定义，Agent 处理器 804 行读了同名字段，故较可能）。; 与 & 那半条不依赖此前提。
+
+3. 【中】编辑在执行前就计数，被拒或失败的编辑也占名额。
+ - register.tsx:481-484 的 mainEdits.add、sourceEdits.add、editCount++ 在 next(e) 之前；906-909 的 Edit/Write 与 917-921 的 NotebookEdit 同样。
+ - 触发：Edit 被用户拒绝、被其他钩子 deny，或 old_string 未匹配。
+ - 后果：失败的编辑占满 EDIT_CAP=1 的名额，改真正目标文件会被拦（理由是“已改过 A”，而 A 并未改动）；sourceEdits 多出未改动的文件，guard 因此发回；若发生在通过的检查之后，editCount 变化使该检查失效（register.tsx:380），已验证的一轮被要求重跑。
+
+4. 【中低】嵌套委派改写主轮记账。
+ - register.tsx:778-780 的 agentIndex: ++agentsThisTurn 与 delegate = entry 未判断 !e.agentId；只有 781 行建 DelegateRec 时排除了子代理。
+ - 触发：子代理（如 deep）自己再调 Agent，或上一轮遗留的后台子代理在本轮发起嵌套调用。
+ - 后果：主轮 agents 计数混入嵌套调用；1040 行用 delegate 定归属，本轮可能被记在嵌套子代理的 lane 与模型下；嵌套子代理无 DelegateRec，993-995 行的 usage 挂不上。
+ - 未完全确认：“嵌套 usage 丢失”依赖父子 turn.complete 的 usage 不含子代理部分，代码内无法核实；计数与归属被改写一条是确定的。
+
+5. 【低】检查识别用子串 test，误把 latest 之类名字当检查。
+ - guard.ts:61 的 isTestScript 只看 /test/i.test(base)；guard.ts:21 的 \S*tests?\.py；guard.ts:24 的 (?:bash|sh|zsh)\s+\S*test。
+ - 触发：./scripts/latest-release.sh、python3 latest.py、bash deploy-latest.sh、/usr/bin/test -d dir。
+ - 后果：一条与测试无关、退出码为 0 的命令即可满足 guard，源码已改却未跑真正检查。
+
+=== 回答 F ===
+共找到 5 个缺陷，按严重度排序。只读审查，未修改文件，未运行测试。
+
+1. [高] guard.ts:94-97，checkOf 只跳过 `||` 后接的检查。
+文件：/private/tmp/claude-501/-Users-brulek-Documents-Developer/d15fe6ce-532d-4271-89ed-d39ed6c5f409/scratchpad/ab/r2/haiku-bare/T9/run-2/work/mod/guard.ts
+触发：Bash 命令 `pytest; echo done`、`(pytest) || true`、`npm test; true`。pytest 失败，但行末命令退出 0，工具结果不是 isError。
+后果：checkOf 返回 pytest，register.tsx:890 置 exitOk 为 true，isChecked（register.tsx:462）成立，classic.Stop（register.tsx:952）不把回合退回，源码改动未经检查即结束。guard.ts:66-69 的注释只说明了 `||` 与管道两种情况。
+
+2. [高] register.tsx:397-408、538-545、997-1007，超时后才完成的委派，用量和 late 行丢失，并被门禁按失败计。
+文件：/private/tmp/claude-501/-Users-brulek-Documents-Developer/d15fe6ce-532d-4271-89ed-d39ed6c5f409/scratchpad/ab/r2/haiku-bare/T9/run-2/work/mod/register.tsx
+触发：某个 Agent 调用的子代理 30 分钟内无完成信号。sweepStale 调 onTimeout，即 settle(id,'failed')，并从 delegateOfCall 删除该记录（544 行）。之后子代理才结束。
+后果：turn.complete 中 d 为 undefined（1001 行），usage 不写入（995 行），late 行也不写（1004 行）。回合记录中该委派 ok:false、costUsd:null，实际花费却漏计，spend 偏低。gate.ts:32 的 roleDone 也把它当作失败，所以即使 deep 已交出结论，回合仍可能被门禁退回。
+
+3. [中] register.tsx:798 与 804-807，被拒或报错的后台 Agent 调用，其车道滞留在 inFlight。
+文件：同上 register.tsx
+触发：Agent 调用带 run_in_background: true，结果为 deny（agent.spawn 因 821 行的 `!r.deny` 不记入 backgroundCalls）或 isError。
+后果：798 行对 status 做了判断，settle 已执行；但 804 行的 isBackground 不看 status，为 true，于是 806-807 行的 inFlight.delete 被跳过。该车道在本回合剩余时间内留在频带与 Running 列表中，showing（581-584 行）也会选中它。回合结束时 dropFinishedCalls（1022 行）才清掉。
+
+4. [中] guard.ts:18，`ruff`、`eslint`、`tsc` 等只匹配命令词，不看子命令。UNSURE: 是否有意把格式化计为检查，需要确认。
+文件：同上 guard.ts
+触发：编辑源码后执行 `ruff format src/`、`eslint --fix .` 或 `tsc --init`，三者退出码均为 0。
+后果：checkOf 计为通过的检查，guard 不要求真正的测试或构建。guard.ts:12-13 的注释称检查为测试、构建、linter 或类型检查器，与此不符。
+
+5. [低] register.tsx:780，嵌套子代理的 Agent 调用也改写 delegate。UNSURE: 注释（532 行）对"最新委派"的含义有歧义，需要确认。
+文件：同上 register.tsx
+触发：子代理自己调用 Agent（e.agentId 有值）。780 行的 `delegate = entry` 不受 `!e.agentId` 限制，而 782-783 行的 delegatesOfTurn 记录却受其限制。
+后果：回合结束时 1040 行的 who = delegate 把回合记录（last、turns）的 lane/model 写成嵌套子代理的车道，而 delegatesOfTurn 中并无此委派，两者不一致。
+
+=== 回答 G ===
+mod/ 三块逻辑的审查结果（只读，未运行测试）：共 5 个缺陷，按严重度排序。
+
+1. 超时后，即使委派真的跑完，也永远记为 failed，gate 会据此误判（高）
+   - 位置：register.tsx:598（onTimeout 调用 settle(id,'failed',…)）；register.tsx:538-545（settle 之后执行 delegateOfCall.delete(id)）；register.tsx:799、896、1001-1007（迟到的完成信号查不到记录）。
+   - 触发条件：前台 Agent(deep) 或 CLI 委派运行超过 STALE_MS（30 分钟，format.ts:259）。sweep 在每次 tool.call 时执行（register.tsx:764），长跑中必然被扫到。
+   - 后果：子代理随后正常返回，但记录已删，状态停在 failed。roleDone('deep')（gate.ts:32）返回 false，gate 以"no deep run completed"打回一个其实已交付结论的回合。后台 agent 的迟到用量也写不进去（register.tsx:1001-1007、994-995）。另外 endedAt 用 Date.now()、startedAt 用 $.clock.now()，两种时钟混用，假时钟下耗时会失真。
+
+2. 检查判定只看整条命令的退出码，失败的检查会被记为通过（高）
+   - 位置：guard.ts:85-97（只处理紧跟 || 的情况，见 guard.ts:94）；register.tsx:890（run.exitOk = … !r.isError）。
+   - 触发条件：检查后接 ;、换行、&，或 && … || … 链，例如 npm test; echo done、pytest && echo ok || echo fail、pytest &、echo $(pytest)。
+   - 后果：末段命令退出 0 则 isError 为假，coversTurn（register.tsx:380）和 isChecked（register.tsx:462）都成立。测试实际失败的回合不会被打回，escalation 的失败计数（register.tsx:875）也拿不到这次失败。guard.ts:66-69 的注释只承认了管道 | 这一盲区。
+
+3. 编辑在执行前就计数，失败或被拒的编辑也算数（中）
+   - 位置：register.tsx:481-484（mainEdits、sourceEdits、editCount++ 都在 next(e) 之前）；register.tsx:906-920 没有按结果回滚。
+   - 触发条件：Edit 因 old_string 不匹配报错，或用户在权限提示中拒绝，或下层钩子 deny。
+   - 后果：改 A 失败后再改 B 会被编辑上限（register.tsx:473）拒绝，而 A 实际未改。检查通过后若再有一次失败的 Edit，editCount 与检查时的 editsAtStart 不再相等（register.tsx:380），回合被判 unchecked，打回理由（register.tsx:966）还会列出根本没改动的文件。
+
+4. 嵌套 Agent 调用覆盖本回合的 delegate 与 agent 计数，turn 记录挂错 lane（中）
+   - 位置：register.tsx:778-780（agentIndex: ++agentsThisTurn 与 delegate = entry 未判断 e.agentId）。对照 register.tsx:781 与 849，DelegateRec 和 CLI 路径都排除了子代理发起的调用，这里没有。
+   - 触发条件：主会话派出的子代理（如 deep、planner）再发起一次 Agent 调用。
+   - 后果：register.tsx:1040 用 delegate 决定记在谁名下，last/turns 会记成孙代理的 lane、model、effort。band 的 agents 计数（register.tsx:786）也把嵌套调用算了进去，与 delegatesOfTurn 对不上。
+
+5. 嵌套子代理的用量从 turn 记录中丢失（中低）
+   - 位置：register.tsx:993-995（delegateOfCall.get(call) 只查得到主会话直接派出的调用）；register.tsx:781（嵌套调用不建 DelegateRec）。
+   - 触发条件：任何嵌套委派，例如 deep 内部再派出 general-purpose。
+   - 后果：孙代理的 token 与费用只进 totals（register.tsx:981-991），不计入父委派的 usage，turn 记录里的委派费用系统性偏低。
+
+注意：以上结论均来自只读阅读，未经运行验证。第 2 条中后台 Bash 是否同样被记为通过，代码中看不到引擎是否传入相关字段，未单列。另有一处取决于引擎语义的疑点（Stop 打回后若换了 turnId，gate 结果可能不被记录），未计为缺陷。
+
+=== 回答 H ===
+找到 5 个真实缺陷：超时 1 个、guard 2 个、gate 1 个、嵌套委派记账 1 个。按严重度排列。mod 目录为 /private/tmp/claude-501/-Users-brulek-Documents-Developer/d15fe6ce-532d-4271-89ed-d39ed6c5f409/scratchpad/ab/r2/haiku-spick/T9/run-3/work/mod/。
+
+1. 高｜超时按"开始至今"计算，误判后不可撤销
+   - 位置：register.tsx:401（`now - l.startedAt < STALE_MS`），连同 :598、:544、:1001-1004、:799
+   - 触发：一次前台 `Agent(deep)` 调用，或一次 `codex exec` review，运行超过 30 分钟。`sweep` 在每次 tool.call 时执行（:764），子代理自己的工具调用也计入，子代理越忙越早被判超时。
+   - 后果：该委派被 `settle(id,'failed', Date.now())` 标为 failed，并从 `delegateOfCall` 删除（:544）。子代理之后正常结束时，:1002 和 :799 的 settle 找不到记录，状态永远停在 failed。Stop 时 `roleDone('deep')` 返回 false，gate 会把一个已正确委派并转述结果的回合退回（"no deep run completed"），gateOutcome 也永远记不到 delegated。turn 记录里该委派为 `ok:false`；超时后的用量因 :994 取不到 d 而丢失，后台委派也因 :1004 的 `d` 为空不再写补记行。`ms` 用 `Date.now()` 计算，而 startedAt 来自 `$.clock`，两者不在同一时钟上。
+   - 理由：注释写的是"无完成信号 30 分钟"，代码量的是存活时长；超时只是猜测，却按"已报告的失败"处理，且不可撤销。
+
+2. 高｜失败的检查被算作通过（guard 的"是否跑过检查"）
+   - 位置：guard.ts:94（只看紧随其后的分隔符是否为 `||`），配合 register.tsx:890（`exitOk` 取整行退出码）
+   - 触发：`pytest; echo done`、`npm test && echo PASS || echo FAIL`、`pytest &` 这类写法。检查后面跟着 `;` 或 `&`，或之后某处有 `||`。
+   - 后果：整行退出码是最后一条命令的，结果为 0，于是 `exitOk=true`、`coversTurn=true`。测试实际失败，guard 仍认定"已检查"，不退回；第 2 次失败的升级提示（:875 依赖 `r.isError`）也永远不会触发。
+   - 理由：文档只承认管道是盲区，但同样的退出码遮蔽在 `;`、`&` 和后置 `||` 上也存在，代码未排除。
+
+3. 中｜编辑在落地前就计数（guard 的编辑计数）
+   - 位置：register.tsx:481-484（`mainEdits.add`、`sourceEdits.add`、`editCount++`）。:906、:912、:918 调用 guardEdit 时尚未执行 `next(e)`，之后也不检查结果。
+   - 触发：Edit 失败（如 old_string 未找到）或被权限拒绝。
+   - 后果：一次未生效的编辑占掉编辑名额，之后对另一文件的真实编辑被拒，并被要求转给 coder。若它发生在一次通过的检查之后，`editsAtStart !== editCount`，回合被判未检查而退回，`uncheckedReason` 还会列出实际没改过的文件。
+   - 理由：计数依据是"发起了编辑"而非"编辑生效"，cap 和 coversTurn 都建立在这个计数上。
+
+4. 中｜嵌套委派的用量不进 turn 记录，回合还会记到孙代理名下
+   - 位置：register.tsx:781（只有主会话的调用才建 DelegateRec），:993-995（用量只挂到 `delegateOfCall.get(call)`），:780（嵌套调用也执行 `delegate = entry`）
+   - 触发：deep 或 coder 子代理再派子代理。:768-787 与 :817-820 明确处理带 `agentId` 的 Agent 调用和 spawn。
+   - 后果：孙代理的 turn.complete 查不到 DelegateRec，用量只进 `totals`，不进 turn 文件，spend.py 读到的每回合委派成本偏低。回合结束时 `last` 和 `turns` 记在"最近一个委派"名下（:1040），可能是孙代理的 lane，而非主会话真正派出的那个。
+   - 理由：嵌套调用占用了全局的 `delegate`、`agentsThisTurn`，用量却无处可归，记账口径不一致。
+
+5. 中低｜后台启动的 review CLI 一启动就被算作"干净返回"（gate）
+   - 位置：register.tsx:896（`settle(id, statusOf(r))`），配合 :857 的 isReview 判定
+   - 触发：`codex exec "review ..." > out.txt 2>&1 &`（parseCli 按 `&` 切段，能识别该 lane）；或 Bash 带 `run_in_background` 启动 review lane（Bash 钩子从不读该字段，Agent 钩子在 :798 读了）。
+   - 后果：Bash 立即返回 0，委派记为 completed，`roleDone('review')` 为真，gate 放行，而 review 结果尚未产生。
+   - 理由：gate 对 review 要求"returned cleanly"，Bash 路径把"进程已派出"当成"结果已返回"，不像 Agent 路径那样区分前台和后台。
+
+不确定之处（均未在代码外核实）：
+- 第 3 条：Edit 结果是否带 `isError` 或 `deny`，是从 :385 `statusOf` 的用法推断的，未见引擎类型定义。
+- 第 5 条：Bash 信封是否带 `run_in_background`，同样未见类型定义；`&` 那条路径不依赖该字段，可直接从代码确认。
+- 第 4 条：嵌套子代理的 spawn 和 turn.complete 事件是否真会到达本 mod，依据的是代码内的处理分支，需实测确认。
+
+本轮未修改任何文件，未运行测试。我抽查了 register.tsx:401、:481-485、:890、:896 与 guard.ts:94，与报告所述一致。
+
+=== 回答 I ===
+共 5 个缺陷,按严重度排序(行号来自 /private/tmp/claude-501/-Users-brulek-Documents-Developer/d15fe6ce-532d-4271-89ed-d39ed6c5f409/scratchpad/ab/r2/sonnet-bare/T9/run-3/work/mod/)。只读代码,未改文件,未跑测试。
+
+1. 超时按"调用开始时间"算,不按"最后一次完成信号"算;超时后委派记账永久丢失(turn 记录 + gate)
+   - 位置:register.tsx:401(`now - l.startedAt < STALE_MS`)、:403、:598(`onTimeout` 调 `settle(id,'failed',Date.now())`)、:992-995 与 :1004-1006(turn.complete 靠 `delegateOfCall.get(call)` 找记录)。
+   - 触发:一个合法的长委派(前台或后台 deep/coder,运行超过 30 分钟)。`sweep` 在每个循环的每次 tool.call、turn.step 上都会跑,所以它还在干活就会被扫走。
+   - 后果:
+     - `settle` 把它标成 failed,并把它从 `delegateOfCall` 删掉。
+     - 它之后正常结束时,turn.complete 里 `d` 为 undefined:用量不会累加进委派,也不会写 `lateLine`,状态也无法改回 completed。注释里"完成不会被收回"只适用于 completed,failed 改不回去。
+     - gate 的 `roleDone`(gate.ts:32)认为 deep 既不是 completed 也不是 running,于是即使 deep 已经交付,gate 仍会误判"缺 deep"并把该 turn 打回一次。
+     - turn 记录里该委派是 failed、成本为 null,与事实相反。
+   - 附带::598 用 `Date.now()`,其余全用 `$.clock.now()`。时钟不一致时 `ms` 会被 `Math.max(0,…)` 截成 0 或异常大。
+
+2. Bash 命令行里"检查"的退出码被后续命令掩盖,仍算 covers-turn(guard 误放行)
+   - 位置:guard.ts:94(只排除 `parts[k+1]==='||'`)与 :85 的分隔符切分;register.tsx:890(`exitOk` 取整条 Bash 的结果)。
+   - 触发:`pytest; echo done`、`pytest; true`、`npm test\nrm x`、`pytest &` 这类写法。`checkOf` 找到第一个 runner 就返回,只看它后面是不是 `||`。
+   - 后果:工具结果的退出码是最后一条命令的,check 失败却 `exitOk=true`,`coversTurn` 为真,"改了源码但没跑过检查"的 Stop 拦截被绕过。文档注释只承认了管道这一个盲区,`;` 和后台 `&` 没有列入。
+   - UNSURE:若 Bash 的 `run_in_background` 调用立即返回成功,同理会被当作通过。我没看到引擎对该字段的定义。
+
+3. 编辑在执行前就记账,失败或被拒的编辑也占用名额并触发"未检查"
+   - 位置:register.tsx:481-484(`mainEdits.add`、`sourceEdits.add`、`editCount++`),调用方在 :911-924 的 `deny` 判断之后才 `next(e)`。
+   - 触发:Edit 的 old_string 找不到、权限被拒、Write 失败,或编辑被其他 hook 拒绝。
+   - 后果:
+     - 失败的编辑已占用 `EDIT_CAP=1`,之后对另一个文件的真实编辑被拒,并提示"already edited X itself",而 X 实际没变。
+     - `sourceEdits` 非空,turn 结束时必须跑检查,否则被打回。
+     - `editCount` 虚增,会让进行中的检查被判为"期间有编辑",`coversTurn` 变假。
+   - 同类:`mainEdits` 按原始路径字符串去重(:473、:481),同一文件用 `./a.ts`、相对路径、绝对路径各写一次,会被算成两个文件而撞上上限。
+
+4. 嵌套委派:子代理发起的 Agent 调用污染 `delegate`,且嵌套用量没有记到顶层委派上
+   - 位置:register.tsx:780(`delegate = entry` 没有 `!e.agentId` 保护,而 CLI 路径 :855 有);:781(只给主循环建 `DelegateRec`);:991-995(用量只加到 `callOfAgent.get(e.agentId)` 对应的记录)。
+   - 触发:deep 或 coder 子代理自己再派发一个 Agent(嵌套)。
+   - 后果:
+     - 主 turn 收尾时 `who = delegate`(:1031 附近)取到最后一个嵌套子代理的 lane,Turn 历史和 `last` 记在错误的 lane 下。
+     - 嵌套那次调用的 `agentIndex` 也计入 `agentsThisTurn`,band 的 agents 数偏大。
+     - 嵌套子代理的 token 与费用只进 `totals`。它没有 `DelegateRec`,所以 `delegateOfCall.get` 取不到,顶层委派的 `usage`/`costUsd` 少了这部分,turn 记录里的花费被低估。
+
+5. 子代理多次 turn.complete 时,首次结算就清掉映射,后续用量与 lane 丢失;另有 turnId 为空串时 gate 永不触发
+   - 位置:
+     - register.tsx:998-1008(首个 turn.complete 就 `laneOfAgent.delete`、`settle`、`callOfAgent.delete`)。
+     - register.tsx:552、:554、:946(`mainTurnId=''` 与 `gateAskedTurn=''` 初值相同)。
+   - 触发:
+     - 第一种:同一个 agentId 之后再产生 turn.complete。:995 的注释写的是"summed over its turn.complete events",但第一次之后映射已删。
+     - 第二种:mod 在会话中途加载、没有收到 turn.start,`mainTurnId` 仍为 ''。
+   - 后果:
+     - 第一种:后续 turn 的用量按 lane `'agent'` 记入 totals,不进委派记录。
+     - 第二种:`gateAskedTurn === mainTurnId` 恒真,Stop 直接放行,gate 和 guard 的打回都失效。这个情形我判断概率较低,严重度不高。
+   - UNSURE:第一种取决于引擎是否真会对同一 agentId 发多次 turn.complete,我没法从这些文件确认。
+
+另一个没列入的盲区:hook 只覆盖 Edit、Write、NotebookEdit(:911-924)。如果引擎还有 MultiEdit,它不受 cap 和"未检查"约束。Bash 的 `sed -i` 等写入不受约束是 format.ts:107 自己承认的。
+
+=== 回答 J ===
+1. 超时把已完成的委派记成失败，gate 误触发，用量和迟到行丢失（register.tsx:397-408、538-545、598、799、994、1004、1015-1017）
+   - 触发条件：一个 deep 子代理（前台或后台）运行超过 STALE_MS（30 分钟），之后正常完成。判定的起点是调用开始时间，不是最后一次活动时间，所以仍在正常工作的长任务也会被判超时。
+   - 过程：`sweepStale` 把它移入 `timedOut`，并通过 `onTimeout` 调 `settle(id,'failed')`。`settle` 会把记录从 `delegateOfCall` 删掉。它之后真正完成时，`settle` 找不到记录，直接返回。
+   - 后果：
+     - 记录永远是 `failed`，`roleDone('deep')` 为假。gate 在 Stop 时会对一个已交付判断的回合误触发，逼模型重派 deep 或写 `Kept:`。
+     - 第 994 行 `delegateOfCall.get(call)` 取不到记录，这个子代理的用量不进回合记录。
+     - 第 1004 行 `d?.isRecorded` 为空，迟到行不写。
+     - 第 1015 行只把 "timed out" 行从面板删掉，委派状态没有改回。
+   - 同一处还有一个小问题：第 598 行用 `Date.now()` 写 `endedAt`，其余地方用 `$.clock.now()`，两种时钟混用，`ms` 可能错。
+
+2. 检查是否通过按整条命令的退出码判定，后台、分号和管道会把失败的检查记成通过（guard.ts:85-99；register.tsx:890）
+   - 触发条件：
+     - `pytest -x; echo done`：退出码是 echo 的。
+     - `pytest &`、`npm test &`：`&` 被当作分隔符，检查被识别，但退出码恒为 0。
+     - Bash 的 `run_in_background: true`：调用立刻返回，`isError` 为假。
+     - `pytest 2>&1 | tail`：退出码是 tail 的。
+   - 注释只承认了管道这一种盲区。其余几种也会让 `exitOk` 为真，且 `editsDuring` 为 0。
+   - 后果：`isChecked` 为真，Stop 时的"未检查"拦截被绕过，源码带着失败的测试结束回合。
+
+3. 编辑在真正执行前就被计数（register.tsx:481-484、905-921）
+   - 触发条件：Edit 或 Write 经过 `guardEdit` 之后，才在后面失败。例如 `old_string` 没找到、被权限拒绝，或写入出错。
+   - `guardEdit` 在 `next(e)` 之前就执行了 `sourceEdits.add` 和 `editCount++`，也没有看结果。
+   - 后果：
+     - 前面已通过的检查因为 `editsAtStart !== editCount` 变得不再覆盖本回合，被迫重跑。
+     - 一次什么都没改的失败 Edit，就能让 `sourceEdits` 非空，触发"源码已编辑、无检查"的回送。
+   - 同一函数里 `mainEdits.has(path)` 用原始字符串比较（第 473 行）。`./a.ts` 和 `/abs/a.ts` 会被算成两个文件，所以对同一文件的第二次编辑可能被误拒。
+
+4. 嵌套委派的记账错位（register.tsx:778-786、994、1040）
+   - 触发条件：子代理自己又调 Agent，即 `e.agentId` 有值的 Agent 调用。
+   - 第 780 行对嵌套调用也会 `delegate = entry` 并 `++agentsThisTurn`，只有第 781 行才用 `!e.agentId` 排除委派记录。
+   - 后果：
+     - 回合记录（第 1040 行）和面板会把这一回合算在孙代理名下，agents 数量也被撑大。
+     - 嵌套子代理的 `turn.complete` 在第 994 行查不到记录（`delegateOfCall` 里没有嵌套调用），它的用量没记到父委派的 `usage`。回合记录里的成本因此少算，只有 `totals` 里有。
+
+5. 升级计数的 key 把带值的标志当成检查目标（guard.ts:97，影响 register.tsx:876-880）
+   - `key` 取"不以 `-` 开头的参数"，所以 `pytest -k foo`、`pytest -n 4` 里的 `foo`、`4` 都进了 key。
+   - 触发条件：模型换一个 `-k` 表达式或 `-n` 值，重跑本质上同一个检查。
+   - 后果：失败计数分到不同的 key，永远到不了 `ESCALATE_AFTER`，不会升级给 coder 或 deep。这与注释"`pytest -q tests/a.py` 与 `pytest tests/a.py -x` 同一检查"的意图不符。严重度较低。
+
+UNSURE（没有算进上面 5 条）：
+- 第 702 行 `turn.start` 没有按 `e.agentId` 过滤，而 `turn.complete` 和 `turn.step` 有。如果引擎对子代理也发 `turn.start`，守卫和 gate 的回合状态会在回合中途被清空。这取决于引擎事件定义，我没法在这些文件里确认。
+- 第 1002 行和第 998、1008 行在子代理第一次 `turn.complete` 就结算并删除 `laneOfAgent` 和 `callOfAgent`。第 366 行的注释却说用量是"按其多个 `turn.complete` 累加"。如果子代理会多次发 `turn.complete`（例如被 SendMessage 续跑），后几次的用量会记到 'agent' 这个通用名下，并且丢失。
+
+先用几句话说明理由，最后单独一行输出：JUDGE_JSON: {"A": {"overall": n}, "B": {"overall": n}, "C": {"overall": n}, "D": {"overall": n}, "E": {"overall": n}, "F": {"overall": n}, "G": {"overall": n}, "H": {"overall": n}, "I": {"overall": n}, "J": {"overall": n}}（每个标签给 overall 和 scores）

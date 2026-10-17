@@ -1,0 +1,1 @@
+修改了 textwrap2/wrap.py：display_width 改为按字符计算显示宽度（东亚宽/全角字符计 2 格，组合用字符和 Mn/Me/Cf 类字符计 0 格），并新增 _take_cells 按显示宽度切分超长词，使 wrap 不再按字符数切分，tests 目录未改动，python3 -m pytest 3 项全部通过。
