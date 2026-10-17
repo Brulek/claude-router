@@ -26,6 +26,19 @@ def mean(values):
     return sum(values) / len(values) if values else None
 
 
+def cost_floor(gs):
+    """The Claude-side cost is a floor when a run called an outside CLI (it bills elsewhere) or had a delegate
+    whose cost is unknown."""
+    return any((g.get("outside_calls") or 0) > 0 or (g.get("unpriced_delegates") or 0) > 0 for g in gs)
+
+
+def cost_summary(gs):
+    """(total, priced). The total is None unless every run has a priced cost: a sum over the priced ones alone
+    would pass for the whole cell. priced is the number of runs that carry a cost."""
+    costs = [g["cost"] for g in gs if g.get("cost") is not None]
+    return (sum(costs) if len(costs) == len(gs) else None), len(costs)
+
+
 def aggregate(runs):
     """{(arm, task): cell} from grades.json's runs. A cell keeps every run; nothing is dropped."""
     cells = {}
@@ -34,13 +47,13 @@ def aggregate(runs):
     out = {}
     for key, gs in cells.items():
         graded = [g for g in gs if g["pass"] is not None]
-        costs = [g["cost"] for g in gs if g["cost"] is not None]
+        total, priced = cost_summary(gs)
         out[key] = {
             "n": len(gs), "graded": len(graded), "passed": sum(1 for g in graded if g["pass"]),
             "completed": sum(1 for g in gs if not g["error"]),
-            "cost_mean": mean(costs), "cost_sum": sum(costs),
-            # an outside CLI call bills elsewhere, so the Claude-side cost is a floor, not the cost
-            "cost_floor": any((g.get("outside_calls") or 0) > 0 for g in gs),
+            "cost_total": total, "cost_priced": priced, "cost_coverage": priced / len(gs),
+            "cost_mean": total / len(gs) if total is not None else None,
+            "cost_floor": cost_floor(gs),
             "wall_mean": mean([g["wall"] for g in gs]),
             "models": sorted({m for g in gs for m in g["models"]}),
             "labels": sum(1 for g in gs if g["label_line"]), "kept": sum(1 for g in gs if g["kept_line"]),
@@ -53,15 +66,15 @@ def arm_summary(runs, arm):
     gs = [g for g in runs.values() if g["arm"] == arm]
     graded = [g for g in gs if g["pass"] is not None]
     passed = sum(1 for g in graded if g["pass"])
-    costs = [g["cost"] for g in gs if g["cost"] is not None]
+    total, priced = cost_summary(gs)
     walls = [g["wall"] for g in gs if g["wall"] is not None]
     return {
         "n": len(gs), "graded": len(graded), "passed": passed,
         "completed": sum(1 for g in gs if not g["error"]),
-        "cost_total": sum(costs),
+        "cost_total": total, "cost_priced": priced, "cost_coverage": priced / len(gs) if gs else None,
         # failures are paid for too: total spend over successful deliveries
-        "cost_per_success": (sum(costs) / passed) if passed else None,
-        "cost_floor": any((g.get("outside_calls") or 0) > 0 for g in gs),
+        "cost_per_success": (total / passed) if passed and total is not None else None,
+        "cost_floor": cost_floor(gs),
         "wall_p50": percentile(walls, 50), "wall_p95": percentile(walls, 95),
         "subagent_runs": sum(1 for g in gs if g.get("subagents")),
         "explore_runs": sum(1 for g in gs if g.get("explore_ran")),
@@ -70,8 +83,12 @@ def arm_summary(runs, arm):
     }
 
 
-def fmt_cost(v, floor=False):
-    return "n/a" if v is None else f"{'>=' if floor else ''}${v:.3f}"
+def fmt_cost(v, floor=False, priced=None, n=None):
+    """A missing figure with unpriced runs reads "unknown (priced/n priced)"; with every run priced (no success to
+    divide by) it stays n/a."""
+    if v is None:
+        return f"unknown ({priced}/{n} priced)" if n and priced < n else "n/a"
+    return f"{'>=' if floor else ''}${v:.3f}"
 
 
 def fmt_s(v):
@@ -118,11 +135,14 @@ def render(out_dir, today):
     for a in arms:
         s = arm_summary(runs, a)
         L.append(f"| {a} | {fmt_rate(s['passed'], s['graded'])} | {fmt_rate(s['completed'], s['n'])} | "
-                 f"{fmt_cost(s['cost_total'], s['cost_floor'])} | {fmt_cost(s['cost_per_success'], s['cost_floor'])} | "
+                 f"{fmt_cost(s['cost_total'], s['cost_floor'], s['cost_priced'], s['n'])} | "
+                 f"{fmt_cost(s['cost_per_success'], s['cost_floor'], s['cost_priced'] if s['passed'] else s['n'], s['n'])} | "
                  f"{fmt_s(s['wall_p50'])} | {fmt_s(s['wall_p95'])} |")
     L += ["", "Quality counts graded runs only (a judged cell whose judge call failed is left out). Completion is runs that "
           "returned a result without error or timeout. Cost per successful delivery is the arm's whole spend, failures "
-          "included, over its passes.", ""]
+          "included, over its passes. A cost is `unknown (n/m priced)` when some runs carry no priced cost (a failed or "
+          "unparsed run): a sum over the priced runs alone would understate it. `>=` marks a floor: an outside-CLI call or "
+          "a delegate with an unknown cost bills outside the figure.", ""]
 
     L += ["## Per arm and task", "",
           "Every cell is kept, including the ones where an arm loses (marked LOSES: pass rate below the best arm on that task).", "",
@@ -136,7 +156,7 @@ def render(out_dir, today):
                 continue
             loses = best is not None and c["graded"] and c["passed"] / c["graded"] < best
             L.append(f"| {t} {tasks[t]['name']} | {a} | {fmt_rate(c['passed'], c['graded'])}{' LOSES' if loses else ''} | "
-                     f"{fmt_rate(c['completed'], c['n'])} | {fmt_cost(c['cost_mean'], c['cost_floor'])} | "
+                     f"{fmt_rate(c['completed'], c['n'])} | {fmt_cost(c['cost_mean'], c['cost_floor'], c['cost_priced'], c['n'])} | "
                      f"{fmt_s(c['wall_mean'])} | {', '.join(m.replace('claude-', '') for m in c['models']) or '-'} | "
                      f"{c['labels']}/{c['n']} | {c['kept']}/{c['n']} |")
     L.append("")

@@ -179,6 +179,13 @@ def outside_calls(turn_records):
                if str(d.get("lane", "")).lower() not in CLAUDE_LANES)
 
 
+def unpriced_delegates(turn_records):
+    """Number of delegates in the turn records whose cost is unknown (no costUsd); None when there is no record."""
+    if not turn_records:
+        return None
+    return sum(1 for r in turn_records for d in (r.get("delegates") or []) if d.get("costUsd") is None)
+
+
 def explore_ran(res):
     """The Explore override is only checkable at runtime: did an Explore agent run, and was any Haiku billed?
     (On a Haiku main session the Haiku line alone proves nothing; the agent type is what counts.)"""
@@ -219,6 +226,7 @@ def run_metrics(rec, task):
         "ideal": task["ideal_tier"], "tier_match": tier_match(models, task["ideal_tier"]),
         "turn_record": rec.get("turn_records") is not None,
         "outside_calls": outside_calls(rec.get("turn_records")),
+        "unpriced_delegates": unpriced_delegates(rec.get("turn_records")),
         "explore_ran": explore_ran(res)[0], "haiku_billed": explore_ran(res)[1],
         "subagent_types": (res.get("subagent_stats") or {}).get("by_type") or {},
     }

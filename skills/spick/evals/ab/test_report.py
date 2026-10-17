@@ -39,6 +39,51 @@ class Stats(unittest.TestCase):
         c = report.aggregate({"a/T5/run-1": g("a", "T5", None)})[("a", "T5")]
         self.assertEqual((c["passed"], c["graded"], c["n"]), (0, 0, 1))
 
+    def test_unpriced_runs_make_cost_unknown_not_a_partial_sum(self):
+        runs = {"a/T1/run-1": g("a", "T1", True, cost=0.10), "a/T1/run-2": g("a", "T1", True, cost=None),
+                "a/T1/run-3": g("a", "T1", False, cost=0.30)}
+        c = report.aggregate(runs)[("a", "T1")]
+        self.assertIsNone(c["cost_total"])
+        self.assertIsNone(c["cost_mean"])
+        self.assertEqual(c["cost_priced"], 2)
+        self.assertAlmostEqual(c["cost_coverage"], 2 / 3)
+        s = report.arm_summary(runs, "a")
+        self.assertIsNone(s["cost_total"])
+        self.assertIsNone(s["cost_per_success"])
+        self.assertAlmostEqual(s["cost_coverage"], 2 / 3)
+        self.assertEqual(report.fmt_cost(s["cost_total"], False, s["cost_priced"], s["n"]), "unknown (2/3 priced)")
+
+    def test_all_unpriced_is_zero_of_n_not_zero_dollars(self):
+        runs = {"a/T1/run-1": g("a", "T1", False, cost=None), "a/T1/run-2": g("a", "T1", False, cost=None)}
+        s = report.arm_summary(runs, "a")
+        self.assertIsNone(s["cost_total"])
+        self.assertEqual(s["cost_priced"], 0)
+        self.assertEqual(report.fmt_cost(None, False, 0, 2), "unknown (0/2 priced)")
+
+    def test_fully_priced_cell_keeps_its_numbers(self):
+        c = report.aggregate({"a/T1/run-1": g("a", "T1", True, cost=0.10), "a/T1/run-2": g("a", "T1", True, cost=0.30)})[("a", "T1")]
+        self.assertAlmostEqual(c["cost_total"], 0.40)
+        self.assertAlmostEqual(c["cost_mean"], 0.20)
+        self.assertEqual(c["cost_coverage"], 1.0)
+
+    def test_unknown_delegate_cost_keeps_the_floor(self):
+        c = report.aggregate({"a/T1/run-1": g("a", "T1", True, outside_calls=0, unpriced_delegates=1)})[("a", "T1")]
+        self.assertTrue(c["cost_floor"])
+        self.assertFalse(report.aggregate({"a/T1/run-1": g("a", "T1", True, outside_calls=0, unpriced_delegates=0)})[("a", "T1")]["cost_floor"])
+        s = report.arm_summary({"a/T1/run-1": g("a", "T1", True, unpriced_delegates=2)}, "a")
+        self.assertTrue(s["cost_floor"])
+
+    def test_floor_survives_in_the_rendered_row_and_unknown_is_printed(self):
+        runs = {"haiku-bare/T1/run-1": g("haiku-bare", "T1", True, cost=0.10, outside_calls=1),
+                "haiku-bare/T1/run-2": g("haiku-bare", "T1", True, cost=None),
+                "opus-bare/T1/run-1": g("opus-bare", "T1", True, cost=0.20, unpriced_delegates=1)}
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {}}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("| haiku-bare | 2/2 | 2/2 | unknown (1/2 priced) | unknown (1/2 priced) |", text)
+        self.assertIn("| opus-bare | 1/1 | 1/1 | >=$0.200 | >=$0.200 |", text)
+        self.assertNotIn("$0.000", text)
+
 
 class Render(unittest.TestCase):
     def test_report_has_every_section_and_marks_losing_cells(self):

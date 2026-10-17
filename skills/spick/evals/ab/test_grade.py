@@ -109,6 +109,9 @@ class Metrics(unittest.TestCase):
         recs = [{"delegates": [{"lane": "coder"}, {"lane": "agy"}, {"lane": "Codex"}]}]
         self.assertEqual(grade.outside_calls(recs), 2)
         self.assertIsNone(grade.outside_calls(None))
+        priced = [{"delegates": [{"lane": "coder", "costUsd": 0.2}, {"lane": "agy", "costUsd": None}, {"lane": "deep"}]}]
+        self.assertEqual(grade.unpriced_delegates(priced), 2)
+        self.assertIsNone(grade.unpriced_delegates(None))
         res = {"subagent_stats": {"by_type": {"Explore": 1}}, "modelUsage": {"claude-haiku-5-5": {}}}
         self.assertEqual(grade.explore_ran(res), (True, True))
         self.assertEqual(grade.explore_ran({"modelUsage": {"claude-opus-5-5": {}}}), (False, False))
