@@ -5,9 +5,11 @@ import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checkl
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
 import { EDIT_CAP, UNCHECKED_RE, checkCommand, declaredChecks, editCapReason, uncheckedReason } from './guard'
-import { KEPT_RE, appendGateLog, gateLogPath, gateOutcome } from './gatelog'
+import { appendGateLog, gateLogPath } from './gatelog'
+import { KEPT_RE, gateFiring, gateOutcome, roleDone, sendBackText } from './gate'
+import type { DelegateStatus } from './gate'
 import type { GateLogEntry } from './gatelog'
-import { findHints, gateReason, lineOf } from './hint'
+import { findHints, lineOf } from './hint'
 import type { Hint } from './hint'
 import { readQuota } from './quota'
 import { parseSpendFile, spendFileText, spendPath, spendRow } from './spend'
@@ -379,7 +381,14 @@ async function publishRunning($: EngineInterface, inFlight: Map<string, Lane>, t
 }
 
 /** What the band bookkeeping reads: the calls in flight, the timed-out ones, who shows now, whether the main turn is open. */
-type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean }
+/** a delegate of the main turn (an Agent call or an outside CLI call) and how it stands; the turn record lists them */
+type DelegateRec = { id: string; lane: string; model: string; effort?: string; isReview?: boolean; startedAt: number; endedAt?: number; status: DelegateStatus }
+
+/** how a call that returned stands: refused, failed (an error result) or completed */
+const statusOf = (r: { deny?: string; isError?: true } | undefined): DelegateStatus => (r === undefined ? 'failed' : r.deny ? 'refused' : r.isError ? 'failed' : 'completed')
+
+/** `onTimeout` hears each call that timed out, so its delegate record reads failed */
+type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean; onTimeout: (id: string) => void }
 
 /** put the lane that works now on the band and publish the Running list */
 async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecord) => Partial<TurnRecord>): Promise<void> {
@@ -388,13 +397,14 @@ async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecor
 }
 
 /** Move calls with no completion signal for STALE_MS out of flight into `timedOut`. True when any moved. */
-async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>): Promise<boolean> {
+async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>, onTimeout: (id: string) => void = () => {}): Promise<boolean> {
   const now = await $.clock.now()
   let moved = false
   for (const [id, l] of [...inFlight]) {
     if (l.startedAt === undefined || now - l.startedAt < STALE_MS) continue
     inFlight.delete(id)
     timedOut.set(id, { id, lane: l.lane, model: l.model, effort: l.effort, startedAt: l.startedAt, timedOutAt: now })
+    onTimeout(id)
     moved = true
   }
   return moved
@@ -402,7 +412,7 @@ async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timed
 
 /** Drop calls that have gone 30 minutes without a completion signal; the band follows. */
 async function sweep($: EngineInterface, t: Tracker): Promise<void> {
-  if (!(await sweepStale($, t.inFlight, t.timedOut))) return
+  if (!(await sweepStale($, t.inFlight, t.timedOut, t.onTimeout))) return
   // nothing left running after the main turn ended: the band goes idle
   if (!t.isMainTurnOpen() && t.inFlight.size === 0) await update($, current, () => null)
   else await showLane($, t.showing)
@@ -519,6 +529,18 @@ export const register: Register = on => {
   const dropFinishedCalls = (): void => { for (const id of [...inFlight.keys()]) if (!isRunningAgentCall(id)) inFlight.delete(id) }
   /** the turn's latest delegate (Agent or CLI call), kept after the call ends: the closed turn is recorded under it */
   let delegate: Lane | null = null
+  /** every delegate of the main turn and how it stands; the gate asks them whether the required role completed */
+  let delegatesOfTurn: DelegateRec[] = []
+  /** tool_use_id -> its record, until it settles (a background agent's settles at its own turn.complete) */
+  const delegateOfCall = new Map<string, DelegateRec>()
+  const settle = (id: string, status: DelegateStatus, at: number): void => {
+    const d = delegateOfCall.get(id)
+    if (!d) return
+    // a refusal or failure the call reported stands; completion is never taken back
+    if (d.status === 'running') d.status = status
+    d.endedAt = at
+    delegateOfCall.delete(id)
+  }
   let agentsThisTurn = 0
   /** the Hint line's findings for the prompt just submitted, then for the turn it started (a delivery carries none) */
   let pendingHints: Hint[] = []
@@ -529,7 +551,7 @@ export const register: Register = on => {
   /** the turn the gate or the guard's check already sent back once (one send-back per turn, for both) */
   let gateAskedTurn = ''
   /** the gate's firing this turn, until a later stop logs what became of it (kept or delegated) */
-  let gateFired: { turnId: string; entry: GateLogEntry } | null = null
+  let gateFired: { turnId: string; entry: GateLogEntry; roles: ('deep' | 'review')[] } | null = null
   /** this session's spend record (~/.claude/spick-spend/<sessionId>.json) */
   const spend: SpendState = { sessionId: '', cwd: '', startedAt: '', rows: [], chain: Promise.resolve() }
   /** the project's own check commands (spick.json guard.check_commands), read once at session.start */
@@ -563,7 +585,8 @@ export const register: Register = on => {
   }
   /** calls that timed out (no completion signal for 30 minutes), listed in the pane until the next prompt drops them */
   const timedOut = new Map<string, RunningAgent>()
-  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen }
+  // a call with no completion signal for 30 minutes is a failed delegate
+  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen, onTimeout: id => settle(id, 'failed', Date.now()) }
 
   on('session.start', async ($, e, next) => {
     try {
@@ -670,6 +693,7 @@ export const register: Register = on => {
       mainTurnOpen = true
       dropFinishedCalls()
       delegate = null
+      delegatesOfTurn = []
       agentsThisTurn = 0
       mainTurnId = e.turnId
       mainToolCalls = 0
@@ -711,7 +735,7 @@ export const register: Register = on => {
 
   // any tool call, from any loop, ticks the elapsed time; the main session's own calls are counted for the gate
   on('tool.call', async ($, e, next) => {
-    try { if (!e.agentId && String(e.tool) !== 'Agent') mainToolCalls++ } catch {}
+    try { if (!e.agentId) mainToolCalls++ } catch {}
     try { lastTickMs = Math.max(lastTickMs, await tick($, lastTickMs)) } catch {}
     try { await sweep($, tracker) } catch {}
     return next(e)
@@ -723,12 +747,26 @@ export const register: Register = on => {
       const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn, startedAt: await $.clock.now() }
       inFlight.set(id, entry)
       delegate = entry
+      if (!e.agentId) {
+        const d: DelegateRec = { id, lane: entry.lane, model: e.model ?? '', effort: e.effort, startedAt: entry.startedAt!, status: 'running' }
+        delegatesOfTurn.push(d)
+        delegateOfCall.set(id, d)
+      }
       await refreshBand($, tracker, () => ({ agents: agentsThisTurn }))
     } catch {}
     // finally: an interrupted call must not leave the subagent's lane on the band
+    let r: Awaited<ReturnType<typeof next>> | undefined
     try {
-      return await next(e)
+      r = await next(e)
+      return r
     } finally {
+      try {
+        // a foreground call that returned is over (its subagent's turn.complete came first); a background one runs on
+        // until its own turn.complete, unless the call itself was refused or failed
+        const status = statusOf(r)
+        const isBackground = (e.run_in_background === true || backgroundCalls.has(id)) && status === 'completed'
+        if (!isBackground) settle(id, status, await $.clock.now())
+      } catch {}
       try {
         // a background agent returns at once but its subagent still runs: its lane stays until turn.complete. Background
         // is the default, so a call that leaves run_in_background out is one too; agent.spawn reports what was decided.
@@ -750,6 +788,9 @@ export const register: Register = on => {
         callOfAgent.set(r.agentId, e.tool_use_id)
       }
       if (e.background && !r.deny) backgroundCalls.add(e.tool_use_id)
+      const d = delegateOfCall.get(e.tool_use_id)
+      if (d && r.deny) settle(e.tool_use_id, 'refused', await $.clock.now())
+      else if (d) { d.lane = e.subagentType; if (r.model) d.model = r.model }
       // the resolved type and model replace what the Agent call named (it may have named neither)
       const entry = inFlight.get(e.tool_use_id)
       if (entry && !r.deny) {
@@ -781,6 +822,11 @@ export const register: Register = on => {
         const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview: cli.isReview, startedAt: await $.clock.now() }
         inFlight.set(id, entry)
         delegate = entry
+        // a review call: Codex with a review prompt, or a declared lane tagged review (invoke.py --lane <id>)
+        const isReview = cli.isReview || ((await lanesNow($)) ?? []).some(l => l.id === cli.lane && l.tags.includes('review'))
+        const d: DelegateRec = { id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview, startedAt: entry.startedAt!, status: 'running' }
+        delegatesOfTurn.push(d)
+        delegateOfCall.set(id, d)
         await refreshBand($, tracker, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
         // outside CLIs report no usage: count the call, leave it unpriced
         await update($, totals, t => {
@@ -806,6 +852,7 @@ export const register: Register = on => {
       }
       if (isCli) {
         try {
+          settle(id, statusOf(r), await $.clock.now())
           inFlight.delete(id)
           await refreshBand($, tracker)
         } catch {}
@@ -833,21 +880,23 @@ export const register: Register = on => {
   }).catch(passThrough)
 
   // Stop time, where the gate and the guard's check intervene (with the guard's edit cap, the only places this module
-  // does). Both fire at most once per turn between them, never while routing is off, and the reason returned is what
-  // Claude Code hands the model as the reason to continue.
-  // The gate: a prompt the Hint line called a verdict (judgement or review words; design words never) that the main
-  // session answered on its own, delegating nothing, is sent back to dispatch deep or to say in one line (`Kept:`) why
-  // the deliverable was a lookup after all. Never on a short reply without tool calls (a question back); /spick gate off
-  // switches it off. Each firing, and what became of it, is a line in ~/.claude/spick-gate.jsonl (gatelog.ts).
-  // The guard's check: a turn in which any loop (a subagent too) edited source and no loop ran a check is sent back to
-  // run one, hand the user a /goal line, or say in one line (`Unchecked:`) why there is none. A delegate does not
-  // excuse it. /spick guard off switches it off, with the edit cap.
+  // does). They send a turn back at most once between them, with every reason in one block, never while routing is
+  // off; the block is what Claude Code hands the model as the reason to continue.
+  // The gate, by required role: judgement words need deep, review words the review lane or deep (gate.ts). When that
+  // role did not complete this turn (a deep subagent that finished or still runs in the background, a review call
+  // that returned cleanly), the reply has no `Kept:` line and the turn was substantive (a tool call, or 400+
+  // characters), the turn is sent back. Design words never gate; /spick gate off switches it off.
+  // The guard's check: a turn in which any loop (a subagent too) edited source and no check passed after the last
+  // edit is sent back to run one, hand the user a /goal line, or say in one line (`Unchecked:`) why there is none.
+  // A delegate does not excuse it. /spick guard off switches it off, with the edit cap.
   on('classic.Stop', async ($, e, next) => {
     const r = await next(e)
     try {
-      // a turn the gate sent back: log, once, whether the model then delegated or kept it with a Kept: line
+      const answer = e.last_assistant_message ?? ''
+      // a turn the gate sent back: log, once, whether the required role then completed or the reply kept it with Kept:
       if (gateFired && gateFired.turnId === mainTurnId) {
-        const outcome = gateOutcome(e.last_assistant_message ?? '', delegate !== null)
+        const roles = gateFired.roles
+        const outcome = gateOutcome(answer, roles.every(role => roleDone(role, delegatesOfTurn)))
         if (outcome) {
           const entry = { ...gateFired.entry, outcome }
           gateFired = null
@@ -857,26 +906,28 @@ export const register: Register = on => {
       if (r.block || e.stop_hook_active || gateAskedTurn === mainTurnId) return r
       const c = await read($, controls)
       if (!effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) return r
-      const answer = e.last_assistant_message ?? ''
-      const isGated = c.gate === 'on' && delegate === null && !KEPT_RE.test(answer) && !(mainToolCalls === 0 && answer.length < LONG_ANSWER)
-      const g = isGated ? gateReason(hintsOfTurn) : null
+      // a short reply with no tool call is a question back, not a delivered verdict
+      const isSubstantive = mainToolCalls > 0 || answer.length >= LONG_ANSWER
+      const g = c.gate === 'on' && isSubstantive && !KEPT_RE.test(answer) ? gateFiring(hintsOfTurn, delegatesOfTurn) : null
+      const isUnchecked = c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !isChecked(guardTurn) && !UNCHECKED_RE.test(answer)
+      if (!g && !isUnchecked) return r
+      // one send-back per turn, carrying every reason at once
+      gateAskedTurn = mainTurnId
+      const reasons: string[] = []
       if (g) {
-        gateAskedTurn = mainTurnId
         const sessionId = spend.sessionId || (await $.session.id().catch(() => ''))
         const entry: GateLogEntry = { at: new Date(await $.clock.now()).toISOString(), sessionId, kind: g.kinds.join('+'), words: g.words, outcome: 'sent-back' }
-        gateFired = { turnId: mainTurnId, entry }
+        gateFired = { turnId: mainTurnId, entry, roles: g.roles }
         await logGate($, entry).catch(() => undefined)
-        $.ui.toast(`spick: gate — ${g.kind} kept by the triage session; sent back once`)
-        await setCurrent($, { note: { kind: 'warning', text: `gate: ${g.kind} kept` } })
-        return { ...r, block: g.text }
+        $.ui.toast('spick: gate — verdict kept by the triage session; sent back once')
+        reasons.push(g.text)
       }
-      if (c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !isChecked(guardTurn) && !UNCHECKED_RE.test(answer)) {
-        gateAskedTurn = mainTurnId
+      if (isUnchecked) {
         $.ui.toast('spick: guard — source edited, no passing check after it; sent back once')
-        await setCurrent($, { note: { kind: 'warning', text: 'guard: unchecked' } })
-        return { ...r, block: uncheckedReason([...guardTurn.sourceEdits]) }
+        reasons.push(uncheckedReason([...guardTurn.sourceEdits]))
       }
-      return r
+      await setCurrent($, { note: { kind: 'warning', text: g ? `gate: ${g.roles.join('+')} missing` : 'guard: unchecked' } })
+      return { ...r, block: sendBackText(reasons) }
     } catch {
       return r
     }
@@ -910,6 +961,8 @@ export const register: Register = on => {
       if (e.agentId) {
         laneOfAgent.delete(e.agentId)
         const call = callOfAgent.get(e.agentId)
+        // the subagent's own end decides its delegate's status: an answer completed it, anything else failed it
+        if (call !== undefined) settle(call, e.reason === 'answer' && !e.isAborted ? 'completed' : 'failed', await $.clock.now())
         callOfAgent.delete(e.agentId)
         // a background agent's Agent call returned long ago; its lane leaves the band now
         if (call !== undefined && inFlight.delete(call)) {

@@ -855,7 +855,7 @@ test('a hinted verdict answered by the main session alone is blocked once at sto
   await $.turn.start({ text, turnId: 't1' })
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'wc -l a b' })
   const r = await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })
-  expect(r.block).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and nothing was delegated this turn')
+  expect(r.block).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and no deep run completed this turn')
   expect(r.block).toContain('dispatch Agent(deep)')
   expect(r.block).toContain('`Kept:`')
   expect(world.toasts).toContain('spick: gate — verdict kept by the triage session; sent back once')
@@ -878,14 +878,14 @@ test('the gate stays quiet when something was delegated, on a short reply or a K
   await $.session.start(START)
   const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg: string) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
-  // delegated to an Agent: no gate
+  // delegated to deep: no gate
   await turn('t1', VERDICT)
   await $.tool.call({ ...agentCall('a1', 'deep'), model: 'opus', effort: 'high' })
   expect(await stop(LONG_REPLY)).toBeUndefined()
   await $.turn.complete({ turnId: 't1', ...DONE })
-  // delegated to an outside CLI: no gate
-  await turn('t2', VERDICT)
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'agy -p "why" --model gemini-3.8-flash --effort low' })
+  // a review prompt reviewed by Codex: no gate
+  await turn('t2', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'git diff | codex exec --sandbox read-only "Review this diff"' })
   expect(await stop(LONG_REPLY)).toBeUndefined()
   await $.turn.complete({ turnId: 't2', ...DONE })
   // a short reply with no tool call is a question back: no gate; a long one with no tool call is a verdict: gated
@@ -923,6 +923,58 @@ test('the gate stays quiet when something was delegated, on a short reply or a K
   expect(await stop(LONG_REPLY)).toBeUndefined()
   await $.turn.complete({ turnId: 't8', ...DONE })
   expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(1)
+})
+
+test('the gate asks for the role the hint names: deep that finished or still runs satisfies it; a coder, a search lane, a refused or failed deep does not', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: `ag-${e.tool_use_id}` }))
+  on('tool.call', async ($, e) => {
+    if (e.tool_use_id.startsWith('refused')) return { deny: 'not allowed' }
+    if (e.tool_use_id.startsWith('failed')) return { isError: true as const, result: 'boom', text: 'boom' }
+    return { result: {} as never }
+  })
+  await $.session.start(START)
+  const turn = async (id: string, text = VERDICT) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
+  const stop = async () => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })).block
+  const spawn = (id: string, background: boolean) => $.agent.spawn({ tool_use_id: id, prompt: 'p', description: 'd', subagentType: 'deep', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background, fork: false })
+  const cases: [string, () => Promise<unknown>, boolean][] = [
+    ['a coder', () => $.tool.call({ ...agentCall('c1', 'coder') }), true],
+    ['a search lane', () => $.tool.call({ tool: 'Bash', tool_use_id: 's1', command: 'agy -p "why" --model gemini-3.8-flash' }), true],
+    ['a refused deep', () => $.tool.call({ ...agentCall('refused1', 'deep') }), true],
+    ['a failed deep', () => $.tool.call({ ...agentCall('failed1', 'deep') }), true],
+    ['a background deep still running', async () => { await spawn('bg1', true); await $.tool.call({ ...agentCall('bg1', 'deep'), run_in_background: true }) }, false],
+    ['a background deep that died before stop', async () => {
+      await spawn('bg2', true)
+      await $.tool.call({ ...agentCall('bg2', 'deep'), run_in_background: true })
+      await $.turn.complete({ turnId: 'sub', agentId: 'ag-bg2', answer: '', durationMs: 1, isAborted: false, reason: 'error' })
+    }, true],
+    ['a foreground deep whose subagent answered', async () => {
+      await spawn('fg1', false)
+      await $.turn.complete({ turnId: 'sub', agentId: 'ag-fg1', ...DONE })
+      await $.tool.call({ ...agentCall('fg1', 'deep') })
+    }, false],
+  ]
+  for (const [i, [name, act, gated]] of cases.entries()) {
+    await turn(`t${i}`)
+    await act()
+    const block = await stop()
+    expect([name, block === undefined ? 'quiet' : block.includes('no deep run completed') ? 'gated' : block]).toEqual([name, gated ? 'gated' : 'quiet'])
+    await $.turn.complete({ turnId: `t${i}`, ...DONE })
+  }
+  // a review prompt: deep satisfies it; a search lane does not, and the reason names the review lane
+  await turn('r1', 'review this diff please')
+  await $.tool.call({ ...agentCall('d9', 'deep') })
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 'r1', ...DONE })
+  await turn('r2', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's9', command: 'agy -p "check"' })
+  expect(await stop()).toContain('hinted as a review (review) and no review lane call returned cleanly and no deep run completed')
 })
 
 test('each gate firing and what became of it is a line in ~/.claude/spick-gate.jsonl; design words are never gated', async ($, on) => {
@@ -1236,14 +1288,18 @@ test('a check command the project declares in spick.json counts; a pattern that 
   expect(await stop(LONG_REPLY)).toContain('spick guard')
 })
 
-test('the gate and the guard\'s check send a turn back once between them', async ($, on) => {
+test('the gate and the guard\'s check send a turn back once between them, with both reasons in the one block', async ($, on) => {
   const { world, turn, stop } = await guardWorld($, on)
   await turn('t1', VERDICT)
   await $.tool.call(edit('e1', '/repo/a.py'))
-  expect(await stop(LONG_REPLY)).toContain('spick gate')
+  const block = await stop(LONG_REPLY)
+  expect(block).toContain('spick gate')
+  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py)')
+  expect(block).toContain('spick sends a turn back once')
   // the second stop of the turn: neither sends it back again
   expect(await stop(LONG_REPLY)).toBeUndefined()
-  expect(world.toasts.filter(t => t.startsWith('spick: guard')).length).toBe(0)
+  expect(world.toasts.filter(t => t.startsWith('spick: guard')).length).toBe(1)
+  expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(1)
 })
 
 test('guard off persists to the store and comes back at the next session.start', async ($, on) => {

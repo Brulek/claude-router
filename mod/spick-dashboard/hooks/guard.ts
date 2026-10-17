@@ -132,5 +132,5 @@ export function editCapReason(files: readonly string[]): string {
  * project with nothing to run. What Claude Code hands the model as the reason to continue.
  */
 export function uncheckedReason(files: readonly string[]): string {
-  return `spick guard: source files were edited this turn (${listed(files)}) and no check passed after the last edit (a test, build check, linter or type checker run as its own command, after the edits, with a clean exit; a failed one, or one an edit followed, does not count). Do one of three things now: run the project's check command and report its result; or hand the user one \`/goal <check command>; stop after 10 attempts\` line; or, if this project has no check to run, reply with one line starting with \`Unchecked:\` that says why, and stop. This gate fires once per turn.`
+  return `spick guard: source files were edited this turn (${listed(files)}) and no check passed after the last edit (a test, build check, linter or type checker run as its own command, after the edits, with a clean exit; a failed one, or one an edit followed, does not count). Do one of three things now: run the project's check command and report its result; or hand the user one \`/goal <check command>; stop after 10 attempts\` line; or, if this project has no check to run, reply with one line starting with \`Unchecked:\` that says why, and stop.`
 }
