@@ -64,6 +64,16 @@ class Stub(BaseHTTPRequestHandler):
             return self._send(200, {"choices": [{"message": {"content": [{"type": "text", "text": "no usage"}]}}]})
         if mode == "badjson":
             return self._send(200, b"not json")
+        if mode == "multi":   # several text blocks, a thinking block between them
+            if self.path.endswith("/chat/completions"):
+                return self._send(200, {"choices": [{"message": {"content": [{"type": "text", "text": "one "}, {"type": "reasoning", "text": "hidden"}, {"type": "text", "text": "two"}]}}]})
+            return self._send(200, {"content": [{"type": "thinking", "thinking": "hm"}, {"type": "text", "text": "first, "}, {"type": "text", "text": "second"}]})
+        if mode == "cut":     # stopped at the token limit
+            if self.path.endswith("/chat/completions"):
+                return self._send(200, {"choices": [{"message": {"content": "partial ans"}, "finish_reason": "length"}]})
+            return self._send(200, {"content": [{"type": "text", "text": "partial ans"}], "stop_reason": "max_tokens"})
+        if mode == "cutempty":
+            return self._send(200, {"content": [{"type": "thinking", "thinking": "long"}], "stop_reason": "max_tokens"})
         if self.path.endswith("/chat/completions"):
             return self._send(200, {"choices": [{"message": {"role": "assistant", "content": "openai says hi"}}],
                                     "usage": {"prompt_tokens": 7, "completion_tokens": 3}})
@@ -108,7 +118,7 @@ class InvokeCase(unittest.TestCase):
         return subprocess.run(argv, capture_output=True, text=True, env=env, timeout=60)
 
     def api_lane(self, api="openai-chat", mode="ok", **over):
-        lane = {"kind": "api-key", "key_ref": "env:SPICK_TEST_KEY", "data": "text",
+        lane = {"kind": "api-key", "key_ref": "env:SPICK_TEST_KEY", "data": "code",
                 "invoke": {"api": api, "base_url": self.base(mode), "model": "m1"}}
         lane.update(over)
         return {"t": lane}
@@ -321,22 +331,90 @@ class ListModels(InvokeCase):
         self.assertEqual(r.returncode, 2)
 
 
-class Contains(InvokeCase):
-    def test_lower_data_level_warns_and_still_proceeds(self):
-        r = self.run_invoke(self.api_lane(data="public"), "--lane", "t", "--contains", "code")
-        self.assertEqual(r.returncode, 0, r.stderr)
-        self.assertEqual(r.stdout, "openai says hi\n")
-        self.assertIn("warning", r.stderr)
-        self.assertEqual(len([line for line in r.stderr.splitlines() if "warning" in line]), 1)
+class DataLevel(InvokeCase):
+    """A declared constraint, fail-closed: exit 6 and nothing sent when the call is above the lane's data level."""
 
-    def test_no_warning_when_level_is_enough_or_unset(self):
+    def write(self, name, text):
+        p = os.path.join(self.tmp.name, name)
+        with open(p, "w") as f:
+            f.write(text)
+        return p
+
+    def test_no_contains_is_taken_as_code_and_a_text_lane_refuses(self):
+        r = self.run_invoke(self.api_lane(data="text"), "--lane", "t")
+        self.assertEqual(r.returncode, 6, r.stderr)
+        self.assertEqual(r.stdout, "")
+        self.assertEqual(RECEIVED, [])
+        self.assertIn("lane t takes data:text; this call sends code (no --contains: taken as code)", r.stderr)
+
+    def test_contains_above_the_lane_exits_6(self):
+        r = self.run_invoke(self.api_lane(data="public"), "--lane", "t", "--contains", "text")
+        self.assertEqual(r.returncode, 6)
+        self.assertEqual(RECEIVED, [])
+        self.assertIn("refused, nothing sent", r.stderr)
+
+    def test_a_public_lane_needs_an_explicit_public(self):
+        self.assertEqual(self.run_invoke(self.api_lane(data="public"), "--lane", "t").returncode, 6)
+        r = self.run_invoke(self.api_lane(data="public"), "--lane", "t", "--contains", "public")
+        self.assertEqual((r.returncode, r.stdout), (0, "openai says hi\n"))
+
+    def test_at_or_below_the_level_proceeds_and_an_unset_level_takes_anything(self):
         r = self.run_invoke(self.api_lane(data="code"), "--lane", "t", "--contains", "text")
-        self.assertNotIn("warning", r.stderr)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--contains", "text").returncode, 0)
         lane = self.api_lane()
         del lane["t"]["data"]
-        r = self.run_invoke(lane, "--lane", "t", "--contains", "code")
-        self.assertEqual(r.returncode, 0)
-        self.assertNotIn("warning", r.stderr)
+        self.assertEqual(self.run_invoke(lane, "--lane", "t").returncode, 0)
+
+    def test_code_looking_content_under_a_text_declaration_is_refused(self):
+        with open(self.prompt, "w") as f:
+            f.write("fix this:\n```python\nprint(1)\n```\n")
+        r = self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--contains", "text")
+        self.assertEqual(r.returncode, 6)
+        self.assertIn("looks like code", r.stderr)
+        # three indented code-looking lines, no fence; and the same content in the system file
+        code = "explain:\n    def f(x):\n        return x;\n    y = f(2);\n"
+        with open(self.prompt, "w") as f:
+            f.write(code)
+        self.assertEqual(self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--contains", "text").returncode, 6)
+        with open(self.prompt, "w") as f:
+            f.write("say hi")
+        sysf = self.write("sys.txt", code)
+        r = self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--contains", "text", "--system-file", sysf)
+        self.assertEqual(r.returncode, 6)
+        self.assertEqual(RECEIVED, [])
+
+    def test_prose_is_not_code(self):
+        with open(self.prompt, "w") as f:
+            f.write("Summarise this:\n  - the meeting moved to Friday (room 3)\n  - bring the slides\n  - lunch is provided\n")
+        self.assertEqual(self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--contains", "text").returncode, 0)
+
+    def test_override_sends_and_prints_the_reason(self):
+        r = self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--override-data", "the user approved it")
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(r.stdout, "openai says hi\n")
+        self.assertIn("spick-invoke: data override: lane t takes data:text; this call sends code (no --contains: taken as code); reason: the user approved it", r.stderr)
+        self.assertEqual(self.run_invoke(self.api_lane(data="text"), "--lane", "t", "--override-data", " ").returncode, 2)
+
+
+class Answers(InvokeCase):
+    def test_every_text_block_in_order(self):
+        for api, want in (("openai-chat", "one two\n"), ("anthropic-messages", "first, second\n")):
+            r = self.run_invoke(self.api_lane(api=api, mode="multi"), "--lane", "t")
+            self.assertEqual((r.returncode, r.stdout), (0, want), r.stderr)
+
+    def test_a_cut_answer_exits_7_with_the_partial_text(self):
+        for api in ("openai-chat", "anthropic-messages"):
+            r = self.run_invoke(self.api_lane(api=api, mode="cut"), "--lane", "t", "--max-tokens", "20")
+            self.assertEqual(r.returncode, 7, r.stderr)
+            self.assertEqual(r.stdout, "partial ans\n")
+            self.assertIn("INCOMPLETE", r.stderr)
+            self.assertIn("(20)", r.stderr)
+
+    def test_a_budget_spent_before_any_text_is_still_7(self):
+        r = self.run_invoke(self.api_lane(api="anthropic-messages", mode="cutempty"), "--lane", "t")
+        self.assertEqual(r.returncode, 7)
+        self.assertIn("INCOMPLETE", r.stderr)
 
 
 class Cli(InvokeCase):
