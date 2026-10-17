@@ -1,0 +1,230 @@
+{
+ "haiku-bare/T4/run-1": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T4/run-2": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T5/run-1": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T5/run-2": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T6/run-1": {
+  "chars": 202,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T6/run-2": {
+  "chars": 190,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T7/run-1": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T7/run-2": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T9/run-1": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T9/run-2": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-bare/T9/run-3": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-spick/T1/run-1": {
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T2/run-1": {
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T3/run-1": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high)]"
+ },
+ "haiku-spick/T4/run-1": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T4/run-2": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (medium)]"
+ },
+ "haiku-spick/T4/run-3": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high)]"
+ },
+ "haiku-spick/T5/run-1": {
+  "pass": null,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → planner Opus (high)]"
+ },
+ "haiku-spick/T6/run-1": {
+  "chars": 173,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T6/run-2": {
+  "chars": 197,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T6/run-3": {
+  "chars": 186,
+  "placeholders": true,
+  "banned": false,
+  "pass": true,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T7/run-1": {
+  "pass": null,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T7/run-2": {
+  "pass": null,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T7/run-3": {
+  "pass": null,
+  "label_line": true,
+  "kept_line": true,
+  "route": "[Model: Haiku 5.5 | Effort: medium]"
+ },
+ "haiku-spick/T8/run-1": {
+  "tests_untouched": true,
+  "visible_pass": true,
+  "hidden_pass": true,
+  "pass": true,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high)]"
+ },
+ "haiku-spick/T9/run-1": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-spick/T9/run-2": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "haiku-spick/T9/run-3": {
+  "pass": null,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Haiku 5.5 (medium) → deep Opus (high)]"
+ },
+ "sonnet-bare/T9/run-1": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "sonnet-bare/T9/run-2": {
+  "pass": null,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Sonnet 5.5 | Effort: medium]"
+ },
+ "sonnet-bare/T9/run-3": {
+  "pass": null,
+  "label_line": false,
+  "kept_line": false,
+  "route": null
+ },
+ "sonnet-free/T9/run-1": {
+  "pass": null,
+  "label_line": true,
+  "kept_line": false,
+  "route": "[Model: Sonnet 5.5 | Effort: medium]"
+ }
+}

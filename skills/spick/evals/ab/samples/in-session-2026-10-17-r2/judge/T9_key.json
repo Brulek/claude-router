@@ -1,0 +1,12 @@
+{
+ "A": "sonnet-free/T9/run-1",
+ "B": "haiku-bare/T9/run-1",
+ "C": "haiku-bare/T9/run-3",
+ "D": "sonnet-bare/T9/run-1",
+ "E": "haiku-spick/T9/run-1",
+ "F": "haiku-bare/T9/run-2",
+ "G": "haiku-spick/T9/run-2",
+ "H": "haiku-spick/T9/run-3",
+ "I": "sonnet-bare/T9/run-3",
+ "J": "sonnet-bare/T9/run-2"
+}

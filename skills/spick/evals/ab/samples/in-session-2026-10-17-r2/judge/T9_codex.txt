@@ -1,0 +1,28 @@
+整体上，回答集中发现了 **K1 的复合命令误判**和 **K3 的记账遗漏**；全部漏掉 K4，也都没有准确指出 K1 中“编辑尚未完成时的检查被算作编辑后检查”。H 额外发现后台 review 提前完成，与 K2 的完成状态伪造部分吻合，因此领先。
+
+召回按加权覆盖率换算为 1–5 分：`1 + 4 × 已覆盖权重 / 3`，复合缺陷允许部分得分。不同于参考、但证据具体且看起来成立的问题不扣准确分；未经确认的引擎行为、过强的必然性表述和内部矛盾会扣分。overall 综合五项判断，不机械取平均。
+
+| 回答 | 召回 | 准确 | 证据 | 排序与后果 | 简洁 | overall |
+|---|---:|---:|---:|---:|---:|---:|
+| A | 2.3 | 4 | 4 | 4 | 3 | 3 |
+| B | 1.7 | 4 | 3 | 3 | 4 | 3 |
+| C | 2.0 | 3 | 3 | 3 | 4 | 3 |
+| D | 1.7 | 3 | 4 | 3 | 2 | 3 |
+| E | 2.3 | 4 | 4 | 4 | 3 | 3 |
+| F | 2.3 | 3 | 3 | 3 | 4 | 3 |
+| G | 2.3 | 4 | 4 | 4 | 4 | 3 |
+| H | 3.0 | 4 | 4 | 4 | 3 | 4 |
+| I | 2.3 | 3 | 3 | 3 | 2 | 3 |
+| J | 2.3 | 4 | 4 | 4 | 3 | 3 |
+
+主要差异：
+
+- **A、E、G、J**：复合命令和记账遗漏证据较完整，但遗漏核心完成状态问题。G 将嵌套记账拆成两项，降低了五项限额的利用率。
+- **B**：没有指出 K1 的误放行；把依赖未核实读写语义的数据丢失列为首项，排序依据不足。
+- **C**：声称超时后“后记行仍写 failed”，与参考的“索引删除后无法补写 late 行”直接冲突。
+- **D**：记账分析扎实，但没有命中 K1 的目标触发条件；将不同 `-k` 测试选择视为同一个检查，论证不足。附带问题过多，且明确未读完六个模块。
+- **F**：`eslint --fix` 仍可能执行实际 lint，不能仅因自动修复就判为非检查；部分命令示例的解析结果缺少支撑。
+- **H**：后台 review 被立即记为 completed，是 K2 的有效部分覆盖；但仍漏掉引号关键词误识别及前台 deep 非空即完成。
+- **I**：第五项混装两个依赖引擎生命周期的假设，且附加问题较多，削弱准确性与简洁性。
+
+JUDGE_JSON: {"A":{"overall":3,"scores":{"recall":2.3,"accuracy":4,"evidence":4,"ordering_consequences":4,"conciseness":3}},"B":{"overall":3,"scores":{"recall":1.7,"accuracy":4,"evidence":3,"ordering_consequences":3,"conciseness":4}},"C":{"overall":3,"scores":{"recall":2.0,"accuracy":3,"evidence":3,"ordering_consequences":3,"conciseness":4}},"D":{"overall":3,"scores":{"recall":1.7,"accuracy":3,"evidence":4,"ordering_consequences":3,"conciseness":2}},"E":{"overall":3,"scores":{"recall":2.3,"accuracy":4,"evidence":4,"ordering_consequences":4,"conciseness":3}},"F":{"overall":3,"scores":{"recall":2.3,"accuracy":3,"evidence":3,"ordering_consequences":3,"conciseness":4}},"G":{"overall":3,"scores":{"recall":2.3,"accuracy":4,"evidence":4,"ordering_consequences":4,"conciseness":4}},"H":{"overall":4,"scores":{"recall":3.0,"accuracy":4,"evidence":4,"ordering_consequences":4,"conciseness":3}},"I":{"overall":3,"scores":{"recall":2.3,"accuracy":3,"evidence":3,"ordering_consequences":3,"conciseness":2}},"J":{"overall":3,"scores":{"recall":2.3,"accuracy":4,"evidence":4,"ordering_consequences":4,"conciseness":3}}}

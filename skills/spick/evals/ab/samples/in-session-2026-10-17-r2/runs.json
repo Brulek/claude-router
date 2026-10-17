@@ -1,0 +1,434 @@
+{
+ "haiku-bare/T4/run-1": {
+  "agent": "a3c6ffabc947c4e7d",
+  "nested": [],
+  "wall_s": 11.9,
+  "own_usage": {
+   "in": 12,
+   "out": 1100,
+   "cache_read": 90139,
+   "cache_write": 23848
+  },
+  "api_calls": 6,
+  "has_report": true
+ },
+ "haiku-bare/T4/run-2": {
+  "agent": "aa61baeb1f3f5705c",
+  "nested": [],
+  "wall_s": 11.4,
+  "own_usage": {
+   "in": 14,
+   "out": 835,
+   "cache_read": 109232,
+   "cache_write": 25200
+  },
+  "api_calls": 7,
+  "has_report": true
+ },
+ "haiku-bare/T5/run-1": {
+  "agent": "a4d11fd19b301a754",
+  "nested": [],
+  "wall_s": 14.4,
+  "own_usage": {
+   "in": 6,
+   "out": 30,
+   "cache_read": 24808,
+   "cache_write": 25680
+  },
+  "api_calls": 3,
+  "has_report": true
+ },
+ "haiku-bare/T5/run-2": {
+  "agent": "a248452af065ef35b",
+  "nested": [],
+  "wall_s": 15.0,
+  "own_usage": {
+   "in": 6,
+   "out": 141,
+   "cache_read": 24808,
+   "cache_write": 25680
+  },
+  "api_calls": 3,
+  "has_report": true
+ },
+ "haiku-bare/T6/run-1": {
+  "agent": "aae6dc0114e6d93d9",
+  "nested": [],
+  "wall_s": 9.6,
+  "own_usage": {
+   "in": 6,
+   "out": 147,
+   "cache_read": 24808,
+   "cache_write": 25646
+  },
+  "api_calls": 3,
+  "has_report": true
+ },
+ "haiku-bare/T6/run-2": {
+  "agent": "aca689a8c9303a9af",
+  "nested": [],
+  "wall_s": 10.1,
+  "own_usage": {
+   "in": 6,
+   "out": 141,
+   "cache_read": 28574,
+   "cache_write": 21880
+  },
+  "api_calls": 3,
+  "has_report": true
+ },
+ "haiku-bare/T7/run-1": {
+  "agent": "a32b97cb09a8b18c9",
+  "nested": [],
+  "wall_s": 15.3,
+  "own_usage": {
+   "in": 16,
+   "out": 1189,
+   "cache_read": 91624,
+   "cache_write": 24235
+  },
+  "api_calls": 6,
+  "has_report": true
+ },
+ "haiku-bare/T7/run-2": {
+  "agent": "ac87c1a0f77e4489f",
+  "nested": [],
+  "wall_s": 12.5,
+  "own_usage": {
+   "in": 8,
+   "out": 370,
+   "cache_read": 50494,
+   "cache_write": 22085
+  },
+  "api_calls": 4,
+  "has_report": true
+ },
+ "haiku-bare/T9/run-1": {
+  "agent": "a97232745711e6263",
+  "nested": [],
+  "wall_s": 118.2,
+  "own_usage": {
+   "in": 28,
+   "out": 2951,
+   "cache_read": 423724,
+   "cache_write": 138815
+  },
+  "api_calls": 14,
+  "has_report": true
+ },
+ "haiku-bare/T9/run-2": {
+  "agent": "a2cde0c4d131309ba",
+  "nested": [],
+  "wall_s": 94.5,
+  "own_usage": {
+   "in": 20,
+   "out": 571,
+   "cache_read": 243895,
+   "cache_write": 75068
+  },
+  "api_calls": 10,
+  "has_report": true
+ },
+ "haiku-bare/T9/run-3": {
+  "agent": "a9579a288c0a1d392",
+  "nested": [],
+  "wall_s": 94.6,
+  "own_usage": {
+   "in": 36,
+   "out": 2024,
+   "cache_read": 557364,
+   "cache_write": 113690
+  },
+  "api_calls": 18,
+  "has_report": true
+ },
+ "sonnet-bare/T9/run-1": {
+  "agent": "a389d1f344a06de5a",
+  "nested": [],
+  "wall_s": 84.9,
+  "own_usage": {
+   "in": 22,
+   "out": 588,
+   "cache_read": 311410,
+   "cache_write": 91593
+  },
+  "api_calls": 11,
+  "has_report": true
+ },
+ "sonnet-bare/T9/run-2": {
+  "agent": "a3a4f432a0b9993f3",
+  "nested": [],
+  "wall_s": 135.3,
+  "own_usage": {
+   "in": 34,
+   "out": 9233,
+   "cache_read": 483294,
+   "cache_write": 116559
+  },
+  "api_calls": 16,
+  "has_report": true
+ },
+ "sonnet-bare/T9/run-3": {
+  "agent": "a435f5ba1cc819bbd",
+  "nested": [],
+  "wall_s": 95.3,
+  "own_usage": {
+   "in": 32,
+   "out": 1196,
+   "cache_read": 479518,
+   "cache_write": 93608
+  },
+  "api_calls": 16,
+  "has_report": true
+ },
+ "sonnet-free/T9/run-1": {
+  "agent": "af736a48412c246e6",
+  "nested": [],
+  "wall_s": 102.6,
+  "own_usage": {
+   "in": 16,
+   "out": 12022,
+   "cache_read": 678210,
+   "cache_write": 161314
+  },
+  "api_calls": 8,
+  "has_report": true
+ },
+ "haiku-spick/T4/run-1": {
+  "agent": "aa6edc65749dd5ece",
+  "nested": [],
+  "wall_s": 21.6,
+  "own_usage": {
+   "in": 28,
+   "out": 2096,
+   "cache_read": 1149513,
+   "cache_write": 217854
+  },
+  "api_calls": 14,
+  "has_report": true
+ },
+ "haiku-spick/T4/run-2": {
+  "agent": "a4b602a5a16ce1729",
+  "nested": [
+   "ad2438cd3e1f17eaa"
+  ],
+  "wall_s": 30.4,
+  "own_usage": {
+   "in": 22,
+   "out": 198,
+   "cache_read": 819891,
+   "cache_write": 209881
+  },
+  "api_calls": 11,
+  "has_report": true
+ },
+ "haiku-spick/T4/run-3": {
+  "agent": "a0254296cb3ad1e16",
+  "nested": [
+   "ae5ee72c35aad38ba"
+  ],
+  "wall_s": 27.7,
+  "own_usage": {
+   "in": 16,
+   "out": 1519,
+   "cache_read": 543518,
+   "cache_write": 194308
+  },
+  "api_calls": 8,
+  "has_report": true
+ },
+ "haiku-spick/T6/run-1": {
+  "agent": "a441b8008b0cd436b",
+  "nested": [],
+  "wall_s": 14.2,
+  "own_usage": {
+   "in": 8,
+   "out": 167,
+   "cache_read": 162548,
+   "cache_write": 187604
+  },
+  "api_calls": 4,
+  "has_report": true
+ },
+ "haiku-spick/T6/run-2": {
+  "agent": "a1c8b3fe60cd642f1",
+  "nested": [],
+  "wall_s": 13.2,
+  "own_usage": {
+   "in": 8,
+   "out": 160,
+   "cache_read": 162548,
+   "cache_write": 187608
+  },
+  "api_calls": 4,
+  "has_report": true
+ },
+ "haiku-spick/T6/run-3": {
+  "agent": "a4c17616a6d197564",
+  "nested": [],
+  "wall_s": 19.7,
+  "own_usage": {
+   "in": 8,
+   "out": 3694,
+   "cache_read": 162548,
+   "cache_write": 187616
+  },
+  "api_calls": 4,
+  "has_report": true
+ },
+ "haiku-spick/T7/run-1": {
+  "agent": "acae835e98c563157",
+  "nested": [],
+  "wall_s": 28.5,
+  "own_usage": {
+   "in": 24,
+   "out": 223,
+   "cache_read": 910762,
+   "cache_write": 211093
+  },
+  "api_calls": 12,
+  "has_report": true
+ },
+ "haiku-spick/T7/run-2": {
+  "agent": "a6d6a9b02d519e31c",
+  "nested": [],
+  "wall_s": 24.3,
+  "own_usage": {
+   "in": 18,
+   "out": 1520,
+   "cache_read": 623304,
+   "cache_write": 207504
+  },
+  "api_calls": 9,
+  "has_report": true
+ },
+ "haiku-spick/T7/run-3": {
+  "agent": "a74b55486395a833b",
+  "nested": [],
+  "wall_s": 27.1,
+  "own_usage": {
+   "in": 22,
+   "out": 81,
+   "cache_read": 815869,
+   "cache_write": 211938
+  },
+  "api_calls": 11,
+  "has_report": true
+ },
+ "haiku-spick/T1/run-1": {
+  "agent": "a7dd868b351b5f524",
+  "nested": [],
+  "wall_s": 17.7,
+  "own_usage": {
+   "in": 26,
+   "out": 204,
+   "cache_read": 990400,
+   "cache_write": 218969
+  },
+  "api_calls": 13,
+  "has_report": true
+ },
+ "haiku-spick/T2/run-1": {
+  "agent": "ab85c7998f2689c88",
+  "nested": [],
+  "wall_s": 7.7,
+  "own_usage": {
+   "in": 8,
+   "out": 28,
+   "cache_read": 162548,
+   "cache_write": 187462
+  },
+  "api_calls": 4,
+  "has_report": true
+ },
+ "haiku-spick/T3/run-1": {
+  "agent": "abc0468ffced17ed8",
+  "nested": [
+   "a7b4e127d7f6f318d"
+  ],
+  "wall_s": 33.9,
+  "own_usage": {
+   "in": 24,
+   "out": 388,
+   "cache_read": 793520,
+   "cache_write": 137640
+  },
+  "api_calls": 10,
+  "has_report": true
+ },
+ "haiku-spick/T5/run-1": {
+  "agent": "a534c3376e8fc4870",
+  "nested": [
+   "a4930f27781719006"
+  ],
+  "wall_s": 98.7,
+  "own_usage": {
+   "in": 16,
+   "out": 189,
+   "cache_read": 612472,
+   "cache_write": 125334
+  },
+  "api_calls": 8,
+  "has_report": true
+ },
+ "haiku-spick/T8/run-1": {
+  "agent": "a51441a5f80d95538",
+  "nested": [
+   "a88dadfcef1e64e07"
+  ],
+  "wall_s": 32.6,
+  "own_usage": {
+   "in": 20,
+   "out": 358,
+   "cache_read": 793689,
+   "cache_write": 141137
+  },
+  "api_calls": 10,
+  "has_report": true
+ },
+ "haiku-spick/T9/run-1": {
+  "agent": "a35d0a15ee345c011",
+  "nested": [
+   "a604ef90d2474d179"
+  ],
+  "wall_s": 192.6,
+  "own_usage": {
+   "in": 20,
+   "out": 1011,
+   "cache_read": 810948,
+   "cache_write": 132952
+  },
+  "api_calls": 10,
+  "has_report": true
+ },
+ "haiku-spick/T9/run-2": {
+  "agent": "ac5ef5bd8d7b632d4",
+  "nested": [
+   "aa95eab548d32ff74"
+  ],
+  "wall_s": 162.8,
+  "own_usage": {
+   "in": 24,
+   "out": 3116,
+   "cache_read": 807170,
+   "cache_write": 132886
+  },
+  "api_calls": 10,
+  "has_report": true
+ },
+ "haiku-spick/T9/run-3": {
+  "agent": "aa865cb164989e24c",
+  "nested": [
+   "a2213c03b2f78c0e3"
+  ],
+  "wall_s": 198.8,
+  "own_usage": {
+   "in": 16,
+   "out": 52,
+   "cache_read": 616236,
+   "cache_write": 128020
+  },
+  "api_calls": 8,
+  "has_report": true
+ }
+}
