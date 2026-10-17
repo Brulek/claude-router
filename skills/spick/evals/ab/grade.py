@@ -186,12 +186,48 @@ def unpriced_delegates(turn_records):
     return sum(1 for r in turn_records for d in (r.get("delegates") or []) if d.get("costUsd") is None)
 
 
+def _explore_entries(res):
+    """(by_type present, entries) for Explore-type agents in the result's subagent_stats.by_type."""
+    stats = res.get("subagent_stats") or {}
+    if "by_type" not in stats:
+        return False, []
+    by_type = stats["by_type"] or {}
+    return True, [v for k, v in by_type.items() if str(k).lower() == "explore"]
+
+
+def _entry_models(entry):
+    """Model names an Explore entry of by_type names, in any of the shapes a count-with-detail may take; [] if none."""
+    if isinstance(entry, str):
+        return [entry]
+    if not isinstance(entry, dict):
+        return []  # a bare count says an agent ran, not on what
+    names = [entry["model"]] if isinstance(entry.get("model"), str) else []
+    names += [m for m in (entry.get("models") or []) if isinstance(m, str)]
+    names += list((entry.get("modelUsage") or {}).keys())
+    return names
+
+
 def explore_ran(res):
-    """The Explore override is only checkable at runtime: did an Explore agent run, and was any Haiku billed?
-    (On a Haiku main session the Haiku line alone proves nothing; the agent type is what counts.)"""
-    by_type = (res.get("subagent_stats") or {}).get("by_type") or {}
-    ran = any(str(k).lower() == "explore" for k in by_type)
-    return ran, any("haiku" in m for m in (res.get("modelUsage") or {}))
+    """Did an Explore agent run? (The agent type is what counts; a Haiku line in modelUsage proves nothing on a
+    Haiku main session.)"""
+    return bool(_explore_entries(res)[1])
+
+
+def explore_haiku(res, turn_records=None):
+    """True only when an Explore-type agent is shown running on Haiku; False when Explore did not run or ran on
+    another model; "unknown" when it ran (or nothing says it did not) and neither source names its model.
+    Source 1 is subagent_stats.by_type; if that key is absent, or names no model, the turn-record `delegates[]`.
+    Several Explore agents: all named ones must be Haiku."""
+    present, entries = _explore_entries(res)
+    models = [m for e in entries for m in _entry_models(e)]
+    if not models:
+        models = [d.get("model") for r in turn_records or [] for d in (r.get("delegates") or [])
+                  if str(d.get("lane") or d.get("type") or "").lower() == "explore" and isinstance(d.get("model"), str)]
+    if models:
+        return all("haiku" in m.lower() for m in models)
+    if present and not entries:
+        return False  # by_type is there and lists no Explore: it did not run
+    return "unknown"
 
 
 def error_reason(meta, res):
@@ -227,7 +263,7 @@ def run_metrics(rec, task):
         "turn_record": rec.get("turn_records") is not None,
         "outside_calls": outside_calls(rec.get("turn_records")),
         "unpriced_delegates": unpriced_delegates(rec.get("turn_records")),
-        "explore_ran": explore_ran(res)[0], "haiku_billed": explore_ran(res)[1],
+        "explore_ran": explore_ran(res), "explore_haiku": explore_haiku(res, rec.get("turn_records")),
         "subagent_types": (res.get("subagent_stats") or {}).get("by_type") or {},
     }
 

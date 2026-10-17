@@ -112,9 +112,49 @@ class Metrics(unittest.TestCase):
         priced = [{"delegates": [{"lane": "coder", "costUsd": 0.2}, {"lane": "agy", "costUsd": None}, {"lane": "deep"}]}]
         self.assertEqual(grade.unpriced_delegates(priced), 2)
         self.assertIsNone(grade.unpriced_delegates(None))
-        res = {"subagent_stats": {"by_type": {"Explore": 1}}, "modelUsage": {"claude-haiku-5-5": {}}}
-        self.assertEqual(grade.explore_ran(res), (True, True))
-        self.assertEqual(grade.explore_ran({"modelUsage": {"claude-opus-5-5": {}}}), (False, False))
+        self.assertTrue(grade.explore_ran({"subagent_stats": {"by_type": {"Explore": 1}}}))
+        self.assertFalse(grade.explore_ran({"modelUsage": {"claude-opus-5-5": {}}}))
+
+
+class ExploreOnHaiku(unittest.TestCase):
+    """The Explore check is about the Explore agent's own model, not about Haiku showing up somewhere in the bill."""
+
+    HAIKU_MAIN = {"claude-haiku-5-5": {}, "claude-sonnet-5-5": {}}
+
+    def test_haiku_main_plus_sonnet_explore_is_not_a_pass(self):
+        # the old check saw "Explore ran" and "a Haiku line" and said yes; the Haiku line is the main session's
+        res = {"subagent_stats": {"by_type": {"Explore": {"count": 1, "model": "claude-sonnet-5-5"}}},
+               "modelUsage": self.HAIKU_MAIN}
+        self.assertTrue(grade.explore_ran(res))
+        self.assertIs(grade.explore_haiku(res), False)
+
+    def test_explore_on_haiku_is_true(self):
+        for entry in ({"model": "claude-haiku-5-5"}, {"models": ["claude-haiku-5-5"]},
+                      {"modelUsage": {"claude-haiku-5-5": {}}}, "claude-haiku-5-5"):
+            res = {"subagent_stats": {"by_type": {"Explore": entry}}}
+            self.assertIs(grade.explore_haiku(res), True, entry)
+
+    def test_a_bare_count_names_no_model_so_it_is_unknown(self):
+        res = {"subagent_stats": {"by_type": {"Explore": 1}}, "modelUsage": self.HAIKU_MAIN}
+        self.assertEqual(grade.explore_haiku(res), "unknown")
+        self.assertEqual(grade.explore_haiku(res, []), "unknown")
+
+    def test_turn_record_delegates_answer_when_by_type_has_no_model(self):
+        recs = [{"delegates": [{"lane": "coder", "model": "claude-sonnet-5-5"},
+                               {"lane": "Explore", "model": "claude-haiku-5-5"}]}]
+        self.assertIs(grade.explore_haiku({"subagent_stats": {"by_type": {"Explore": 1}}}, recs), True)
+        self.assertIs(grade.explore_haiku({"modelUsage": self.HAIKU_MAIN}, recs), True)  # by_type key absent
+        sonnet = [{"delegates": [{"lane": "explore", "model": "claude-sonnet-5-5"}]}]
+        self.assertIs(grade.explore_haiku({"modelUsage": self.HAIKU_MAIN}, sonnet), False)
+
+    def test_no_explore_in_by_type_is_false_and_no_source_is_unknown(self):
+        self.assertIs(grade.explore_haiku({"subagent_stats": {"spawned": 0, "by_type": {}}}), False)
+        self.assertIs(grade.explore_haiku({"subagent_stats": {"by_type": {"coder": 1}}, "modelUsage": self.HAIKU_MAIN}), False)
+        self.assertEqual(grade.explore_haiku({"modelUsage": self.HAIKU_MAIN}), "unknown")
+
+    def test_one_non_haiku_explore_among_several_fails_it(self):
+        res = {"subagent_stats": {"by_type": {"Explore": {"models": ["claude-haiku-5-5", "claude-sonnet-5-5"]}}}}
+        self.assertIs(grade.explore_haiku(res), False)
 
 
 @unittest.skipUnless(common.venv_python().exists(), "run.py --setup first")

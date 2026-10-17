@@ -78,7 +78,8 @@ def arm_summary(runs, arm):
         "wall_p50": percentile(walls, 50), "wall_p95": percentile(walls, 95),
         "subagent_runs": sum(1 for g in gs if g.get("subagents")),
         "explore_runs": sum(1 for g in gs if g.get("explore_ran")),
-        "explore_haiku": sum(1 for g in gs if g.get("explore_ran") and g.get("haiku_billed")),
+        "explore_haiku": sum(1 for g in gs if g.get("explore_haiku") is True),
+        "explore_unknown": sum(1 for g in gs if g.get("explore_haiku") == "unknown"),
         "turn_records": sum(1 for g in gs if g.get("turn_record")),
     }
 
@@ -172,13 +173,15 @@ def render(out_dir, today):
         L.append("")
 
     L += ["## Tier use and Explore", "",
-          "| arm | runs that spawned a subagent | Explore ran | Explore with Haiku billed | runs with a turn record |", "|---|---|---|---|---|"]
+          "| arm | runs that spawned a subagent | Explore ran | Explore agent on Haiku | runs with a turn record |", "|---|---|---|---|---|"]
     for a in arms:
         s = arm_summary(runs, a)
-        L.append(f"| {a} | {s['subagent_runs']}/{s['n']} | {s['explore_runs']}/{s['n']} | {s['explore_haiku']}/{s['n']} | {s['turn_records']}/{s['n']} |")
+        L.append(f"| {a} | {s['subagent_runs']}/{s['n']} | {s['explore_runs']}/{s['n']} | {s['explore_haiku']}/{s['n']}"
+                 f"{' (+' + str(s['explore_unknown']) + ' unknown)' if s['explore_unknown'] else ''} | {s['turn_records']}/{s['n']} |")
     L += ["", "The Explore check is the spec's runtime acceptance for the Explore override: in `haiku-spick` and the `*-free` "
-          "arms, `subagent_stats.by_type` must show Explore and `modelUsage` a Haiku line. On a Haiku main session the "
-          "Haiku line alone proves nothing, so read the Explore column with it.", ""]
+          "arms, the Explore agent itself must be shown on Haiku, by `subagent_stats.by_type` or, if that names no model, "
+          "by the turn record's `delegates[]`. A Haiku line in `modelUsage` is not evidence (a Haiku main session bills "
+          "one anyway). \"unknown\" counts runs where Explore ran but no source names its model; they are not passes.", ""]
 
     L += ["## Tier match", "", "| task | ideal | " + " | ".join(arms) + " |", "|---|---|" + "---|" * len(arms)]
     for t in tids:

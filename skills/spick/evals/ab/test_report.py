@@ -9,7 +9,7 @@ import report
 def g(arm, task, ok, cost=0.01, wall=10, **kw):
     d = dict(arm=arm, task=task, run=1, error=False, cost=cost, wall=wall, turns=2, models=["claude-haiku-5-5"],
              label_line=False, kept_line=False, ideal="haiku", tier_match=True, turn_record=False,
-             outside_calls=None, explore_ran=False, haiku_billed=True, subagents=0, pass_=ok)
+             outside_calls=None, explore_ran=False, explore_haiku=False, subagents=0, pass_=ok)
     d["pass"] = d.pop("pass_")
     d.update(kw)
     return d
@@ -83,6 +83,17 @@ class Stats(unittest.TestCase):
         self.assertIn("| haiku-bare | 2/2 | 2/2 | unknown (1/2 priced) | unknown (1/2 priced) |", text)
         self.assertIn("| opus-bare | 1/1 | 1/1 | >=$0.200 | >=$0.200 |", text)
         self.assertNotIn("$0.000", text)
+
+    def test_explore_column_counts_verified_haiku_and_flags_unknown(self):
+        runs = {"haiku-spick/T1/run-1": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku=True),
+                "haiku-spick/T1/run-2": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku="unknown"),
+                "haiku-spick/T1/run-3": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku=False)}
+        s = report.arm_summary(runs, "haiku-spick")
+        self.assertEqual((s["explore_runs"], s["explore_haiku"], s["explore_unknown"]), (3, 1, 1))
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {}}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("| haiku-spick | 0/3 | 3/3 | 1/3 (+1 unknown) | 0/3 |", text)
 
 
 class Render(unittest.TestCase):
