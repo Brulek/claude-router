@@ -1,0 +1,6 @@
+{
+  "enabledPlugins": {
+    "spick-dashboard@spick": false
+  },
+  "disableAllHooks": true
+}

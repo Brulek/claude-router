@@ -109,7 +109,7 @@ def render(out_dir, today):
     tasks = common.load_tasks()
     arms = [a for a in common.ARMS if any(k[0] == a for k in cells)]
     tids = [t for t in tasks if any(k[1] == t for k in cells)]
-    L = [f"# spick A/B report - {today}", "", f"Out dir: `{Path(out_dir).resolve()}`; {len(runs)} runs, "
+    L = [f"# spick A/B report - {today}", "", f"Out dir: `{Path(out_dir).resolve().name}`; {len(runs)} runs, "
          f"arms: {', '.join(arms)}; tasks: {', '.join(tids)}.", ""]
 
     L += ["## Per arm", "",
