@@ -84,11 +84,32 @@ export function parseCli(command: string): CliLane | null {
   return null
 }
 
-const NON_SOURCE = /\.(md|markdown|txt|json|jsonl|csv|tsv|ya?ml|toml|lock|log)$/i
-export function isSourcePath(path: string): boolean {
-  if (/(^|\/)\.claude\//.test(path)) return false
-  if (NON_SOURCE.test(path)) return false
-  return /\.[A-Za-z0-9]+$/.test(path)
+// notes, tables, logs and lock files; json, yaml and toml count as source (CI and configuration changes matter)
+const NON_SOURCE = /\.(md|markdown|txt|csv|tsv|log|lock)$/i
+const LOCK_FILES = new Set(['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml'])
+/** build files with no extension that are code all the same */
+const EXTENSIONLESS_SOURCE = new Set(['Dockerfile', 'Makefile', 'Justfile', 'Rakefile', 'Gemfile'])
+
+/** the path relative to the session's cwd when it lies inside it, else as given; a leading ./ dropped */
+export function relativeTo(path: string, cwd = ''): string {
+  const base = cwd.replace(/\/+$/, '')
+  const rel = base && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : path
+  // a git worktree under .claude/worktrees/<name>/ is a checkout of its own: judge the path inside it
+  return rel.replace(/^(\.\/)+/, '').replace(/^\.claude\/worktrees\/[^/]+\//, '')
+}
+
+/**
+ * Whether an edit to this path is a source change. Judged on the path relative to the session's cwd (and inside a
+ * worktree under .claude/worktrees/, relative to it): only a leading `.claude/` (the project's own Claude settings,
+ * plans, memory) is left out, so source in a worktree still counts, which v1's any-`.claude/` rule missed. A tool-level judgement only: Bash writes (sed -i, redirections) never reach it.
+ */
+export function isSourcePath(path: string, cwd = ''): boolean {
+  const rel = relativeTo(path, cwd)
+  if (rel.startsWith('.claude/')) return false
+  const name = rel.slice(rel.lastIndexOf('/') + 1)
+  if (EXTENSIONLESS_SOURCE.has(name)) return true
+  if (LOCK_FILES.has(name) || NON_SOURCE.test(name)) return false
+  return /\.[A-Za-z0-9]+$/.test(name)
 }
 
 /** the main session's lane name in state, totals and the pane */

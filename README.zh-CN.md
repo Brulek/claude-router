@@ -117,7 +117,7 @@ flowchart TD
 
 **守卫**在分流生效时做两件事。
 
-- 编辑上限：主会话每轮亲自改的源码文件最多 3 个（按不同文件计）。第 4 个文件会被拒绝，拒绝信息列出已改的 3 个文件并要求派 `Agent(coder)`。同一文件反复改、子代理的编辑、笔记/数据文件与 `.claude/` 下的文件都不计数。
+- 编辑上限：主会话每轮只能亲自改 1 个源码文件。第 2 个文件会被拒绝，拒绝信息点名已改的那个文件并要求派 `Agent(coder)`。同一文件反复改、子代理的编辑、笔记（`.md`、`.txt`）、表格（`.csv`、`.tsv`）、日志、锁文件以及开头为 `.claude/` 的路径都不计数；json、yaml、toml 计数，`.claude/worktrees/` 下的 worktree 也计数。这是工具层面的软上限：只看 Edit、Write、NotebookEdit，看不到 `sed -i`、重定向这类 Bash 写入。
 - 收工测试门：本轮任何循环（含子代理）改过源码、却没有任何循环跑过检查命令（测试、构建、lint 或类型检查），收工时退回一次。项目有自己的检查命令时，可在 `~/.claude/spick.json` 的 `guard.check_commands` 里用正则声明（见 `skills/spick/references/providers.md`）。主会话被要求跑项目的检查命令，或给用户一行 `/goal`，或用一行以 `Unchecked:`（或 `未验证:`）开头的话说明为何没跑。
 - `/spick guard off` 可关闭守卫，选择会被记住。
 

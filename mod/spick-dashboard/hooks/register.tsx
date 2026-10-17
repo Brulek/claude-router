@@ -425,17 +425,20 @@ async function tick($: EngineInterface, lastMs: number): Promise<number> {
 const ZERO_TOTALS: LaneTotals = { turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null }
 
 /** a Haiku main session editing source itself is the attention case the band flags */
-async function noteEdit($: EngineInterface, mainModel: string, agentId: string | undefined, filePath: string): Promise<void> {
+async function noteEdit($: EngineInterface, mainModel: string, agentId: string | undefined, filePath: string, cwd: string): Promise<void> {
   try {
-    if (!agentId && /haiku/.test(mainModel) && isSourcePath(filePath)) {
+    if (!agentId && /haiku/.test(mainModel) && isSourcePath(filePath, cwd)) {
       const name = filePath.split('/').slice(-2).join('/')
       await setCurrent($, { note: { kind: 'error', text: `edited ${name}` } })
     }
   } catch {}
 }
 
-/** the guard's state for the main turn: the source files the main session edited itself, those any loop edited, whether a check ran */
-type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; checkRan: boolean }
+/**
+ * the guard's state for the main turn: the source files the main session edited itself, those any loop edited, whether
+ * a check ran; `cwd` is the session's, which isSourcePath judges paths against
+ */
+type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; checkRan: boolean; cwd: string }
 
 /**
  * The guard's edit cap, in front of an Edit, Write or NotebookEdit: the main session's own edit of a source file past
@@ -445,11 +448,11 @@ type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; checkRan: b
  * too, counts for the check before the turn ends.
  */
 async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string): Promise<string | null> {
-  if (!isSourcePath(path)) return null
+  if (!isSourcePath(path, g.cwd)) return null
   if (!agentId && !g.mainEdits.has(path) && g.mainEdits.size >= EDIT_CAP) {
     const c = await read($, controls)
     if (c.guard === 'on' && effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) {
-      $.ui.toast(`spick: guard — edit cap: ${EDIT_CAP} source files this turn; the next one goes to a coder`)
+      $.ui.toast('spick: guard — edit cap: one source file per turn; the next one goes to a coder')
       await setCurrent($, { note: { kind: 'error', text: 'edit cap' } })
       return editCapReason([...g.mainEdits])
     }
@@ -521,7 +524,7 @@ export const register: Register = on => {
   /** the project's own check commands (spick.json guard.check_commands), read once at session.start */
   let declared: RegExp[] = []
   /** the guard's per-turn state, cleared at turn.start */
-  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), checkRan: false }
+  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), checkRan: false, cwd: '' }
   let mainModel = ''
   let mainEffort: string | undefined
   /** the last elapsed-time stamp written to `current` */
@@ -558,6 +561,7 @@ export const register: Register = on => {
     } catch {}
     try { await loadControls($) } catch {}
     try { await readSessionModel($) } catch {}
+    guardTurn.cwd = e.cwd
     try { await startSpend($, spend, e.cwd) } catch {}
     // the project's own check commands, once per session; a pattern that does not compile is ignored, with one toast
     try {
@@ -663,6 +667,8 @@ export const register: Register = on => {
       guardTurn.mainEdits.clear()
       guardTurn.sourceEdits.clear()
       guardTurn.checkRan = false
+      // a mod loaded mid-session saw no session.start: ask for the cwd once
+      if (!guardTurn.cwd) guardTurn.cwd = await $.session.cwd().catch(() => '')
       lastTickMs = startedAt
       await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0 }))
       await sweep($, tracker)
@@ -782,13 +788,13 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
     const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
     if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path)
+    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
     return next(e)
   }).catch(passThrough)
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
     const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
     if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path)
+    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
     return next(e)
   }).catch(passThrough)
   on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {

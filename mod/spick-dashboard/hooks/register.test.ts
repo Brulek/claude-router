@@ -1022,38 +1022,49 @@ async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claud
   return { world, ran, turn, stop, run }
 }
 
-test('the guard refuses the main session\'s fourth distinct source file in a turn, naming the three, with a toast and an edit cap note', { plugins: [probePlugin] }, async ($, on) => {
+test('the guard refuses the main session\'s second distinct source file in a turn, naming the first, with a toast and an edit cap note', { plugins: [probePlugin] }, async ($, on) => {
   const { world, ran, turn } = await guardWorld($, on)
   await turn('t1')
-  for (const [i, f] of ['/repo/a.py', '/repo/b.ts', '/repo/c.go'].entries()) expect((await $.tool.call(edit(`e${i}`, f))).deny).toBeUndefined()
-  const r = await $.tool.call(edit('e4', '/repo/d.rs'))
-  expect(r.deny).toContain('spick guard')
-  for (const f of ['/repo/a.py', '/repo/b.ts', '/repo/c.go']) expect(r.deny).toContain(f)
+  expect((await $.tool.call(edit('e1', '/repo/a.py'))).deny).toBeUndefined()
+  const r = await $.tool.call(edit('e2', '/repo/b.ts'))
+  expect(r.deny).toContain('spick guard: the triage session already edited /repo/a.py itself this turn')
   expect(r.deny).toContain('Agent(coder)')
   // the refused edit never reached the tool; a Write and a NotebookEdit to a new file are refused alike
-  expect(ran).toEqual(['/repo/a.py', '/repo/b.ts', '/repo/c.go'])
-  expect((await $.tool.call(write('w5', '/repo/e.swift'))).deny).toContain('spick guard')
-  expect((await $.tool.call(notebook('n6', '/repo/f.ipynb'))).deny).toContain('spick guard')
-  expect(world.toasts.filter(t => t.startsWith('spick: guard — edit cap')).length).toBe(3)
+  expect(ran).toEqual(['/repo/a.py'])
+  expect((await $.tool.call(write('w3', '/repo/e.swift'))).deny).toContain('spick guard')
+  expect((await $.tool.call(notebook('n4', '/repo/f.ipynb'))).deny).toContain('spick guard')
+  expect(world.toasts.filter(t => t.startsWith('spick: guard — edit cap: one source file per turn')).length).toBe(3)
   expect((await probe($)).current?.note).toEqual({ kind: 'error', text: 'edit cap' })
   // the cap is per turn: the next turn starts again
   await $.turn.complete({ turnId: 't1', ...DONE })
   await turn('t2')
-  expect((await $.tool.call(edit('e7', '/repo/d.rs'))).deny).toBeUndefined()
+  expect((await $.tool.call(edit('e5', '/repo/b.ts'))).deny).toBeUndefined()
 })
 
-test('the guard lets through a file already edited, a subagent\'s edits, and paths that are not source', async ($, on) => {
+test('the guard lets through the file already edited, a subagent\'s edits, and paths that are not source', async ($, on) => {
   const { ran, turn } = await guardWorld($, on)
   await turn('t1')
-  for (const [i, f] of ['/repo/a.py', '/repo/b.py', '/repo/c.py'].entries()) await $.tool.call(edit(`e${i}`, f))
-  // the same file a fourth, fifth time: still one of the three
-  expect((await $.tool.call(edit('e4', '/repo/a.py'))).deny).toBeUndefined()
-  expect((await $.tool.call(write('w5', '/repo/b.py'))).deny).toBeUndefined()
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  // the same file a second, third time: still the one
+  expect((await $.tool.call(edit('e2', '/repo/a.py'))).deny).toBeUndefined()
+  expect((await $.tool.call(write('w3', '/repo/a.py'))).deny).toBeUndefined()
   // a subagent's edits never count against the main session's cap
   for (const f of ['/repo/d.py', '/repo/e.py', '/repo/f.py', '/repo/g.py']) expect((await $.tool.call(edit(`s-${f}`, f, 'a1'))).deny).toBeUndefined()
-  // notes, data and .claude/ are not source
-  for (const f of ['/repo/README.md', '/repo/data.json', '/repo/notes.txt', '/repo/.claude/settings.local.py']) expect((await $.tool.call(edit(`n-${f}`, f))).deny).toBeUndefined()
-  expect(ran).toHaveLength(13)
+  // notes, data and a leading .claude/ are not source
+  for (const f of ['/repo/README.md', '/repo/data.csv', '/repo/notes.txt', '/repo/.claude/settings.local.py']) expect((await $.tool.call(edit(`n-${f}`, f))).deny).toBeUndefined()
+  expect(ran).toHaveLength(11)
+})
+
+test('a worktree under .claude/worktrees/ is source: its second file is refused (regression: v1 skipped any .claude/ path)', async ($, on) => {
+  const { turn } = await guardWorld($, on)
+  await turn('t1')
+  expect((await $.tool.call(edit('e1', '/repo/.claude/worktrees/x/src/a.py'))).deny).toBeUndefined()
+  expect((await $.tool.call(edit('e2', '/repo/.claude/worktrees/x/src/b.py'))).deny).toContain('spick guard')
+  // json, yaml and toml count as source too
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  await turn('t2')
+  await $.tool.call(edit('e3', '/repo/pyproject.toml'))
+  expect((await $.tool.call(edit('e4', '/repo/.github/workflows/ci.yml'))).deny).toContain('spick guard')
 })
 
 test('the guard lets every edit through when it is off, when routing is off, and in a session that is not Haiku', async ($, on) => {
@@ -1068,7 +1079,7 @@ test('the guard lets every edit through when it is off, when routing is off, and
   expect(await run('guard off')).toBe('spick: guard off')
   expect(await four('t1')).toBe(0)
   expect(await run('guard on')).toBe('spick: guard on')
-  expect(await four('t2')).toBe(1)
+  expect(await four('t2')).toBe(3)
   expect(await run('off')).toBe('spick: routing off')
   expect(await four('t3')).toBe(0)
   await run('on')
@@ -1077,7 +1088,7 @@ test('the guard lets every edit through when it is off, when routing is off, and
   expect(await four('t4')).toBe(0)
   // forced routing on Opus: the guard applies
   await run('force')
-  expect(await four('t5')).toBe(1)
+  expect(await four('t5')).toBe(3)
 })
 
 test('a turn that edited source and ran no check is sent back once at stop, with a toast; the next stop passes', async ($, on) => {

@@ -1,8 +1,12 @@
 // The guard: an edit cap per turn for the main session and a check before the turn ends. Pure functions; register.tsx
 // keeps the per-turn state and decides when they apply (the guard on, routing in force, the main loop for the cap).
 
-/** the most distinct source files the main session edits itself in one turn; the next one is refused, to go to a coder */
-export const EDIT_CAP = 3
+/**
+ * The most distinct source files the main session edits itself in one turn; the next one is refused, to go to a coder.
+ * One: a one-file change is the main session's own (not dispatching is the default for small work), a second file
+ * means a change that is a coder's.
+ */
+export const EDIT_CAP = 1
 
 /**
  * The command names that count as a check: a test runner, a build, a linter or a type checker. Each on word
@@ -77,9 +81,11 @@ const MAX_LISTED = 5
 const listed = (files: readonly string[]): string =>
   files.length <= MAX_LISTED ? files.join(', ') : `${files.slice(0, MAX_LISTED).join(', ')} and ${files.length - MAX_LISTED} more`
 
-/** Why an edit was refused: the cap is reached; the files already edited, and what to do instead. What the model reads as the tool's error. */
+/** Why an edit was refused: the cap is reached; the file(s) already edited, and what to do instead. What the model reads as the tool's error. */
 export function editCapReason(files: readonly string[]): string {
-  return `spick guard: the triage session already edited ${files.length} source files itself this turn (${listed(files)}); the cap is ${EDIT_CAP} distinct files per turn, so this edit was refused. Dispatch Agent(coder) with the goal, the files above and this one, and the checks to run, and let it make the rest of the change. Further edits to the files above still go through.`
+  const done = files.length === 1 ? `already edited ${files[0]} itself this turn` : `already edited ${files.length} source files itself this turn (${listed(files)})`
+  const cap = EDIT_CAP === 1 ? '1 source file per turn' : `${EDIT_CAP} distinct source files per turn`
+  return `spick guard: the triage session ${done}; the cap is ${cap}, so this edit to a second file was refused. Dispatch Agent(coder) with the goal, the file above and this one, and the checks to run, and let it make the rest of the change. Further edits to the file above still go through.`
 }
 
 /**

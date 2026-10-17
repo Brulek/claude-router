@@ -1,8 +1,8 @@
 import { test, expect } from 'claude-code/testing'
 import { EDIT_CAP, UNCHECKED_RE, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 
-test('the edit cap is three distinct files', () => {
-  expect(EDIT_CAP).toBe(3)
+test('the edit cap is one source file per turn', () => {
+  expect(EDIT_CAP).toBe(1)
 })
 
 test('isCheckCommand knows test runners, build checks, linters and type checkers, anywhere in the command', () => {
@@ -51,10 +51,10 @@ test('UNCHECKED_RE takes a line starting with Unchecked: or 未验证:, nothing 
   expect(UNCHECKED_RE.test('All checks ran.')).toBe(false)
 })
 
-test('editCapReason lists the files edited and sends the rest to a coder', () => {
-  const r = editCapReason(['/r/a.py', '/r/b.py', '/r/c.py'])
-  expect(r).toContain('(/r/a.py, /r/b.py, /r/c.py)')
-  expect(r).toContain('the cap is 3 distinct files per turn')
+test('editCapReason names the file already edited and sends the change to a coder', () => {
+  const r = editCapReason(['/r/a.py'])
+  expect(r).toContain('already edited /r/a.py itself this turn')
+  expect(r).toContain('the cap is 1 source file per turn')
   expect(r).toContain('Dispatch Agent(coder)')
 })
 

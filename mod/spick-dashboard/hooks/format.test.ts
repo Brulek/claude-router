@@ -68,13 +68,30 @@ test('parseCli marks Codex review only when the prompt says review as a word', (
   expect(parseCli('codex exec --sandbox read-only "fix" < docs/code-review.md')?.isReview).toBe(false)
 })
 
-test('isSourcePath excludes docs, data, plan files and .claude', () => {
+test('isSourcePath excludes notes, tables, logs, lock files and a leading .claude/; json, yaml and toml are source', () => {
   expect(isSourcePath('src/lru.py')).toBe(true)
   expect(isSourcePath('scripts/quota.sh')).toBe(true)
   expect(isSourcePath('README.md')).toBe(false)
-  expect(isSourcePath('/Users/x/.claude/plans/1-foo.md')).toBe(false)
   expect(isSourcePath('data/report.csv')).toBe(false)
-  expect(isSourcePath('config.json')).toBe(false)
+  for (const f of ['notes.txt', 'a.tsv', 'run.log', 'Cargo.lock', 'yarn.lock', 'package-lock.json', 'pnpm-lock.yaml', 'docs/x.markdown']) expect(isSourcePath(f)).toBe(false)
+  for (const f of ['config.json', '.github/workflows/ci.yml', 'docker-compose.yaml', 'pyproject.toml']) expect(isSourcePath(f)).toBe(true)
+  expect(isSourcePath('/repo/.claude/plans/1-foo.py', '/repo')).toBe(false)
+  expect(isSourcePath('.claude/settings.local.json', '/repo')).toBe(false)
+})
+
+test('isSourcePath counts Dockerfile, Makefile, Justfile, Rakefile and Gemfile; other extensionless names are not source', () => {
+  for (const f of ['Dockerfile', 'build/Makefile', '/repo/Justfile', 'Rakefile', 'Gemfile', 'Dockerfile.dev']) expect(isSourcePath(f, '/repo')).toBe(true)
+  for (const f of ['LICENSE', 'bin/run', 'makefile.md']) expect(isSourcePath(f, '/repo')).toBe(false)
+})
+
+test('isSourcePath judges the path relative to the session cwd: a worktree under .claude/worktrees/ is source (regression)', () => {
+  expect(isSourcePath('/repo/.claude/worktrees/x/src/a.py', '/repo')).toBe(true)
+  expect(isSourcePath('.claude/worktrees/x/src/a.py', '/repo')).toBe(true)
+  expect(isSourcePath('/repo/.claude/worktrees/x/.claude/settings.local.json', '/repo')).toBe(false)
+  expect(isSourcePath('/repo/.claude/worktrees/x/src/a.py', '/repo/.claude/worktrees/x')).toBe(true)
+  // a .claude/ that is not leading (relative to cwd) does not exclude
+  expect(isSourcePath('/elsewhere/.claude/hooks/a.py', '/repo')).toBe(true)
+  expect(isSourcePath('./src/a.py', '/repo')).toBe(true)
 })
 
 const L = (b: { left: { text: string }[] }) => b.left.map(s => s.text).join('')
