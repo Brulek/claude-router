@@ -14,25 +14,25 @@ test('the off sentence and notes read exactly as the spec words them', () => {
 
 test('routing on: the three questions, the bash hook\'s substance, no notes', () => {
   const block = checklist(ctl(), HAIKU, true)
-  expect(block.startsWith('[spick triage - answer all three before the first tool call]')).toBe(true)
+  expect(block.startsWith('[spick triage - answer all three before any tool call]')).toBe(true)
   for (const q of ['1. Plan mode?', '2. Lane?', '3. Goal-shaped?']) expect(block).toContain(q)
   expect(block).toContain(LANE_BULLET_LANES_BUILTIN)
   // the planner threshold is narrow: architecture, interface, data format, cross-module; layout and naming are coder's
   expect(block).toContain('(architecture, public interface, data format, cross-module trade-off) -> Agent(planner)')
-  expect(block).toContain('layout, naming, which file are its calls')
+  expect(block).toContain('Layout and naming are its calls.')
   // not dispatching is the default for small work, and the brief is a handoff packet
-  expect(block).toContain('small work stays here')
+  expect(block).toContain('or a one-file edit -> you')
   expect(block).toContain('A brief is a handoff packet, not your trail')
   // escalation on a fact: a check failing twice
-  expect(block).toContain('A check failing twice: Agent(coder) at high effort, or Agent(deep) if the cause is unknown.')
+  expect(block).toContain('A check failing twice: Agent(coder) at high, or Agent(deep) if the cause is unknown.')
   // the kinds in rules.json order: outside lanes, deep, planner, coder, review, the main session last
-  const order = ['-> Grok', '-> Agent(deep).', '-> Agent(planner)', '-> Agent(coder);', 'a diff to review', '-> you:'].map(s => block.indexOf(s))
+  const order = ['-> Grok', '-> Agent(deep).', '-> Agent(planner)', '-> Agent(coder);', 'a diff to review', '-> you;'].map(s => block.indexOf(s))
   expect(order.every(i => i > -1)).toBe(true)
   expect([...order].sort((a, b) => a - b)).toEqual(order)
   expect(REGISTRY_LANE_LINE).toBe(laneBullets(true).join('\n'))
-  expect(REGISTRY_LANE_LINE).toContain('pick from the Lanes line by tag')
+  expect(REGISTRY_LANE_LINE).toContain('the Lanes line, by tag')
   expect(block).toContain('Review: Codex <model> (medium)')
-  expect(block).toContain('every participant, reviewer included, carries its own model and effort')
+  expect(block).toContain('every participant carries its own model and effort')
   expect(block).not.toContain('lane is off')
   expect(block).not.toContain(reviewOffNote(true))
   expect(block).not.toContain(offSentence(true))
@@ -275,7 +275,7 @@ test('item 2 is one head, six bullets and a tail; the outside lanes come first a
     expect(b.at(-1)).toBe(LANE_TAIL)
     expect(b.filter(l => l.startsWith('   - ')).length).toBe(6)
     // every bullet names who takes it
-    for (const l of b.slice(1, -1)) expect(/-> (Agent\((deep|planner|coder)\)|you:|Grok|Codex|pick from the Lanes line|the lane tagged|Agent\(deep\))|no outside lane/.test(l)).toBe(true)
+    for (const l of b.slice(1, -1)) expect(/-> (Agent\((deep|planner|coder)\)|you[;,]|Grok|Codex|the Lanes line|the lane tagged)|no outside lane/.test(l)).toBe(true)
   }
   expect(laneBullets('none')[1]).toBe(LANE_BULLET_LANES_NONE)
   expect(LANE_BULLET_LANES_NONE).toContain('no outside lane is enabled: do not call Gemini, Grok or Codex')

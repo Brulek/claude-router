@@ -143,3 +143,8 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 - `grade.py --judges codex,claude` adds a second blind judge, Opus through `claude -p` with no tools and hooks off;
   the first judge named decides pass, and the report's Second judge section shows both means per cell and the runs
   the two score within one point. The result parser tolerates a stray line on stdout and keeps the raw output.
+- Mod: a subagent's own `turn.start` no longer resets the main turn's state. Before, a background planner's or
+  coder's loop start wiped the delegate list, the hints and the turn id, so every turn that delegated was recorded
+  with `delegates: []` and `hint: []` (seen in the first real harness runs) and the gate could send back a turn
+  whose deep delegate was still running. Regression test added; three checklist tests that still quoted
+  pre-v2.1 wording were brought up to date.

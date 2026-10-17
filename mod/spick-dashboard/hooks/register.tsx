@@ -813,6 +813,10 @@ export const register: Register = on => {
   })
 
   on('turn.start', async ($, e, next) => {
+    // a subagent's loop has turns of its own and the engine reports them with its agentId: they must not reset the
+    // main turn (its delegates, hints, edits, gate events and turn id), or a background planner's own start wipes
+    // the record of the call that started it (seen in a headless run on 2026-10-17: delegates [], hint [])
+    if (e.agentId) return next(e)
     try {
       const startedAt = await $.clock.now()
       mainTurnOpen = true

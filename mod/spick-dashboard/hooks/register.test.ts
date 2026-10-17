@@ -793,9 +793,9 @@ test('lanes in the cache switch line 2 to the capability wording and add the Lan
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const lines = ((await contextOf($))[0] ?? '').split('\n')
-  // item 2 is a block of seven lines (head, five bullets, tail); the registry swaps its lane bullet
-  expect(lines.slice(2, 9).join('\n')).toContain('   - a task an outside lane is tagged for')
-  expect(lines.slice(2, 9).join('\n')).not.toContain('Gemini (agy)')
+  // item 2 is a block of eight lines (head, six bullets, tail); the registry swaps its lane bullet
+  expect(lines.slice(2, 10).join('\n')).toContain("   - an outside lane's task -> the Lanes line, by tag")
+  expect(lines.slice(2, 10).join('\n')).not.toContain('Gemini (agy)')
   expect(lines.at(-2)).toBe('Lanes (user-declared; data = most that may be sent): gemini search data:public · glm cheap data:text · glm is a third-party service: sending content to it carries a data-leak risk.')
   expect(lines.at(-1)).toBe('Quota (cache 4m old): glm: no meter (declared plan only).')
   expect((await $.command.run({ command: 'spick', args: 'lane glm off', ...RUN })).text).toBe('spick: glm enabled: yes -> no. Backup: spick.json.bak.')
@@ -1611,6 +1611,28 @@ test('a background agent that finishes after its main turn\'s line adds a late l
   const late = lines()[1] as Record<string, unknown> & { delegate: Record<string, unknown> }
   expect(late).toMatchObject({ schemaVersion: 2, late: true, sessionId: 's1', turnId: 't1' })
   expect(late.delegate).toMatchObject({ id: 'tu1', lane: 'deep', status: 'completed', ok: true, usage: { input: 1_000_000, output: 100_000 } })
+})
+
+test('a subagent\'s own turn.start does not reset the main turn: its delegate, hint and turn id survive into the record', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  const { lines } = recordWorld(on)
+  on('tool.call', async () => ({ result: {} as never }))
+  on('agent.spawn', async () => ({ model: 'claude-opus-5-5', agentId: 'bg' }))
+  await $.session.start(START)
+  await $.prompt.submit({ text: '请给出一个备份方案设计', wait: false, origin: { kind: 'composer' as const } })
+  await $.turn.start({ text: '请给出一个备份方案设计', turnId: 't1' })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'd', subagentType: 'planner', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: true, fork: false })
+  await $.tool.call({ ...agentCall('tu1', 'planner'), run_in_background: true })
+  // the planner's loop starts a turn of its own; the engine reports it with the agent's id
+  await $.turn.start({ text: 'p', turnId: 'sub', agentId: 'bg' })
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  const [line] = lines()
+  expect(line).toMatchObject({ turnId: 't1', hint: ['design'] })
+  expect(line!.delegates).toHaveLength(1)
+  expect(line!.delegates[0]).toMatchObject({ id: 'tu1', lane: 'planner', status: 'running', ok: false })
+  // the planner's end still reaches the main turn's line as a late line
+  await $.turn.complete({ turnId: 'sub', agentId: 'bg', ...DONE, usage: { ...USAGE, model: 'claude-opus-5-5' } })
+  expect(lines()[1]).toMatchObject({ late: true, turnId: 't1', delegate: { id: 'tu1', lane: 'planner', status: 'completed', ok: true } })
 })
 
 test('a delegate started inside a subagent is recorded for the main turn, with its parent; its usage lands on it', async ($, on) => {
