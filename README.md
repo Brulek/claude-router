@@ -233,6 +233,10 @@ Yes. Without the band, replies name their participants in the label line. The sp
 
 A key stored as `keychain:<name>` works on macOS only. On Linux and Windows, use `env:<VAR>`.
 
+### Why does the triage session itself cost more than a bare worker?
+
+In the in-session A/B of 2026-10-17 a Haiku main session with the full tool list cost about $0.015 per short task before delegating anything, against $0.004 for a Haiku worker with six tools. The difference is the tool prompt (every MCP server and built-in tool is described on every request), not the model. A triage session should carry as few tools as the work needs: disable MCP servers you do not use in that session, and let `coder`, `deep` and `Explore` hold the wide tool sets instead.
+
 ## Known limitations
 
 Spick does not change the main session's model. A mod can rewrite the model and effort of each request (`turn.step` in the engine types of Claude Code 2.1.299); claude-router and claude-agent-tools do that. Spick leaves it to them and composes with claude-router, so the main session runs on the lower-cost model and triages by checklist. The checklist is advice: the main session can still keep a task it should have delegated, which is what the Hint line and the deliverable-shaped item 2 are there to prevent.

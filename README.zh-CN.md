@@ -233,6 +233,10 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 
 用 `keychain:<名称>` 保存的密钥仅限 macOS。Linux 与 Windows 请用 `env:<变量名>`。
 
+### 为什么分流会话自己比一个裸工作者还贵？
+
+2026-10-17 的会话内 A/B 里，带全工具集的 Haiku 主会话在委派任何东西之前，每道短任务约花 $0.015，而只带六个工具的 Haiku 工作者只花 $0.004。差的是工具提示词（每个 MCP 服务器和内建工具都在每次请求里被描述一遍），不是模型。分流会话应只带工作需要的工具：在该会话里停用用不到的 MCP 服务器，把宽工具集留给 `coder`、`deep` 和 `Explore`。
+
 ## 已知限制
 
 Spick 不改主会话的模型。模组可以改写每次请求的模型与推理强度（Claude Code 2.1.299 引擎类型中的 `turn.step`），claude-router 与 claude-agent-tools 就是这样做的；Spick 把这件事留给它们、与 claude-router 配合使用，所以主会话跑在低成本模型上，靠清单分派。清单只是建议：主会话仍可能把本该委派的任务留给自己，`Hint` 行和按交付物形状排列的第二项就是为了防这一点。
