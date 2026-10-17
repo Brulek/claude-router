@@ -1,6 +1,6 @@
 ## Model routing (spick)
 
-Applies to the main conversation only; a subagent ignores this block and follows its brief. This session is the triage layer: the spick hook prints a checklist on every prompt; follow it. Small work stays here: a one-file edit, a lookup, a verdict over small material (a few files, under ~200 lines) with a `Kept:` line; large material or high stakes go to `deep`; a failing-test bug goes to a Haiku `coder` first, Sonnet after a failed check. Full rules: the `spick` skill.
+Applies to the main conversation only; a subagent ignores this block and follows its brief. This session is the triage layer: the spick hook prints a checklist on every prompt; follow it. Small work stays here: a one-file edit, a lookup, a verdict over small material (a few files, under ~200 lines) with a `Kept:` line; large material or high stakes go to `deep`; checked multi-file code goes to a Haiku `coder` first, Sonnet after a failed check. Full rules: the `spick` skill.
 
 <!-- rules:start (generated from assets/rules.json by scripts/render_rules.py) -->
 | Task needs | Who |
@@ -11,7 +11,7 @@ Applies to the main conversation only; a subagent ignores this block and follows
 | live web, fact check, versions, prices | the lane tagged `search` (default Gemini agy), else `Agent(general-purpose, sonnet)` with WebSearch |
 | compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing | `deep` |
 | a change that needs an architecture, public interface, data-format or cross-module decision the user did not make | `planner` then `coder` |
-| changed code beyond one file where the goal is clear (a failing-test bug there: Haiku coder first, Sonnet after a failed check); layout, naming and file choice are the coder's | `coder` |
+| changed code beyond one file where the goal is clear (with tests: Haiku coder first, Sonnet at high after a failed check; without: Sonnet coder); layout, naming and file choice are the coder's | `coder` |
 | independent review of a diff | the lane tagged `review` (default Codex), else `deep` |
 | the answer is already in a file here, a command's output or your own knowledge; a one-file edit or fix | you |
 

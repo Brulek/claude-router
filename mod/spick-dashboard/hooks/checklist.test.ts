@@ -26,7 +26,7 @@ test('routing on: the three questions, the bash hook\'s substance, no notes', ()
   // escalation on a fact: a check failing twice
   expect(block).toContain('A check failing twice: Agent(coder) at high, or Agent(deep) if the cause is unknown.')
   // the kinds in rules.json order: outside lanes, deep, planner, coder, review, the main session last
-  const order = ['-> Grok', '-> Agent(deep).', '-> Agent(planner)', '-> Agent(coder);', 'a diff to review', '-> you;'].map(s => block.indexOf(s))
+  const order = ['-> Grok', '-> Agent(deep).', '-> Agent(planner)', '-> Agent(coder, model haiku)', 'a diff to review', '-> you;'].map(s => block.indexOf(s))
   expect(order.every(i => i > -1)).toBe(true)
   expect([...order].sort((a, b) => a - b)).toEqual(order)
   expect(REGISTRY_LANE_LINE).toBe(laneBullets(true).join('\n'))

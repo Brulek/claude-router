@@ -50,7 +50,7 @@
     {
       "id": "code",
       "order": 7,
-      "label": "changed code beyond one file where the goal is clear (a failing-test bug there: Haiku coder first, Sonnet after a failed check); layout, naming and file choice are the coder's",
+      "label": "changed code beyond one file where the goal is clear (with tests: Haiku coder first, Sonnet at high after a failed check; without: Sonnet coder); layout, naming and file choice are the coder's",
       "route": "agent:coder"
     },
     {
@@ -306,7 +306,7 @@
         "kinds": [
           "code"
         ],
-        "text": "   - code beyond one file, goal clear -> Agent(coder); a failing-test bug there -> Agent(coder, model haiku) first, the test is the check; still failing -> Agent(coder) at high. Layout and naming are its calls."
+        "text": "   - code beyond one file, goal clear, with tests -> Agent(coder, model haiku) first, the test is the check; failed -> Agent(coder) at high; no tests -> Agent(coder). Layout and naming are its calls."
       },
       {
         "name": "REVIEW",

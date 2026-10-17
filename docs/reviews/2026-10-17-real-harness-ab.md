@@ -198,7 +198,7 @@ coder first. Nothing is rerun for it: it describes the behaviour the matrix meas
 
 - The multi-file code route (T8) went to a Sonnet coder 3 of 3 at $0.073; a lone Haiku passed the same hidden tests
   3 of 3 at $0.012. Whether a Haiku coder with the test as its check does as well inside spick is the next cheap
-  experiment (nine runs).
+  experiment (nine runs). Done the same day: section 7.
 - Delegates run in the background by default, so a delegated task spans two or three main turns in a headless
   session and the guard's and gate's per-turn facts are split across them. The records are right since 43a4fc3; the
   shape still deserves a design note.
@@ -212,3 +212,36 @@ coder first. Nothing is rerun for it: it describes the behaviour the matrix meas
 **What the day cost.** The matrix as reported is $48.6 at list price (sum of the seven arm totals); with the first
 spick pass, the contaminated T9 cells and the judge calls that were thrown away, about $80. The Max plan's 7-day
 meter went from 9% to 34%.
+
+## 7. T8 follow-up: a Haiku coder first for checked multi-file code (policy v2.4)
+
+The first open question above, run the same day. The coder bullet now reads: code beyond one file with tests goes to
+`Agent(coder, model haiku)` first, the test is the check, a failed check sends it to `Agent(coder)` at high, and code
+without a check keeps the Sonnet coder (`rules.json`, rendered into the checklist, the mod, `SKILL.md` and the CLAUDE.md
+block; budgets unchanged). The `haiku-spick` arm was rerun under that text on the four hidden-test tasks: 12 runs,
+`--parallel 3`, `claude` 2.1.302, out dir `~/spick-ab/t8-haiku`, probe verified (record at 669fdba with the v2.4 text
+in the working tree). Hidden tests grade every cell; no judge. The report, grades and probe are copied to
+`skills/spick/evals/ab/samples/t8-haiku-2026-10-17/`. "Before" is the spick arm of the full matrix above (v2.3 text,
+section 4); costs are mean `total_cost_usd` a run, wall is the mean.
+
+| task | before: pass, cost, wall | after: pass, cost, wall | what the turn records show after |
+|---|---|---|---|
+| T8 three-file feature | 3/3, $0.073, 44 s | 3/3, $0.022, 45 s | Haiku coder at medium 3/3; no second coder, no Sonnet, no failed check |
+| T3 one-file bug | 3/3, $0.016, 32 s | 3/3, $0.016, 30 s | main session 3/3, as before |
+| T4 one-file bug | 3/3, $0.014, 27 s | 3/3, $0.050, 36 s | main session 2/3; Opus `deep` at medium 1/3 ($0.121: judgement hint, gate `delegated`) |
+| T10 wrap bug | 3/3, $0.021, 39 s | 3/3, $0.021, 47 s | main session 3/3 (the matrix had a Haiku coder 1/3) |
+
+- **T8 holds at 30% of the cost.** 3 of 3 hidden-test passes with a Haiku coder, $0.022 a run against $0.073 with
+  the Sonnet coder; the fallback to Sonnet at high never fired, since no run had a failed check. A lone Haiku did the
+  same work for $0.012, so the remaining $0.010 is the handoff itself (the brief, the coder's own context, the relay),
+  not the model. The rule is kept: policy v2.4.
+- **The one-file cells did not move**, except that one T4 run went to `deep` for the root-cause explanation the prompt
+  asks for (the `judgement` hint on "root cause"; the matrix kept all three with `Kept:` lines in two). That is the
+  v2.1 size rule's variance at n=3, not the coder bullet, which does not apply to a one-file bug; the run passed and
+  cost $0.12.
+- **Limits.** n=3 per cell; one task is multi-file, and its three files are 38 lines in all. The arm reads this
+  machine's global `~/.claude/CLAUDE.md`, whose routing block predates the Haiku coder, and the skill directory it can
+  load is a symlink to the main checkout, so the checklist from the mod is what carried the new rule; both held in the
+  matrix as well. A failed check, and so the Sonnet escalation, was never exercised; nothing here says what happens on
+  a multi-file task a Haiku coder gets wrong.
+

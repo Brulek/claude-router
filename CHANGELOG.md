@@ -141,6 +141,14 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
   failing-test bug there" (in code beyond one file) and the main-session bullet "a one-file edit or fix". Nothing was
   rerun for it: it describes the behaviour the matrix measured.
 
+### 1.0.0, routing policy v2.4 (2026-10-17, after the T8 follow-up)
+
+- Code beyond one file that has a check (tests) goes to a Haiku `coder` first (`model: haiku`); the test is the
+  check, and only a failed check sends it to the Sonnet `coder` at high effort. Code without a check keeps the Sonnet
+  `coder`. Measured on the harness's four hidden-test tasks (12 runs, `samples/t8-haiku-2026-10-17/`): T8 passed 3 of
+  3 at $0.022 a run against $0.073 with the Sonnet coder, the fallback never fired, and the one-file cells did not
+  move (`docs/reviews/2026-10-17-real-harness-ab.md`, section 7).
+
 ### 1.0.0, A/B harness against a real `claude` (2026-10-17)
 
 - First run of `skills/spick/evals/ab` against a real `claude` (2.1.302): the `haiku-spick` start-up probe failed
