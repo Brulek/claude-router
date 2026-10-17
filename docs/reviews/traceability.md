@@ -47,3 +47,17 @@ P1/P2 its architecture items); S = `2026-10-17-codex-astra-spec-review.md` (its 
 Deferred, with reasons: a shared `~/.claude/spick/` directory for state is done, but `spick.json` stays where it is
 (users know it); Bash writes are not counted by the edit cap (no cheap detection); a semantic classifier (text would
 leave the machine); mid-session model switching (claude-router's job).
+
+## Round 3: the re-review of the integrated branch (2026-10-17-codex-astra-rereview.md)
+
+| Finding | Where it lands | Test |
+|---|---|---|
+| N1 a compound command, an in-flight edit or a check outside the edits' scope passes as a check | v2-fix-mod item 1 (single-command rule, edits counted when completed, `afterLastEdit`); the scope limit stays documented | guard.test.ts, register.test.ts |
+| N2 a tool return can fake a completed review or deep | v2-fix-mod item 2 (single-command review calls with real output; foreground completion by `turn.complete`, `confirmedBy` recorded) | register.test.ts |
+| N3 nested delegates and post-timeout completions missing from the record | v2-fix-mod item 3 | turnlog/register tests, test_spend.py, test_audit.py |
+| N4 a cold quota cache reverts disabled lanes to the defaults | v2-fix-mod item 4 (spick.json is the authority) | register.test.ts |
+| N5 the A/B cannot prove it measured the checkout's mod | v2-fix-evals item 4 (probe per arm, `_probe.json`) | test_run.py |
+| N6 exit failures counted as passes, unknown cost as zero, Explore unbound | v2-fix-evals items 1-3 | test_grade.py, test_report.py |
+| N7 quoted `--lane` parsed as "0" | v2-fix-mod item 5 | format.test.ts |
+| N8 version stamped without checking what the install kept; `~/.claude/spick.json` hard-coded in SKILL | v2-fix-mod item 6 | test_setup.py |
+| A P1 data level: override without audit | v2-fix-mod item 7 (`<state>/invoke.jsonl`, audit.py) | test_invoke.py |
