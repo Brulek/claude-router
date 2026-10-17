@@ -55,8 +55,10 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 
 - The data level fails closed: a call above the lane's declared `data` exits 6 and sends nothing. Without
   `--contains` the prompt counts as `code`; under a `text` or `public` declaration, code-looking content in the prompt
-  or the system file is refused too. `--override-data "<reason>"` sends anyway and prints the reason. This is a
-  declared limit, not sensitive-data detection.
+  or the system file is refused too. `--override-data "<reason>"` sends anyway and prints the reason; it is for the
+  user's explicit say-so only. Every prompt call is logged to `<config>/spick/invoke.jsonl` (lane, model, declared
+  and sent level, override reason, exit code, tokens, seconds; never the key) and `/spick audit` lists the period's
+  overrides. This is a declared limit, not sensitive-data detection.
 - An answer cut off at the token limit (`finish_reason=length`, `stop_reason=max_tokens`) exits 7 with the partial
   text on stdout and `INCOMPLETE` on stderr.
 - An answer in several text blocks is returned whole, not only its first block.

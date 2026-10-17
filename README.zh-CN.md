@@ -238,7 +238,7 @@ bash ~/.claude/skills/spick/scripts/setup.sh --uninstall [--purge] [--force]
 Spick 不改主会话的模型。模组可以改写每次请求的模型与推理强度（Claude Code 2.1.299 引擎类型中的 `turn.step`），claude-router 与 claude-agent-tools 就是这样做的；Spick 把这件事留给它们、与 claude-router 配合使用，所以主会话跑在低成本模型上，靠清单分派。清单只是建议：主会话仍可能把本该委派的任务留给自己，`Hint` 行和按交付物形状排列的第二项就是为了防这一点。
 
 - Hint 行是关键词匹配，不是分类器：措辞里没有关键词的结论类请求它会漏掉，也会在少数不该触发的地方触发（"版本号"会被当作联网信号）。它的标注语料是 `skills/spick/scripts/testdata/hint_corpus.json`。
-- lane 的 `data` 级别是用户声明的上限，不是敏感数据检测。`scripts/invoke.py` 会拒绝超出上限的调用（退出码 6），没写 `--contains` 时按 code 处理，在 `text` 或 `public` 声明下还会扫描像代码的内容；它不查找密钥或个人信息。
+- lane 的 `data` 级别是用户声明的上限，不是敏感数据检测。`scripts/invoke.py` 会拒绝超出上限的调用（退出码 6），没写 `--contains` 时按 code 处理，在 `text` 或 `public` 声明下还会扫描像代码的内容；它不查找密钥或个人信息。`--override-data "<理由>"` 只能在你明确同意时使用：每次调用都记入 `<config>/spick/invoke.jsonl`（通道、模型、声明与实际级别、越权理由、退出码、token、耗时；不记密钥和提示词），`/spick audit` 会列出这些越权调用及其理由。直接调用内置 CLI（`agy`、`grok`、`codex`）不经过这项检查。
 - 守卫的改文件上限和 `Explore` 的只读工具列表都是工具层面的软约束：Bash 命令照样能写文件。
 - 用户级 `Explore` 取代内置版本，是 Claude Code 文档的说法，本项目没有在运行时实测。
 

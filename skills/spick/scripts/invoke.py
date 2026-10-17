@@ -17,7 +17,13 @@ declares what this prompt holds. It is a declared constraint, not sensitive-data
 prompt is taken as `code`, the strictest, so a `text` or `public` lane needs an explicit --contains at or below its
 level. Under such a declaration the prompt file and the --system-file are still scanned for code-looking content
 (a fenced block, or three or more code-looking lines) and the call is refused when it is found. A lane without
-`data` takes anything. `--override-data "<reason>"` sends anyway and prints the reason as a fact line.
+`data` takes anything. `--override-data "<reason>"` sends anyway and prints the reason as a fact line; it is for the
+user's explicit say-so only.
+
+Audit. Every prompt call appends one JSON line to <state>/invoke.jsonl (<config>/spick/, paths.py): the lane, the model,
+the lane's declared data level, the level the call holds (--contains, or code by default or by the heuristic),
+the override reason (null when none), the exit code, the tokens and the seconds. Never the key or the prompt.
+scripts/audit.py lists the period's overrides.
 
 The program refuses only what cannot work or what the user's declared limits forbid. It never judges the service.
 Keys are read at call time and never reach argv, stdout, stderr or any file. No retries, no streaming.
@@ -36,6 +42,7 @@ import urllib.request
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 import lanes  # noqa: E402
+import paths  # noqa: E402
 
 BEARER_RE = re.compile(r"Bearer\s+\S+", re.I)
 MAX_ERR = 200
@@ -151,16 +158,22 @@ def looks_like_code(text):
     return False
 
 
+def sent_level(contains, texts):
+    """What the call holds: --contains, code without it, code when a lower declaration meets code-looking content.
+    The second value says why the heuristic raised it ("" when it did not)."""
+    levels = lanes.DATA_LEVELS
+    declared = contains or "code"
+    if levels.index(declared) < levels.index("code") and any(looks_like_code(t) for t in texts if t):
+        return "code", " (the prompt or system file looks like code)"
+    return declared, ""
+
+
 def check_data(lane_id, data, contains, texts, override):
     """Refuse (Fail 6) when what this call sends is above the lane's declared data level. Returns fact lines."""
     levels = lanes.DATA_LEVELS
     if data not in levels:
         return []   # a lane without a declared level takes anything
-    declared = contains or "code"
-    sent = declared
-    seen = ""
-    if levels.index(declared) < levels.index("code") and any(looks_like_code(t) for t in texts if t):
-        sent, seen = "code", " (the prompt or system file looks like code)"
+    sent, seen = sent_level(contains, texts)
     if levels.index(sent) <= levels.index(data):
         return []
     fact = "lane %s takes data:%s; this call sends %s%s%s" % (
@@ -266,7 +279,25 @@ def list_models(a):
     return 0
 
 
-def run(a):
+def log_call(rec, code, seconds, key):
+    """Append the call's audit line to <state>/invoke.jsonl. Best effort: a failed write is one stderr line, never a
+    changed exit code. The key is never a field; a reason that happens to hold it is redacted."""
+    line = dict(rec, exit=code, seconds=round(seconds, 1))
+    if key and isinstance(line.get("override"), str):
+        line["override"] = line["override"].replace(key, "[redacted]")
+    try:
+        p = paths.path("invoke")
+        os.makedirs(os.path.dirname(p), exist_ok=True)
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(line, ensure_ascii=False) + "\n")
+    except OSError as e:
+        sys.stderr.write("spick-invoke: the call was not logged: %s\n" % scrub(e.strerror or e))
+
+
+def run(a, rec=None, secret=None):
+    """`rec` collects the audit line's fields as they become known; `secret` gets the key, to keep it out of the log."""
+    rec = {} if rec is None else rec
+    secret = [] if secret is None else secret
     if a.list_models:
         return list_models(a)
     if not a.prompt_file:
@@ -274,6 +305,7 @@ def run(a):
     if a.contains is not None and a.contains not in lanes.DATA_LEVELS:
         raise Fail(2, "--contains must be one of %s" % ", ".join(lanes.DATA_LEVELS))
     lane = find_lane(a)
+    rec["data"] = lane.get("data") if lane.get("data") in lanes.DATA_LEVELS else None
     inv = lane.get("invoke") if isinstance(lane.get("invoke"), dict) else {}
     api, cli = inv.get("api"), inv.get("cli")
     if api not in APIS and not isinstance(cli, str):
@@ -282,7 +314,11 @@ def run(a):
     system = read_text(a.system_file, "system") if a.system_file else None
     if a.override_data is not None and not a.override_data.strip():
         raise Fail(2, "--override-data needs a reason")
+    rec["sent"] = sent_level(a.contains, (prompt, system))[0]
+    rec["model"] = a.model or inv.get("model") or ("cli" if api not in APIS else None)
     facts = check_data(a.lane, lane.get("data"), a.contains, (prompt, system), a.override_data)
+    # the user's say-so as given, whether or not this call needed it (the stderr fact line says when it did)
+    rec["override"] = scrub(a.override_data) if a.override_data else None
     for f in facts:
         sys.stderr.write("spick-invoke: %s\n" % scrub(f))
 
@@ -299,6 +335,7 @@ def run(a):
         ref = lane.get("key_ref")
         if ref:
             key = read_key(ref)
+            secret.append(key)
         elif lane.get("kind") != "local":
             raise Fail(3, "key not found: lane %s has no key_ref" % a.lane)
         max_tokens = a.max_tokens or inv.get("max_tokens") or DEFAULT_MAX_TOKENS
@@ -307,6 +344,7 @@ def run(a):
             text, tin, tout, cut = fn(base, key, model, system, prompt, int(max_tokens), a.timeout)
         except Fail as f:
             raise Fail(f.code, scrub(f.msg, key))
+        rec["tokens"] = {"in": tin, "out": tout} if tin is not None or tout is not None else None
         if not text.strip() and not cut:
             raise Fail(5, "empty answer")
         tokens = "%s in / %s out tokens" % (tin, tout) if tin is not None and tout is not None else "tokens unknown"
@@ -337,14 +375,23 @@ def main(argv):
     p.add_argument("--contains", help="what the prompt holds at most: public, text or code (default: code)")
     p.add_argument("--override-data", metavar="REASON", help="send although the data level forbids it; the reason is printed")
     a = p.parse_args(argv)
+    # the audit line of a prompt call (a model listing sends no prompt and is not logged)
+    rec = {"at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), "lane": a.lane, "model": a.model, "data": None,
+           "sent": None, "override": None, "tokens": None}
+    secret = []
+    t0 = time.time()
+    code = 5
     try:
-        return run(a)
+        code = run(a, rec, secret)
     except Fail as f:
         sys.stderr.write("spick-invoke: %s\n" % scrub(f.msg))
-        return f.code
+        code = f.code
     except Exception as e:
         sys.stderr.write("spick-invoke: error: %s\n" % scrub(type(e).__name__))
-        return 5
+        code = 5
+    if not a.list_models:
+        log_call(rec, code, time.time() - t0, secret[0] if secret else None)
+    return code
 
 
 if __name__ == "__main__":
