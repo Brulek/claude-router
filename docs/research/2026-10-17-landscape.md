@@ -41,3 +41,19 @@ unless marked verified.
 8. Keep the main cache warm: never switch the main model mid-session; subagents and CLIs run in their own contexts.
 9. Cheap wins that hold on any main model come first (Explore on Haiku, review by another lineage, quota facts).
 10. Publish the unflattering cells: every benchmark reports cost, time and quality per arm, including the arms that lose.
+
+## Addendum: Gemini web scan (gemini-3.8-flash-high, 2026-10-17)
+
+Covered RouteLLM, FrugalGPT, Not Diamond, Hybrid LLM, OpenRouter auto, LiteLLM, Martian/RouterBench, Aider's
+architect/editor split, Cline/Roo plan-vs-act, OpenHands, Cursor auto, and the Claude Code hook ecosystem. What it adds
+to the table above (its sources are listed in the scratch report; the URLs below were not fetched by us):
+
+- Pre-action routing beats post-generation cascades for agents: FrugalGPT-style "try the cheap model, score, escalate"
+  burns latency and context on failed attempts; classify before acting (arXiv 2305.05126 vs 2406.18665).
+- Train or tune the triage on the application's own outcome logs (Not Diamond's lesson), not on generic benchmarks:
+  spick's turn record is that log.
+- Deterministic, zero-cost checks come before any classifier; triage latency stays under 100 ms (spick's hook: 70 ms).
+- Bind the cheap tier to permission boundaries: read-only tools for exploration agents (the Explore override).
+- Fast-fail escalation with a ceiling (two failed attempts), then hand the stronger model the diagnostic context, not the
+  trail (agrees with the Handoff Tax summary above).
+- Prefer argument mutation (`updatedInput`) over refusing a call where a safe bound exists; refusal forces a re-plan.
