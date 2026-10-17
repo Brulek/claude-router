@@ -63,10 +63,14 @@ def strip_markers(text):
     return text.strip()
 
 
+def turn_record_path(session_id):
+    return claude_dir() / "spick" / "turns" / f"{session_id}.jsonl"
+
+
 def find_turn_records(session_id):
     """Lines of <state>/turns/<sessionId>.jsonl (one file per session; a late agent appends a `late` line);
     None when the file is absent, which is normal for a headless run."""
-    path = claude_dir() / "spick" / "turns" / f"{session_id}.jsonl"
+    path = turn_record_path(session_id)
     if not session_id or not path.is_file():
         return None
     recs = []

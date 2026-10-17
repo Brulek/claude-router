@@ -96,6 +96,28 @@ class Stats(unittest.TestCase):
         self.assertIn("| haiku-spick | 0/3 | 3/3 | 1/3 (+1 unknown) | 0/3 |", text)
 
 
+class Probe(unittest.TestCase):
+    def render(self, probe):
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": {"haiku-bare/T1/run-1": g("haiku-bare", "T1", True)}, "judge": {}}))
+            if probe is not None:
+                Path(d, "_probe.json").write_text(json.dumps(probe))
+            return report.render(d, "2026-10-17")
+
+    def test_caveats_show_probe_results_version_and_head(self):
+        text = self.render({"claude_version": "2.9.9 (Claude Code)", "checkout_head": "abcdef0123456789", "allow_unverified": True,
+                            "arms": {"haiku-spick": {"ok": False, "check": "record", "detail": "no schemaVersion 2 turn record"},
+                                     "haiku-bare": {"ok": True, "check": "no-record", "detail": "no turn record"},
+                                     "haiku-hook": {"ok": True, "check": "best-effort", "detail": "accepted unverified"}}})
+        self.assertIn("claude `2.9.9 (Claude Code)`, checkout `abcdef012345`, run with --allow-unverified", text)
+        self.assertIn("`haiku-spick`: **INVALID**", text)
+        self.assertIn("`haiku-bare`: **verified**", text)
+        self.assertIn("`haiku-hook`: **accepted, not verified**", text)
+
+    def test_missing_probe_file_is_said_out_loud(self):
+        self.assertIn("Arm start-up probe: none recorded", self.render(None))
+
+
 class Render(unittest.TestCase):
     def test_report_has_every_section_and_marks_losing_cells(self):
         runs = {"haiku-bare/T1/run-1": g("haiku-bare", "T1", False), "opus-bare/T1/run-1": g("opus-bare", "T1", True)}

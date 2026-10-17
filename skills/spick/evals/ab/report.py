@@ -120,6 +120,22 @@ CANNOT = """\
 """
 
 
+def probe_lines(out_dir):
+    """Caveat bullets from <out>/_probe.json: version, checkout head and what each arm's start-up probe showed."""
+    path = Path(out_dir) / "_probe.json"
+    if not path.exists():
+        return ["- **Arm start-up probe: none recorded** (`_probe.json` is missing), so nothing here shows that the arms "
+                "started as their names say."]
+    info = json.loads(path.read_text(encoding="utf-8"))
+    head = (info.get("checkout_head") or "unknown")[:12]
+    L = [f"- Arm start-up probe (claude `{info.get('claude_version') or 'version unknown'}`, checkout `{head}`"
+         f"{', run with --allow-unverified' if info.get('allow_unverified') else ''}):"]
+    for arm, p in (info.get("arms") or {}).items():
+        state = "INVALID" if not p.get("ok") else ("accepted, not verified" if p.get("check") == "best-effort" else "verified")
+        L.append(f"  - `{arm}`: **{state}** - {p.get('detail') or 'no detail'}")
+    return L
+
+
 def render(out_dir, today):
     data = json.loads((Path(out_dir) / "grades.json").read_text(encoding="utf-8"))
     runs, judge = data["runs"], data.get("judge", {})
@@ -200,7 +216,7 @@ def render(out_dir, today):
                  "cost unknown (a subscription CLI reports no dollar figure). It is kept out of every arm's cost above.")
     else:
         L.append("No judge call recorded (grading ran with `--no-judge`, or no judged task was in the matrix).")
-    L += ["", "## Caveats", "", CAVEATS, "## What this matrix cannot show", "", CANNOT]
+    L += ["", "## Caveats", "", *probe_lines(out_dir), CAVEATS, "## What this matrix cannot show", "", CANNOT]
     return "\n".join(L)
 
 
