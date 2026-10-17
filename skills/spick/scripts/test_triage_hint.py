@@ -74,7 +74,7 @@ class Table(unittest.TestCase):
         self.assertEqual(th.find_hints("see https://example.com/x", t), [("web", ["a web address"])])
         self.assertEqual(th.find_hints("这个怎么设计", t), [("design", ["怎么设计"])])
         line = th.hint_line("对比、比较、评估、评价这四种说法", t)
-        self.assertIn("judgement words (对比, 比较, 评估) -> start from Agent(deep); pick the effort by the table", line)
+        self.assertIn("judgement words (对比, 比较, 评估) -> size the material: small -> you, with a `Kept:` line; large or high-stakes -> Agent(deep)", line)
         self.assertNotIn("评价", line)
         self.assertIsNone(th.hint_line("", t))
         self.assertIsNone(th.hint_line(None, t))

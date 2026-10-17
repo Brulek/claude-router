@@ -1,18 +1,18 @@
 [spick triage - answer all three before the first tool call]
 1. Plan mode? 3+ files, irreversible or wide action, ambiguous ask, new build, or a plan asked for -> EnterPlanMode, then planner inside it (headless: plan inline, stop before editing unless told to go ahead).
-2. Lane? Route by the shape of the deliverable, top to bottom, first match wins:
+2. Lane? Route by the deliverable's shape, top to bottom, first match wins:
 {builtin}   - X data -> Grok; images -> Codex; long media, live web, facts -> Gemini (agy).
-{registry}   - a task an outside lane is tagged for -> pick from the Lanes line by tag; never send above a lane's data: level.
-{none}   - no outside lane is enabled: do not call Gemini, Grok or Codex; live web -> Agent(general-purpose, sonnet) with WebSearch; X data, images -> tell the user.
-   - a verdict (compare, evaluate, find gaps, diagnose why, review code or a design, recommend, formal writing), or unsure how hard -> Agent(deep).
+{registry}   - an outside lane's task -> the Lanes line, by tag; never above its data: level.
+{none}   - no outside lane is enabled: do not call Gemini, Grok or Codex; live web -> Agent(general-purpose, sonnet) with WebSearch; X data or images -> tell the user.
+   - a verdict (compare, evaluate, diagnose why, review, recommend, formal writing): small material (a few files, under ~200 lines) -> you, with a `Kept:` line; large material, money/law/interface stakes, a second failure or unsure -> Agent(deep).
    - a decision the user did not make (architecture, public interface, data format, cross-module trade-off) -> Agent(planner), then Agent(coder).
-   - code beyond one file, goal clear -> Agent(coder); layout, naming, which file are its calls.
+   - code beyond one file, goal clear, or a bug with a failing test -> Agent(coder); layout, naming, which file are its calls.
 {builtin}   - a diff to review -> Codex, else Agent(deep).
 {registry}   - a diff to review -> the lane tagged review, else Agent(deep).
 {none}   - a diff to review -> Agent(deep).
-   - the answer is in a file, a command's output or your knowledge, or a one-file edit, goal clear -> you: small work stays here; a kept verdict needs a `Kept:` line.
-   A prompt that mixes kinds is split by kind. Give every delegate an effort. A brief is a handoff packet, not your trail; a brief saying how (use X, then Y) is a design: planner. A check failing twice: Agent(coder) at high effort, or Agent(deep) if the cause is unknown.
+   - the answer is in a file, a command's output or your knowledge, or a one-file edit -> you; a kept verdict needs a `Kept:` line.
+   A prompt that mixes kinds is split by kind. Give every delegate an effort. A brief is a handoff packet, not your trail; a brief saying how is a design: planner. A check failing twice: Agent(coder) at high effort, or Agent(deep) if the cause is unknown.
 {hint}
-3. Goal-shaped? A machine-checkable finish (tests, build, exit 0) after several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line.
+3. Goal-shaped? A machine-checkable finish (tests, build, exit 0) needing several edit-run cycles -> hand the user one `/goal <check command>; stop after 10 attempts` line.
 {builtin,registry}Reply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: Codex <model> (medium)]` — every participant, reviewer included, carries its own model and effort. Never write `→ none` or `→ 无`.
 {none}Reply starts with the deliverable; end with the label line: no delegate -> `[Model: Haiku 5.5 | Effort: medium]`; with delegates -> `[Model: Haiku 5.5 (medium) → coder Sonnet 5.5 (high) | Review: skipped]` — every participant carries its own model and effort. Never write `→ none` or `→ 无`.

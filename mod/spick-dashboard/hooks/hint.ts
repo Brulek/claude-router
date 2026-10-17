@@ -18,7 +18,7 @@ export const KEYWORDS: Record<HintKind, readonly string[]> = {
 export const NEGATIONS: readonly string[] = ["不要", "别", "不用", "无需", "don't", "do not", "no need to", "without"]
 /** what each kind's keywords imply; {t} is the matched words */
 export const PHRASE_TEMPLATES: Record<HintKind, string> = {
-  "judgement": "judgement words ({t}) -> start from Agent(deep); pick the effort by the table",
+  "judgement": "judgement words ({t}) -> size the material: small -> you, with a `Kept:` line; large or high-stakes -> Agent(deep)",
   "review": "review words ({t}) -> the review lane for a diff, else Agent(deep)",
   "design": "design words ({t}) -> Agent(planner) before any coder",
   "code": "edit words ({t}) -> Agent(coder) once nothing is left to decide",

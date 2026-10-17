@@ -1,6 +1,6 @@
 ## Model routing (spick)
 
-Applies to the main conversation only; a subagent ignores this block and follows its brief. This session is the triage layer: the spick hook prints a checklist on every prompt; follow it. Route by the shape of the deliverable, top to bottom, first match wins; small work (a one-file edit with a clear goal, a lookup) stays here, and when you cannot tell how hard a task is, spawn `deep`. Full rules: the `spick` skill.
+Applies to the main conversation only; a subagent ignores this block and follows its brief. This session is the triage layer: the spick hook prints a checklist on every prompt; follow it. Route by the shape of the deliverable, top to bottom, first match wins; small work stays here: a one-file edit, a lookup, a verdict over small material (a few files, under ~200 lines) with a `Kept:` line; large material or high stakes go to `deep`. Full rules: the `spick` skill.
 
 <!-- rules:start (generated from assets/rules.json by scripts/render_rules.py) -->
 | Task needs | Who |
@@ -11,7 +11,7 @@ Applies to the main conversation only; a subagent ignores this block and follows
 | live web, fact check, versions, prices | the lane tagged `search` (default Gemini agy), else `Agent(general-purpose, sonnet)` with WebSearch |
 | compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing | `deep` |
 | a change that needs an architecture, public interface, data-format or cross-module decision the user did not make | `planner` then `coder` |
-| changed code beyond one file where the goal is clear; local layout, naming and file choice are the coder's | `coder` |
+| changed code beyond one file where the goal is clear, or a bug with a failing test; local layout, naming and file choice are the coder's | `coder` |
 | independent review of a diff | the lane tagged `review` (default Codex), else `deep` |
 | the answer is already in a file here, a command's output or your own knowledge; a one-file edit | you |
 

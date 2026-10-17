@@ -26,9 +26,9 @@ Once per session: `test -f <config>/spick.json` (`<config>` is `$CLAUDE_CONFIG_D
 | 2 | image generation or editing | the lane tagged `image` (default Codex codex-image, then Gemini) | tell the user |
 | 3 | long video/audio, documents far beyond ~200 pages | the lane tagged `long-context` (default Gemini) | `deep` (documents only) |
 | 4 | live web, fact check, versions, prices | the lane tagged `search` (default Gemini agy) | `Agent(general-purpose, model sonnet, effort medium)` with WebSearch; judging the findings stays deep's |
-| 5 | compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing | `deep` | keep it, with a `Kept:` line, when the answer is two numbers or a fact already on disk |
+| 5 | compare, evaluate, find gaps, diagnose why, review a codebase or a design, recommend, formal writing | `deep` | keep it, with a `Kept:` line, when the material is small (a few files, under ~200 lines, a short text): say so in the line |
 | 6 | a change that needs an architecture, public interface, data-format or cross-module decision the user did not make | `planner` then `coder` | - |
-| 7 | changed code beyond one file where the goal is clear; local layout, naming and file choice are the coder's | `coder` | - |
+| 7 | changed code beyond one file where the goal is clear, or a bug with a failing test; local layout, naming and file choice are the coder's | `coder` | - |
 | 8 | independent review of a diff | the lane tagged `review` (default Codex) | `deep` |
 | 9 | the answer is already in a file here, a command's output or your own knowledge; a one-file edit | you | - |
 
@@ -39,13 +39,13 @@ Once per session: `test -f <config>/spick.json` (`<config>` is `$CLAUDE_CONFIG_D
 | `deep` | medium | medium: ordinary verdicts: a diagnosis within one file, a comparison of two small things, a review of a small diff; high: hard problems, multi-file debugging, first drafts of formal writing; xhigh: key decisions, final drafts, money or law; max: only when the user says "extremely important" |
 <!-- rules:end -->
 
-**Not dispatching is the default for small work.** Delegation costs a handoff (a brief, a cold context, a relay). A one-file edit with a clear goal, a question a file or command answers, a tidy-up: do it yourself. A verdict whose answer is two numbers or a fact on disk you may keep, with one line starting `Kept:` saying why. Reading files on the way does not make a verdict a lookup; when you cannot tell how hard a task is, `deep` takes it.
+**Not dispatching is the default for small work.** Delegation costs a handoff: brief, cold context, relay. A one-file edit, a question a file or command answers, a tidy-up: do it yourself. A verdict over small material (a few files, under ~200 lines) is yours with a `Kept:` line; large material or high stakes go to `deep`; a failing-test bug goes to `coder` first. Reading files on the way does not make a verdict a lookup; unsure how hard: `deep`.
 
 **The planner threshold is narrow.** `planner` is for a decision the user did not make about architecture, a public interface, a data format or a cross-module trade-off. Local layout, naming and which file to touch are `coder`'s own calls; send `coder` the goal, not a design.
 
 **The Hint line** names prompt keywords and the route they imply (words in paths, URLs, code blocks or after a negation such as 不要 / don't do not count). Follow it, or keep the task with a `Kept:` line. With the dashboard mod, a hinted verdict kept without that line is sent back once at stop time.
 
-**Outside lanes.** Among lanes tagged for the task: one whose `data:` is below what the task sends (`public` < `text` < `code`) is out; `scripts/invoke.py` refuses it (exit 6) unless you pass `--override-data "<reason>"`, only on the user's explicit say-so; every call and override is logged (`<config>/spick/invoke.jsonl`, listed by `/spick audit`) - a declared limit, not a detector. Prefer matching tags, then weigh Quota and notes; a `web-only` lane gets a paste-ready prompt, never a call. A failed or over-quota lane: choose again. "Extremely important", or beyond Opus: `deep`, then suggest switching the session to Fable.
+**Outside lanes.** Among lanes tagged for the task: one whose `data:` is below what the task sends (`public` < `text` < `code`) is out; `scripts/invoke.py` refuses it (exit 6) unless you pass `--override-data "<reason>"`, only on the user's say-so; every call and override is logged (`<config>/spick/invoke.jsonl`, listed by `/spick audit`) - a declared limit, not a detector. Prefer matching tags, then Quota and notes; a `web-only` lane gets a paste-ready prompt, never a call. A failed or over-quota lane: choose again. "Extremely important", or beyond Opus: `deep`, then suggest switching the session to Fable.
 
 A mixed prompt is split by kind: a lane searches, `coder` codes with the result in its brief, `deep` judges.
 

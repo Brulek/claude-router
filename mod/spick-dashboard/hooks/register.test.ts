@@ -869,7 +869,7 @@ test('the Hint line comes from the prompt itself: a comparison gets it after ite
   await $.session.start(START)
   const judged = ((await $.prompt.submit({ ...PROMPT, text: '把 spick 和对方的分流机制对比一下，看看有没有差距' })).context ?? [])[0] ?? ''
   const lines = judged.split('\n')
-  const at = lines.findIndex(l => l.startsWith('   Hint (keywords in this prompt, not a verdict): judgement words (对比, 差距) -> start from Agent(deep); pick the effort by the table'))
+  const at = lines.findIndex(l => l.startsWith('   Hint (keywords in this prompt, not a verdict): judgement words (对比, 差距) -> size the material: small -> you, with a `Kept:` line; large or high-stakes -> Agent(deep)'))
   expect(at).toBeGreaterThan(2)
   expect((lines[at - 1] ?? '').startsWith('   A prompt that mixes kinds')).toBe(true)
   expect((lines[at + 1] ?? '').startsWith('3. Goal-shaped?')).toBe(true)

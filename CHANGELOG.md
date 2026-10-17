@@ -122,3 +122,9 @@ After updating, run `spick setup` once: the hook says so (`spick: skill 1.0.0 in
 ### CI
 
 - shellcheck and ruff steps; a weekly run on the latest Claude Code (round 1).
+
+### 1.0.0, routing policy v2.1 (2026-10-17, after the in-session A/B)
+
+- A verdict over small material (a few files, under ~200 lines, a short text) stays with the main session, with a `Kept:` line; `deep` takes large material, money/law/interface stakes, a second failure, or a task the main session cannot size. The A/B of 2026-10-17 showed the old "every verdict to Opus" rule bought no measured quality on short tasks at 10-30x the cost.
+- A bug with a failing test goes to `coder` first; `deep` only after two failed checks (the guard's escalation line).
+- The Hint phrase for judgement words now says to size the material instead of starting from `deep`.
