@@ -61,3 +61,15 @@ leave the machine); mid-session model switching (claude-router's job).
 | N7 quoted `--lane` parsed as "0" | 002e28e | format.test.ts |
 | N8 version stamped without checking what the install kept; `~/.claude/spick.json` hard-coded in SKILL | 3f3cea9 | test_setup.py |
 | A P1 data level: override without audit | f69c4ac (`<state>/invoke.jsonl`, audit.py) | test_invoke.py |
+
+## Round 4: the scoped check of round 3 (2026-10-17-codex-astra-round3-check.md)
+
+| Finding | Landed in | Test |
+|---|---|---|
+| Redirection parsing swallowed `||true` / `;true` after a check | 3d68b15 (operators rejected before redirections are stripped) | guard.test.ts |
+| Built-in `lanes` booleans without a registry read as "no registry" and re-enabled every lane | 47d63f2 (`lanes.py --variant`; quota.py, the hook and quotaline.ts share the rule) | test_lanes.py, test_quota.py, hook test, quotaline/checklist tests |
+| 200-character floor rejected short review reports | 91a93d6 (`isReport`: a non-empty line, 20+ chars, not a usage text) | gate.test.ts, register.test.ts, test_audit.py |
+| `_probe.json` overwritten on resumed runs | b3f240c (`meta.probe` per run; cells read verified/mixed/not verified) | test_run.py, test_report.py |
+| Missing delegate record read as "no outside calls" | 8e19a96 (`cost_floor: null`, `?` in the report) | test_grade.py, test_report.py |
+
+Open after round 4, by design or pending a live run: the foreground-agent completion fallback on the tool result (`confirmedBy`) until the engine's event order is observed live; the check's scope (which files a test exercises) is not known to the mod; the edit cap does not see Bash writes; `--override-data` needs only a non-empty reason (logged); kept (user-modified) agent files are listed, not blocked, on upgrade; the A/B matrix and the Explore override wait for a CLI login on this machine.
