@@ -265,6 +265,8 @@ def run_metrics(rec, task):
         "unpriced_delegates": unpriced_delegates(rec.get("turn_records")),
         "explore_ran": explore_ran(res), "explore_haiku": explore_haiku(res, rec.get("turn_records")),
         "subagent_types": (res.get("subagent_stats") or {}).get("by_type") or {},
+        # the start-up probe this run was made under (run.py probe_stamp); None for runs made before the field
+        "probe": meta.get("probe") if isinstance(meta.get("probe"), dict) else None,
     }
 
 

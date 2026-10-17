@@ -7,6 +7,7 @@ import argparse
 import json
 import math
 import sys
+from collections import Counter
 from datetime import date
 from pathlib import Path
 
@@ -57,6 +58,7 @@ def aggregate(runs):
             "wall_mean": mean([g["wall"] for g in gs]),
             "models": sorted({m for g in gs for m in g["models"]}),
             "labels": sum(1 for g in gs if g["label_line"]), "kept": sum(1 for g in gs if g["kept_line"]),
+            "probe": cell_probe(gs),
             "runs": gs,
         }
     return out
@@ -82,6 +84,36 @@ def arm_summary(runs, arm):
         "explore_unknown": sum(1 for g in gs if g.get("explore_haiku") == "unknown"),
         "turn_records": sum(1 for g in gs if g.get("turn_record")),
     }
+
+
+def probe_state(g):
+    """(state, head) of the probe a run was made under: verified, accepted (a best-effort arm), invalid (the probe
+    failed) or none (the run carries no probe)."""
+    p = g.get("probe")
+    if not isinstance(p, dict):
+        return "none", None
+    if not p.get("ok"):
+        return "invalid", p.get("checkout_head")
+    return ("accepted" if p.get("check") == "best-effort" else "verified"), p.get("checkout_head")
+
+
+def cell_probe(gs):
+    """A cell is verified only when every run in it carries a passing probe of the same checkout HEAD: runs resumed
+    from an earlier invocation keep their own probe, so the latest _probe.json cannot vouch for them."""
+    states = [probe_state(g) for g in gs]
+    m = len(states)
+    for state, word in (("verified", "verified"), ("accepted", "accepted, not verified")):
+        heads = Counter(h for s, h in states if s == state and h)
+        if heads:
+            head, n = heads.most_common(1)[0]
+            if n == m:
+                return f"{word} at HEAD {head[:12]}"
+            if state == "verified":
+                return f"mixed ({n} of {m} verified at HEAD {head[:12]})"
+    counts = Counter(s for s, _ in states)
+    parts = [f"{counts[s]} {w}" for s, w in (("invalid", "invalid"), ("none", "without a probe"),
+                                                 ("accepted", "best-effort"), ("verified", "HEAD unknown")) if counts[s]]
+    return f"not verified ({', '.join(parts)})"
 
 
 def fmt_cost(v, floor=False, priced=None, n=None):
@@ -122,14 +154,16 @@ CANNOT = """\
 
 
 def probe_lines(out_dir):
-    """Caveat bullets from <out>/_probe.json: version, checkout head and what each arm's start-up probe showed."""
+    """Caveat bullets from <out>/_probe.json: version, checkout head and what each arm's start-up probe showed in the
+    latest invocation only (each cell's own probes are in the per-task table)."""
     path = Path(out_dir) / "_probe.json"
     if not path.exists():
         return ["- **Arm start-up probe: none recorded** (`_probe.json` is missing), so nothing here shows that the arms "
                 "started as their names say."]
     info = json.loads(path.read_text(encoding="utf-8"))
     head = (info.get("checkout_head") or "unknown")[:12]
-    L = [f"- Arm start-up probe (claude `{info.get('claude_version') or 'version unknown'}`, checkout `{head}`"
+    L = [f"- Arm start-up probe of the latest invocation only; the per-task table reads each run's own "
+         f"(claude `{info.get('claude_version') or 'version unknown'}`, checkout `{head}`"
          f"{', run with --allow-unverified' if info.get('allow_unverified') else ''}):"]
     for arm, p in (info.get("arms") or {}).items():
         state = "INVALID" if not p.get("ok") else ("accepted, not verified" if p.get("check") == "best-effort" else "verified")
@@ -164,8 +198,8 @@ def render(out_dir, today):
 
     L += ["## Per arm and task", "",
           "Every cell is kept, including the ones where an arm loses (marked LOSES: pass rate below the best arm on that task).", "",
-          "| task | arm | pass | completed | mean cost | mean wall | models | label line | Kept: line |",
-          "|---|---|---|---|---|---|---|---|---|"]
+          "| task | arm | pass | completed | mean cost | mean wall | models | label line | Kept: line | start-up probe |",
+          "|---|---|---|---|---|---|---|---|---|---|"]
     for t in tids:
         best = max((c["passed"] / c["graded"] for k, c in cells.items() if k[1] == t and c["graded"]), default=None)
         for a in arms:
@@ -176,8 +210,10 @@ def render(out_dir, today):
             L.append(f"| {t} {tasks[t]['name']} | {a} | {fmt_rate(c['passed'], c['graded'])}{' LOSES' if loses else ''} | "
                      f"{fmt_rate(c['completed'], c['n'])} | {fmt_cost(c['cost_mean'], c['cost_floor'], c['cost_priced'], c['n'])} | "
                      f"{fmt_s(c['wall_mean'])} | {', '.join(m.replace('claude-', '') for m in c['models']) or '-'} | "
-                     f"{c['labels']}/{c['n']} | {c['kept']}/{c['n']} |")
-    L.append("")
+                     f"{c['labels']}/{c['n']} | {c['kept']}/{c['n']} | {c['probe']} |")
+    L += ["", "The start-up probe column reads each run's own probe (written into its result.json when it ran): a cell is "
+          "verified only when every run in it passed its probe at the same checkout HEAD; runs kept from an earlier "
+          "invocation carry that invocation's probe, or none.", ""]
 
     failed = [(rid, g) for rid, g in runs.items() if g["pass"] is False]
     if failed:

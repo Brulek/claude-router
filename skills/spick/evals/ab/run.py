@@ -168,15 +168,26 @@ def probe_arm(arm, args, env, agents_file, settings_dir, settle=None):
 
 
 def probe_all(arms, args, env, agents_file, settings_dir, settle=None):
-    """Probe each distinct arm once, write <out>/_probe.json, return {arm: result}."""
+    """Probe each distinct arm once, write <out>/_probe.json (this invocation's probe: a later one overwrites it),
+    return its content: when, claude --version, the checkout HEAD, and {arm: result} under "arms"."""
     results = {a: probe_arm(a, args, env, agents_file, settings_dir, settle) for a in dict.fromkeys(arms)}
     info = {"at": datetime.now(timezone.utc).isoformat(timespec="seconds"), "claude_version": claude_version(args.claude_bin),
             "checkout_head": checkout_head(), "allow_unverified": bool(args.allow_unverified), "arms": results}
     (Path(args.out) / "_probe.json").write_text(json.dumps(info, ensure_ascii=False, indent=2), encoding="utf-8")
-    return results
+    return info
 
 
-def do_run(job, args, env, agents_file, settings_dir, lock):
+def probe_stamp(info, arm):
+    """What a run's result.json keeps of the probe its invocation made for its arm (meta.probe). _probe.json holds
+    the latest invocation only, and a resumed matrix skips runs that have a result.json, so each run must carry the
+    probe it was made under, or the latest probe would vouch for runs made before it."""
+    p = (info.get("arms") or {}).get(arm) or {}
+    return {"ok": bool(p.get("ok")), "check": p.get("check"), "detail": p.get("detail"), "at": info.get("at"),
+            "claude_version": info.get("claude_version"), "checkout_head": info.get("checkout_head")}
+
+
+def do_run(job, args, env, agents_file, settings_dir, lock, probe=None):
+    """One run; `probe` is this invocation's probe of the arm (probe_stamp), written into its result.json."""
     arm, tid, n = job
     task = common.load_tasks()[tid]
     rdir = Path(args.out) / arm / tid / f"run-{n}"
@@ -203,7 +214,7 @@ def do_run(job, args, env, agents_file, settings_dir, lock):
     rec = {
         "meta": {"arm": arm, "task": tid, "run": n, "started": started, "wall_seconds": wall,
                  "exit_code": code, "timed_out": timed_out, "stderr_tail": err[-600:],
-                 "cmd": cmd[:2] + ["<prompt>"] + cmd[3:]},
+                 "cmd": cmd[:2] + ["<prompt>"] + cmd[3:], "probe": probe},
         "result": result,
         # the mod writes <state>/turns/<sessionId>.jsonl at turn end; headless runs may have none
         "turn_records": common.find_turn_records(session) if arm in common.SPICK_ARMS else None,
@@ -267,7 +278,9 @@ def main():
         for arm, tid, n in jobs:
             print(arm, tid, n, build_cmd(arm, tasks[tid]["prompt"], agents_file, arms_dir / f"{arm}.json", args.claude_bin))
         return 0
-    probes = probe_all(arms, args, env, agents_file, arms_dir)
+    info = probe_all(arms, args, env, agents_file, arms_dir)
+    probes = info["arms"]
+    stamps = {a: probe_stamp(info, a) for a in probes}
     for a, p in probes.items():
         print(f"probe {a:12} {'ok' if p['ok'] else 'FAILED'} ({p['check'] or 'call'}): {p['detail']}", flush=True)
     bad = [a for a, p in probes.items() if not p["ok"]]
@@ -278,7 +291,7 @@ def main():
     lock = threading.Lock()
     print(f"{len(jobs)} runs, parallel {args.parallel}, out {out}", flush=True)
     with ThreadPoolExecutor(max_workers=args.parallel) as ex:
-        for msg in ex.map(lambda j: do_run(j, args, env, agents_file, arms_dir, lock), jobs):
+        for msg in ex.map(lambda j: do_run(j, args, env, agents_file, arms_dir, lock, stamps[j[0]]), jobs):
             if msg:
                 print(msg, flush=True)
     print("ALL DONE", flush=True)

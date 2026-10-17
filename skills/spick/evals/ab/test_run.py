@@ -217,8 +217,9 @@ class Probe(unittest.TestCase):
         args = argparse.Namespace(out=str(self.d / "out"), claude_bin=probe_stub(self.d), probe_timeout=30, allow_unverified=False)
         with mock.patch.object(run, "PROBE_SETTLE", 0):
             res = run.probe_all(["haiku-bare", "haiku-bare", "opus-bare"], args, self.env, self.d / "a.json", self.d / "out" / "_arms")
-        self.assertEqual(sorted(res), ["haiku-bare", "opus-bare"])  # once per arm
+        self.assertEqual(sorted(res["arms"]), ["haiku-bare", "opus-bare"])  # once per arm
         info = json.loads((self.d / "out" / "_probe.json").read_text())
+        self.assertEqual(info, res)
         self.assertEqual(sorted(info["arms"]), ["haiku-bare", "opus-bare"])
         for key in ("claude_version", "checkout_head", "allow_unverified", "at"):
             self.assertIn(key, info)
@@ -250,6 +251,32 @@ class Probe(unittest.TestCase):
     def test_main_with_a_verified_arm_runs_the_matrix(self):
         self.assertEqual(self.main(probe_stub(self.d, {"schemaVersion": 2})), 0)
         self.assertTrue((self.d / "res" / "haiku-spick" / "T2" / "run-1" / "result.json").exists())
+
+    def result(self):
+        return json.loads((self.d / "res" / "haiku-spick" / "T2" / "run-1" / "result.json").read_text())
+
+    def test_each_run_carries_the_probe_it_was_made_under(self):
+        self.main(probe_stub(self.d, {"schemaVersion": 2}))
+        p = self.result()["meta"]["probe"]
+        self.assertTrue(p["ok"])
+        self.assertEqual((p["check"], p["checkout_head"]), ("record", run.checkout_head()))
+        for key in ("claude_version", "at", "detail"):
+            self.assertIn(key, p)
+
+    def test_a_resumed_run_keeps_its_own_probe_not_the_latest(self):
+        # first invocation: the probe fails, the run is made anyway; the second passes and skips the existing run
+        self.main(probe_stub(self.d), "--allow-unverified")
+        self.assertFalse(self.result()["meta"]["probe"]["ok"])
+        self.main(probe_stub(self.d, {"schemaVersion": 2}))
+        self.assertTrue(json.loads((self.d / "res" / "_probe.json").read_text())["arms"]["haiku-spick"]["ok"])
+        rec = self.result()
+        self.assertFalse(rec["meta"]["probe"]["ok"])
+        g = grade.run_metrics(rec, common.load_tasks()["T2"])
+        self.assertFalse(g["probe"]["ok"])
+
+    def test_a_result_written_before_the_field_grades_with_no_probe(self):
+        rec = {"meta": {"arm": "haiku-bare", "task": "T2", "run": 1, "exit_code": 0}, "result": good_result()}
+        self.assertIsNone(grade.run_metrics(rec, common.load_tasks()["T2"])["probe"])
 
 
 if __name__ == "__main__":
