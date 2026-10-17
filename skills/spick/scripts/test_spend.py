@@ -19,6 +19,7 @@ import spend  # noqa: E402
 
 SCRIPT = os.path.join(HERE, "spend.py")
 FIXTURE = os.path.join(HERE, "testdata", "spend_session.json")
+TURNS = os.path.join(HERE, "testdata", "turns_sample.jsonl")
 NOW = dt.datetime(2026, 10, 14, 12, 0, tzinfo=dt.timezone.utc)
 REAL_CLAUDE = os.path.realpath(os.path.expanduser("~/.claude"))
 
@@ -55,6 +56,8 @@ class Base(unittest.TestCase):
         if not self.home.startswith(prefix) or os.path.realpath(self.home).startswith(REAL_CLAUDE):
             self.fail(f"HOME={self.home!r} is not under the temp prefix {prefix!r}; refusing to run spend.py")
         env = dict(os.environ, HOME=self.home)
+        # the real config dir must never be read: the temp HOME decides
+        env.pop("CLAUDE_CONFIG_DIR", None)
         return subprocess.run([sys.executable, SCRIPT, *argv], env=env, capture_output=True, text=True, timeout=30)
 
 
@@ -152,6 +155,53 @@ class TestBadFiles(Base):
                                                         "outputTokens": True, "costUsd": "1"}]})
         g = self.run_json()["groups"][0]
         self.assertEqual((g["inputTokens"], g["outputTokens"], g["costUsd"], g["unpriced"]), (0, 0, None, 1))
+
+
+class TestTurnRecords(Base):
+    """the turn records under <config>/spick/turns/, with the legacy files beside them"""
+
+    def put_turns(self, config=None):
+        d = os.path.join(config or os.path.join(self.home, ".claude"), "spick", "turns")
+        os.makedirs(d, exist_ok=True)
+        shutil.copy(TURNS, os.path.join(d, "aaaaaaaa.jsonl"))
+
+    def test_rows_from_turns_late_lines_merged(self):
+        self.put_turns()
+        code, out, err = self.run_main("--json")
+        self.assertEqual(code, 0)
+        self.assertEqual(err, "spend.py: skipped 1 turn record line that does not read\n")
+        d = json.loads(out)
+        g = {x["key"]: x for x in d["groups"]}
+        # the background coder's late line replaces its running entry: counted once, with its usage
+        self.assertEqual((g["coder"]["rows"], g["coder"]["inputTokens"]), (2, 300000))
+        self.assertAlmostEqual(g["coder"]["costUsd"], 1.40)
+        self.assertEqual((g["main session"]["rows"], g["deep"]["rows"]), (6, 1))
+        self.assertEqual((g["Gemini"]["unpriced"], g["Codex"]["unpriced"]), (1, 1))
+        self.assertEqual(d["sessions"], 2)
+        self.assertAlmostEqual(d["total"]["costUsd"], 1.94)
+
+    def test_turns_and_legacy_files_add_up(self):
+        self.put_turns()
+        self.put_fixture()
+        d = self.run_json()
+        self.assertEqual(d["sessions"], 3)
+        self.assertEqual(d["total"]["rows"], 11 + 3)
+
+    def test_legacy_files_where_setup_moved_them(self):
+        moved = os.path.join(self.home, ".claude", "spick", "spick-spend")
+        os.makedirs(moved)
+        shutil.copy(FIXTURE, os.path.join(moved, "s.json"))
+        self.assertEqual(self.run_json()["total"]["rows"], 3)
+
+    def test_claude_config_dir_is_the_config(self):
+        cfg = os.path.join(self.home, "cfg")
+        self.put_turns(cfg)
+        self.assertEqual(spend.config_dir(None, {"CLAUDE_CONFIG_DIR": cfg}), cfg)
+        self.assertEqual(spend.config_dir(self.home, {"CLAUDE_CONFIG_DIR": cfg}), os.path.join(self.home, ".claude"))
+        env = dict(os.environ, HOME=self.home, CLAUDE_CONFIG_DIR=cfg)
+        r = subprocess.run([sys.executable, SCRIPT, "--days", "3650", "--json"], env=env, capture_output=True, text=True, timeout=30)
+        self.assertEqual(r.returncode, 0, r.stderr)
+        self.assertEqual(json.loads(r.stdout)["sessions"], 2)
 
 
 if __name__ == "__main__":

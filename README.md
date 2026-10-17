@@ -102,26 +102,29 @@ The band is an optional status line above the prompt that shows which participan
 
 ![The Spick pane](docs/images/pane.svg)
 
-`/spick` opens the pane, which contains hotkey switches and recent turns. Haiku reads a short quota line with each prompt; the pane shows local meters for Claude and Codex.
+`/spick` opens the pane, which contains hotkey switches and recent turns. Haiku reads a short quota line with each prompt; the pane shows local meters for Claude and Codex with the age of each sample (when Claude Code or the Codex log sampled it, never when the pane read the file).
 
-The gate and the guard are the mod's only two interventions. Everything else it shows is read only.
+The band also shows the main loop's last prompt size (`ctx 42k`). On a Haiku session above 80,000 tokens it warns `context 85k: Haiku bills 5x above 100k; /clear or delegate`: Haiku 5.5 bills a prompt over 100K tokens at five times the rate.
 
-**The gate**
+The mod acts on facts, at the cheapest moment. Everything else it shows is read only.
 
-- It acts when a prompt's Hint line named a verdict (judgement or review words) and the main session answered it without delegating anything. Design words stay a Hint line but never send a turn back.
-- Then the stop is sent back once. The main session is told to dispatch `deep`, or to state why the deliverable was a plain lookup, in one line starting with `Kept:` (or `自留:`).
-- It never fires twice in a turn.
-- It never fires on a short reply without tool calls (a question back).
-- `/spick gate off` switches it off.
-- Each firing, and whether the turn then delegated or kept it with a `Kept:` line, is one JSON line in `~/.claude/spick-gate.jsonl`, so false positives can be counted.
+**The guard**, while routing is in force:
 
-**The guard** does two things while routing is in force.
-
-- Edit cap: the main session's own source edits are capped at 3 distinct files per turn. A fourth file is refused with a message that names the three and asks for `Agent(coder)`. Edits to the same files, a subagent's edits, and notes, data or `.claude/` files do not count.
-- Check at stop: when any loop, a subagent included, edited source in a turn and no loop ran a check (a test runner, a build, a linter or a type checker), the stop is sent back once. A project with its own check command declares it as a regex in `~/.claude/spick.json` under `guard.check_commands` (see `skills/spick/references/providers.md`). The main session is asked to run the project's check, hand the user a `/goal` line, or state why there is none in one line starting with `Unchecked:` (or `未验证:`).
+- Edit cap: the main session may edit one source file itself per turn. A second file is refused with a message that names the first and asks for `Agent(coder)`. Further edits to the same file, a subagent's edits, and notes (`.md`, `.txt`), tables (`.csv`, `.tsv`), logs, lock files and a leading `.claude/` do not count; json, yaml and toml do, and so does a worktree under `.claude/worktrees/`. The cap is a tool-level soft bound: it sees Edit, Write and NotebookEdit, not Bash writes such as `sed -i` or a redirection.
+- Check at stop: when any loop, a subagent included, edited source in a turn and no check passed after the last edit, the stop is sent back. A check counts only when the runner is the command itself (after `cd x &&`, `env`, `npx`, `sudo`, `time`; `echo pytest` and `grep pytest README` are not checks), it exited cleanly (`pytest || true` and `pytest --version` do not count), and no source edit came after it started. A project with its own check command declares it as a regex in `<config>/spick.json` under `guard.check_commands` (see `skills/spick/references/providers.md`). The main session is asked to run the project's check, hand the user a `/goal` line, or state why there is none in one line starting with `Unchecked:` (or `未验证:`).
+- Escalation: when the same check fails twice in a turn, the second failure's result carries one line telling the main session to dispatch `coder` at effort high, or `deep` if the cause is unknown, instead of a third fix of its own.
 - `/spick guard off` switches the guard off, and the choice is remembered.
 
-The gate and the guard together send a turn back at most once.
+**The gate** asks for the role a hinted verdict needs: judgement words need `deep`, review words the review lane (Codex with a review prompt, or a lane tagged `review`) or `deep`. Design words stay a Hint line and never gate.
+
+- At stop, the turn is sent back when that role did not complete (a `deep` subagent that finished, or still runs in the background; a review call that returned cleanly; a refused, failed or timed-out call does not count), the reply has no line starting with `Kept:` (or `自留:`), and the turn was substantive (a tool call, or a reply of 400 characters or more).
+- `/spick gate off` switches it off.
+
+The gate and the guard send a turn back at most once, with every reason in one block.
+
+**Effort defaults.** An Agent call of `coder`, `planner` or `deep` that names no effort runs at the default from `efforts` in `<config>/spick.json` (coder medium, planner high, deep medium when it is not set).
+
+**The turn record.** Each main turn is one JSON line in `<config>/spick/turns/<sessionId>.jsonl` (`<config>` is `CLAUDE_CONFIG_DIR`, else `~/.claude`): the hint, what ran (each delegate with its status, model, effort, usage and cost), the gate's firings and what followed, the `Kept:` line, the edits, every check with its exit status, any escalation, the main loop's usage and its last prompt size. A background agent that finishes later adds a `late` line for the same turn. `/spick spend` sums the cost of the last seven days (`scripts/spend.py`, which also reads the per-session files of mod 0.x); `/spick audit` runs `scripts/audit.py`: turns by hint kind and what ran, how hinted verdicts ended, gate outcomes and false positive candidates, edits with no passing check, escalations, cost by lane and by kind, and the longest sessions by context size.
 
 ## Installation
 

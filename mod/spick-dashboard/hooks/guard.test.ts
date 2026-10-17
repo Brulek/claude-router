@@ -1,8 +1,8 @@
 import { test, expect } from 'claude-code/testing'
-import { EDIT_CAP, UNCHECKED_RE, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
+import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkCommand, checkOf, declaredChecks, escalationLine, editCapReason, isCheckCommand, uncheckedReason } from './guard'
 
-test('the edit cap is three distinct files', () => {
-  expect(EDIT_CAP).toBe(3)
+test('the edit cap is one source file per turn', () => {
+  expect(EDIT_CAP).toBe(1)
 })
 
 test('isCheckCommand knows test runners, build checks, linters and type checkers, anywhere in the command', () => {
@@ -33,6 +33,30 @@ test('isCheckCommand leaves ordinary commands out, and matches on word boundarie
   ]) expect(isCheckCommand(c)).toBe(false)
 })
 
+test('the runner must be the command word itself: a name in an argument, a quote or a pipe\'s reader is no check', () => {
+  for (const c of [
+    'echo pytest', 'grep pytest README', 'grep -rn "npm test" .', 'echo "cd x && pytest"', 'cat Makefile | grep test', 'git log --grep=pytest',
+    'ls tests/ && echo cargo test', 'which pytest', 'pip install pytest',
+  ]) expect(isCheckCommand(c)).toBe(false)
+})
+
+test('the command word is found after env, npx, sudo, time, assignments, uv run and cd x &&', () => {
+  expect(checkCommand('cd /r/x && python3 -m unittest -q')).toBe('python3 -m unittest -q')
+  expect(checkCommand('env CI=1 npx vitest run')).toBe('vitest run')
+  expect(checkCommand('sudo -E make test')).toBe('make test')
+  expect(checkCommand('time cargo test --all')).toBe('cargo test --all')
+  expect(checkCommand('FOO=1 uv run pytest -q tests/')).toBe('pytest -q tests/')
+  expect(checkCommand('/usr/local/bin/pytest -x')).toBe('/usr/local/bin/pytest -x')
+  expect(checkCommand('npx tsc --noEmit')).toBe('tsc --noEmit')
+})
+
+test('a check whose exit status is thrown away, or that only asks the runner about itself, does not count', () => {
+  for (const c of ['pytest || true', 'pytest 2>&1 || true', 'npm test &>/dev/null || :', 'npm test || echo failed', 'pytest --version', 'cargo --version', 'ruff --help', 'python3 -m pytest -V']) expect(isCheckCommand(c)).toBe(false)
+  // a later command after && still runs only on success; a check reached after || is a check
+  expect(isCheckCommand('pytest && echo ok')).toBe(true)
+  expect(isCheckCommand('false || pytest')).toBe(true)
+})
+
 test('declared check commands: each regex string compiled on its own, a bad one reported and ignored', () => {
   const d = declaredChecks(JSON.stringify({ version: 1, guard: { check_commands: ['^just check$', 'bin/verify\\b', '(unclosed', 7, ''] } }))
   expect(d.patterns.length).toBe(2)
@@ -51,10 +75,10 @@ test('UNCHECKED_RE takes a line starting with Unchecked: or 未验证:, nothing 
   expect(UNCHECKED_RE.test('All checks ran.')).toBe(false)
 })
 
-test('editCapReason lists the files edited and sends the rest to a coder', () => {
-  const r = editCapReason(['/r/a.py', '/r/b.py', '/r/c.py'])
-  expect(r).toContain('(/r/a.py, /r/b.py, /r/c.py)')
-  expect(r).toContain('the cap is 3 distinct files per turn')
+test('editCapReason names the file already edited and sends the change to a coder', () => {
+  const r = editCapReason(['/r/a.py'])
+  expect(r).toContain('already edited /r/a.py itself this turn')
+  expect(r).toContain('the cap is 1 source file per turn')
   expect(r).toContain('Dispatch Agent(coder)')
 })
 
@@ -65,4 +89,20 @@ test('uncheckedReason names the three ways out, the Unchecked: line among them, 
   expect(r).toContain('`/goal <check command>; stop after 10 attempts`')
   expect(r).toContain('`Unchecked:`')
   expect(uncheckedReason(['1.py', '2.py', '3.py', '4.py', '5.py', '6.py', '7.py'])).toContain('(1.py, 2.py, 3.py, 4.py, 5.py and 2 more)')
+})
+
+test('checkOf names a check by the cd before it, its runner and its targets, flags left out', () => {
+  expect(checkOf('pytest -q tests/a.py')?.key).toBe(checkOf('pytest tests/a.py -x')?.key)
+  expect(checkOf('pytest tests/a.py')?.key).not.toBe(checkOf('pytest tests/b.py')?.key)
+  expect(checkOf('cd pkg && pytest')?.key).not.toBe(checkOf('pytest')?.key)
+  expect(checkOf('cd pkg && npm test')).toEqual({ command: 'npm test', key: 'pkg npm test' })
+  expect(checkOf('echo pytest')).toBeNull()
+})
+
+test('the escalation line names the check and the two ways up', () => {
+  expect(ESCALATE_AFTER).toBe(2)
+  const t = escalationLine('pytest -q')
+  expect(t).toContain('failed 2 times this turn (pytest -q)')
+  expect(t).toContain('Agent(coder) at effort high')
+  expect(t).toContain('Agent(deep) if the cause is unknown')
 })

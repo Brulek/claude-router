@@ -3,7 +3,7 @@ import {
   modelName, parseCli, isSourcePath, bandSegments, table, quotaBar,
   fmtDuration, fmtAge, fmtCost, estimateCost, quotaMeters, verbOf, displayWidth, MAIN_LANE, runningLines,
   tagLine, wrapWords, usageLines, quotaCells, recentLines, clockOf, LABEL_W, HOTKEY_W, NARROW_BELOW,
-  colWidths, usageRows, recentRows, runningRows, quotaWindows,
+  colWidths, usageRows, recentRows, runningRows, quotaWindows, sampleNote, fmtTokens, promptTokens, contextNote, HAIKU_WARN_AT,
 } from './format'
 
 test('modelName maps Claude ids to display names and leaves others alone', () => {
@@ -68,13 +68,30 @@ test('parseCli marks Codex review only when the prompt says review as a word', (
   expect(parseCli('codex exec --sandbox read-only "fix" < docs/code-review.md')?.isReview).toBe(false)
 })
 
-test('isSourcePath excludes docs, data, plan files and .claude', () => {
+test('isSourcePath excludes notes, tables, logs, lock files and a leading .claude/; json, yaml and toml are source', () => {
   expect(isSourcePath('src/lru.py')).toBe(true)
   expect(isSourcePath('scripts/quota.sh')).toBe(true)
   expect(isSourcePath('README.md')).toBe(false)
-  expect(isSourcePath('/Users/x/.claude/plans/1-foo.md')).toBe(false)
   expect(isSourcePath('data/report.csv')).toBe(false)
-  expect(isSourcePath('config.json')).toBe(false)
+  for (const f of ['notes.txt', 'a.tsv', 'run.log', 'Cargo.lock', 'yarn.lock', 'package-lock.json', 'pnpm-lock.yaml', 'docs/x.markdown']) expect(isSourcePath(f)).toBe(false)
+  for (const f of ['config.json', '.github/workflows/ci.yml', 'docker-compose.yaml', 'pyproject.toml']) expect(isSourcePath(f)).toBe(true)
+  expect(isSourcePath('/repo/.claude/plans/1-foo.py', '/repo')).toBe(false)
+  expect(isSourcePath('.claude/settings.local.json', '/repo')).toBe(false)
+})
+
+test('isSourcePath counts Dockerfile, Makefile, Justfile, Rakefile and Gemfile; other extensionless names are not source', () => {
+  for (const f of ['Dockerfile', 'build/Makefile', '/repo/Justfile', 'Rakefile', 'Gemfile', 'Dockerfile.dev']) expect(isSourcePath(f, '/repo')).toBe(true)
+  for (const f of ['LICENSE', 'bin/run', 'makefile.md']) expect(isSourcePath(f, '/repo')).toBe(false)
+})
+
+test('isSourcePath judges the path relative to the session cwd: a worktree under .claude/worktrees/ is source (regression)', () => {
+  expect(isSourcePath('/repo/.claude/worktrees/x/src/a.py', '/repo')).toBe(true)
+  expect(isSourcePath('.claude/worktrees/x/src/a.py', '/repo')).toBe(true)
+  expect(isSourcePath('/repo/.claude/worktrees/x/.claude/settings.local.json', '/repo')).toBe(false)
+  expect(isSourcePath('/repo/.claude/worktrees/x/src/a.py', '/repo/.claude/worktrees/x')).toBe(true)
+  // a .claude/ that is not leading (relative to cwd) does not exclude
+  expect(isSourcePath('/elsewhere/.claude/hooks/a.py', '/repo')).toBe(true)
+  expect(isSourcePath('./src/a.py', '/repo')).toBe(true)
 })
 
 const L = (b: { left: { text: string }[] }) => b.left.map(s => s.text).join('')
@@ -464,4 +481,51 @@ test('recentLines aligns time, lane, model, effort and duration; narrow drops th
   ])
   // a turn without an effort leaves the column empty, not "undefined"
   expect(recentLines([{ ...rows[0]!, effort: undefined }], false)[0]).not.toContain('undefined')
+})
+
+test('fmtTokens reads 950, 12k, 85k, 1.2M', () => {
+  expect(fmtTokens(950)).toBe('950')
+  expect(fmtTokens(12_400)).toBe('12k')
+  expect(fmtTokens(84_600)).toBe('85k')
+  expect(fmtTokens(1_234_567)).toBe('1.2M')
+})
+
+test('promptTokens counts fresh input, cache reads and cache writes', () => {
+  expect(promptTokens({ input_tokens: 1200, output_tokens: 900, cache_read_input_tokens: 80_000, cache_creation_input_tokens: 3000 })).toBe(84_200)
+})
+
+test('contextNote warns a Haiku session above 80k only, in the spec\'s words', () => {
+  expect(HAIKU_WARN_AT).toBe(80_000)
+  expect(contextNote(85_000, 'claude-haiku-5-5')).toEqual({ kind: 'warning', text: 'context 85k: Haiku bills 5x above 100k; /clear or delegate' })
+  expect(contextNote(80_000, 'claude-haiku-5-5')).toBeNull()
+  expect(contextNote(150_000, 'claude-sonnet-5-5')).toBeNull()
+  expect(contextNote(undefined, 'claude-haiku-5-5')).toBeNull()
+})
+
+test('the band shows ctx from 70 columns and gives it up first when space runs short', () => {
+  const v = { lane: MAIN_LANE, model: 'Haiku 5.5', agents: 0, isIdle: false, durationMs: 12000, contextTokens: 42_000 }
+  expect(L(bandSegments(v, 100))).toBe('SPICK   Working · Haiku 5.5 · 12s · ctx 42k')
+  expect(L(bandSegments(v, 60))).not.toContain('ctx')
+  expect(L(bandSegments({ ...v, isIdle: true }, 100))).toContain('ctx 42k')
+  // squeezed: ctx goes before the elapsed time
+  expect(L(bandSegments(v, 72, 30))).toBe('SPICK   Working · Haiku 5.5 · 12s')
+})
+
+test('parseCli restores a quoted model and effort: -m "model", --model=\'model\', --effort "low"', () => {
+  expect(parseCli('grok -p "x" -m "grok-4.7" --effort "medium"')).toEqual({ lane: 'Grok', model: 'grok-4.7', effort: 'medium', isReview: false })
+  expect(parseCli("agy -p 'q' --model='gemini-3.8-flash'")).toEqual({ lane: 'Gemini', model: 'gemini-3.8-flash', isReview: false })
+  expect(parseCli('codex exec -m "gpt-6-astra" "Review this diff"')).toEqual({ lane: 'Codex', model: 'gpt-6-astra', isReview: true })
+  // a -m inside the prompt text is not the flag
+  expect(parseCli('agy -p "use -m wisely"')).toEqual({ lane: 'Gemini', isReview: false })
+})
+
+test('sampleNote gives each provider\'s sample age, the oldest only when narrow, never the read time', () => {
+  const now = 10 * 3_600_000
+  expect(sampleNote(null, now)).toBe('not read')
+  expect(sampleNote({ claude: null, codex: null, readAt: now }, now)).toBe('no sample')
+  const q = { claude: { fiveHour: 1, sampledAt: now - 4 * 60_000 }, codex: { sevenDay: 2, sampledAt: now - 2 * 3_600_000 }, readAt: now }
+  expect(sampleNote(q, now)).toBe('sampled claude 4m ago, codex 2h ago')
+  expect(sampleNote(q, now, true)).toBe('sampled 2h ago')
+  expect(sampleNote({ claude: { fiveHour: 1 }, codex: null, readAt: now }, now)).toBe('sampled claude age unknown')
+  expect(sampleNote({ claude: { fiveHour: 1 }, codex: null, readAt: now }, now, true)).toBe('sample age unknown')
 })

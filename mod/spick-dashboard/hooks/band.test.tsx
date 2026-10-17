@@ -211,7 +211,7 @@ for (const surface of ['terminal', 'desktop'] as const) {
     const ui = await mountPane($, surface)
     const all = await linesOf(ui)
     // turn.start refreshed the quota (nothing readable in the test, so no provider has data)
-    for (const want of [/^SPICK {2}routing off · b: band shown +x: close$/, /^Routing {6}● on {2}r: /, /^Review {7}● auto {2}v: /, /^Lanes {5}Gemini {5}● on {2}g: /, /^Usage /, /^Quota {5}unknown$/, /^ {10}q: refresh · read just now$/, /^Recent /]) {
+    for (const want of [/^SPICK {2}routing off · b: band shown +x: close$/, /^Routing {6}● on {2}r: /, /^Review {7}● auto {2}v: /, /^Lanes {5}Gemini {5}● on {2}g: /, /^Usage /, /^Quota {5}unknown$/, /^ {10}q: refresh · no sample$/, /^Recent /]) {
       expect(all.some(l => want.test(l))).toBe(true)
     }
     // one lane: no total row; the head row carries the column heads
@@ -515,6 +515,45 @@ for (const surface of ['terminal', 'desktop'] as const) {
 const paneTexts = async ($: Engine) => paneLinesAt($, 80)
 const hasRunning = (lines: string[]) => lines.some(l => l.startsWith('Running'))
 
+test('the band shows the main loop\'s last prompt size; a Haiku session past 80k gets the warning, active and idle; Sonnet never', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  let promptSize = 0
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('turn.step', async function* ($, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const,
+      usage: { model: e.model, input_tokens: 200, output_tokens: 50, cache_read_input_tokens: promptSize - 1200, cache_creation_input_tokens: 1000 } }
+  })
+  const W = { ...BAND, bodyColumns: 120 }
+  const band = async () => {
+    const ui = await $.ui.mount({ plugin: 'spick-dashboard', surface: 'terminal', component: 'AbovePrompt', props: W })
+    const line = await bandOf(ui, W.bodyColumns)
+    await ui.unmount()
+    return line
+  }
+  const step = async (id: string, model: string, size: number) => {
+    promptSize = size
+    for await (const _ of $.turn.step({ turnId: id, index: 0, model, effort: 'medium', messageCount: 1 })) { /* drain */ }
+  }
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await step('t1', 'claude-haiku-5-5', 42_000)
+  expect(await band()).toContain('ctx 42k')
+  expect(await band()).not.toContain('Haiku bills')
+  await step('t1', 'claude-haiku-5-5', 85_000)
+  const hot = await band()
+  expect(hot).toContain('ctx 85k')
+  expect(hot).toMatch(/context 85k: Haiku bills 5x above 100k; \/clear or delegate$/)
+  // idle after the turn: the warning stays where the user decides on /clear
+  await $.turn.complete({ turnId: 't1', answer: 'ok', durationMs: 1, isAborted: false, reason: 'answer', usage: USAGE })
+  expect(await band()).toContain('context 85k: Haiku bills 5x above 100k')
+  // the same size on Sonnet: the size, no warning
+  await $.turn.start({ text: 'go', turnId: 't2' })
+  await step('t2', 'claude-sonnet-5-5', 150_000)
+  const sonnet = await band()
+  expect(sonnet).toContain('ctx 150k')
+  expect(sonnet).not.toContain('Haiku bills')
+})
+
 test('12 concurrent coders: the band reads coder ×12 with the oldest one\'s time; the pane lists 5 rows and "and 7 more"', async ($, on) => {
   const clock = agentHooks(on)
   await spawnCoders($, clock, 12)
@@ -623,7 +662,7 @@ const EXAMPLE_80 = [
   '',
   'Quota     claude  5h ▰▰▱▱▱▱▱▱▱▱  19%   7d ▰▱▱▱▱▱▱▱▱▱   9%',
   '          codex   7d ▰▰▰▰▰▰▰▰▱▱  80%',
-  '          q: refresh · read just now',
+  '          q: refresh · sampled claude 36m ago, codex 1h ago',
   '',
   'Recent    14:52  coder         Sonnet 5.5  high    3m 41s',
   '          14:47  main session  Haiku 5.5   low         6s',
@@ -649,8 +688,9 @@ async function exampleWorld($: Engine, on: Parameters<TestBody>[1], tags = true)
   const rows = LANE_ROWS.map(r => (r.id === 'gemini' ? { ...r, tags: ['search', 'long-context', 'multimodal', 'image'] }
     : r.id === 'codex' ? { ...r, tags: ['code', 'review', 'image'] } : r))
   fakeSetLane(on, tags ? rows : LANE_ROWS.map(r => ({ ...r, tags: [] })))
-  const claudeJson = JSON.stringify({ cachedUsageUtilization: { utilization: { five_hour: { utilization: 19 }, seven_day: { utilization: 9 } } } })
-  const codexLine = JSON.stringify({ payload: { rate_limits: { primary: { used_percent: 80, window_minutes: 10080 } } } })
+  // sampled by Claude Code at 14:20, the Codex log line written at 13:50: the pane shows those ages, not when it read them
+  const claudeJson = JSON.stringify({ cachedUsageUtilization: { fetchedAtMs: localTime(14, 20), utilization: { five_hour: { utilization: 19 }, seven_day: { utilization: 9 } } } })
+  const codexLine = JSON.stringify({ timestamp: new Date(localTime(13, 50)).toISOString(), payload: { rate_limits: { primary: { used_percent: 80, window_minutes: 10080 } } } })
   const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 1, mtimeMs: 1, isLink: false })
   on('fs.read', async (_$, e) => ({ value: e.path === '/h/.claude.json' ? claudeJson : codexLine }))
   on('fs.list', async (_$, e) => {

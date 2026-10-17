@@ -2,7 +2,6 @@ import { test, expect, mock } from 'claude-code/testing'
 import type { Engine, Plugin, TestBody } from 'claude-code/testing'
 import type { LaneTotals, TurnRecord } from '../types'
 import { SCRIPT, fakeSetLane } from './fakelane'
-import { parseGateLog } from './gatelog'
 
 const USAGE = { model: 'claude-sonnet-5-5', input_tokens: 1_000_000, output_tokens: 100_000, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }
 
@@ -121,6 +120,30 @@ test('an agy -p Bash call counts a Gemini turn and the turn closes as lane Gemin
   const s = await probe($)
   expect(s.totals?.Gemini).toEqual({ turns: 1, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null })
   expect(s.last).toMatchObject({ lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low' })
+})
+
+test('an Agent call of coder, planner or deep with no effort runs at the default from spick.json, else the rules\' default', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  on('session.start', async ($, e) => ({ cwd: e.cwd }))
+  let cfg = JSON.stringify({ efforts: { coder: { default: 'high' } } })
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' ? { value: cfg } : { deny: 'missing' }))
+  const seen: Record<string, unknown> = {}
+  on('tool.call', async ($, e) => { seen[e.tool_use_id] = (e as { effort?: unknown }).effort; return { result: {} as never } })
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  await $.session.start({ cwd: '/repo', surface: 'terminal' as const, isInteractive: true })
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.tool.call(agentCall('c1', 'coder'))
+  await $.tool.call(agentCall('p1', 'planner'))
+  await $.tool.call(agentCall('d1', 'deep'))
+  await $.tool.call({ ...agentCall('d2', 'deep'), effort: 'max' })
+  await $.tool.call(agentCall('x1', 'Explore'))
+  expect(seen).toEqual({ c1: 'high', p1: 'high', d1: 'medium', d2: 'max', x1: undefined })
+  cfg = 'not json'
+  await $.session.start({ cwd: '/repo', surface: 'terminal' as const, isInteractive: true })
+  await $.tool.call(agentCall('c3', 'coder'))
+  expect(seen.c3).toBe('medium')
 })
 
 test('two Agent calls in flight show the later one; the earlier finishing does not drop to the main session', { plugins: [probePlugin] }, async ($, on) => {
@@ -367,6 +390,7 @@ function session(on: Parameters<TestBody>[1], model = 'claude-haiku-5-5', surfac
   const world = { model, isModelBroken: false, writes: [] as { path: string; text: string }[], toasts: [] as string[], submits: [] as unknown[] }
   on('session.model', async () => { if (world.isModelBroken) throw new Error('no model'); return { value: world.model } })
   on('session.surfaces', async () => ({ value: surfaces }))
+  on('session.id', async () => ({ value: 's1' }))
   on('fs.write', async ($, e) => { world.writes.push({ path: e.path, text: e.text }); return { value: undefined } })
   on('ui.toast', async ($, e) => { world.toasts.push(e.text); return { value: undefined } })
   on('prompt.submit', async ($, e) => { world.submits.push(e); return { text: e.text, context: e.context } })
@@ -389,7 +413,7 @@ test('a Haiku session gets the checklist, one block per prompt; /spick off swaps
   const world = session(on)
   await $.session.start(START)
   await until(() => world.writes.length > 0)
-  expect(world.writes).toEqual([{ path: '/h/.claude/.spick-mod-active', text: new Date(1000).toISOString() }])
+  expect(world.writes).toEqual([{ path: '/h/.claude/spick/mod-active/s1', text: new Date(1000).toISOString() }])
 
   expect(isChecklist(await contextOf($))).toBe(true)
   expect((await $.command.run({ command: 'spick', args: 'off', ...RUN })).text).toBe('spick: routing off')
@@ -620,6 +644,22 @@ test('a model change through settings by the user turns routing off; the same va
   expect(await contextOf($)).toEqual([OFF])
 })
 
+test('CLAUDE_CONFIG_DIR moves the marker, the quota cache and spick.json; HOME is then not used for them', async ($, on) => {
+  mock.clock(on, { now: Date.parse('2026-10-13T15:34:00Z') })
+  mock.store(on)
+  mock.env(on, { HOME: '/h', CLAUDE_CONFIG_DIR: '/cfg' })
+  const world = session(on)
+  const reads: string[] = []
+  const cache = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"codex","plan":"Pro Lite","sampled_at":"2026-10-13T15:29:00Z","windows":[{"name":"7d","used_pct":53,"resets_at":"2026-10-20T05:38:29Z","reset":false}]}]}'
+  on('fs.read', async (_$, e) => { reads.push(e.path); return e.path === '/cfg/spick/quota.json' ? { value: cache } : { deny: 'missing' } })
+  await $.session.start(START)
+  await until(() => world.writes.length > 0)
+  expect(world.writes.map(w => w.path)).toEqual(['/cfg/spick/mod-active/s1'])
+  expect(((await contextOf($))[0] ?? '').split('\n').at(-1)).toBe('Quota (cache 4m old): codex Pro Lite: 7d 53% (resets in 6d).')
+  expect(reads).toContain('/cfg/spick.json')
+  expect(reads.filter(r => r.startsWith('/h/'))).toEqual([])
+})
+
 test('the marker is refreshed at most hourly from prompt.submit', async ($, on) => {
   const clock = mock.clock(on, { now: 1000 })
   mock.store(on)
@@ -691,7 +731,7 @@ test('the quota line from the cache file is the checklist\'s last line; with no 
   mock.env(on, { HOME: '/h' })
   session(on)
   let cache: string | null = '{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"codex","plan":"Pro Lite","sampled_at":"2026-10-13T15:29:00Z","windows":[{"name":"7d","used_pct":53,"resets_at":"2026-10-20T05:38:29Z","reset":false}]}]}'
-  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' && cache !== null ? { value: cache } : { deny: 'missing' }))
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' && cache !== null ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const withLine = await contextOf($)
   expect(withLine.length).toBe(1)
@@ -709,7 +749,7 @@ test('registry lanes with facts and no windows reach the checklist with their fa
   session(on)
   const lane = (id: string, facts: string) => `{"provider":"${id}","plan":null,"sampled_at":"2026-10-13T15:29:50Z","windows":[],"facts":${facts}}`
   const cache = `{"written_at":"2026-10-13T15:30:00Z","providers":[${lane('deepseek', '["balance 12.40 CNY"]')},${lane('kimi', '["balance 3.00 CNY"]')},${lane('openrouter', '["used 3.20 of 10.00 USD"]')},${lane('proxy', '[]')}]}`
-  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const last = ((await contextOf($))[0] ?? '').split('\n').at(-1) ?? ''
   expect(last).toBe('Quota (cache 4m old): deepseek: balance 12.40 CNY · kimi: balance 3.00 CNY · openrouter: used 3.20 of 10.00 USD · proxy: unknown (no data).')
@@ -724,7 +764,7 @@ test('lanes in the cache switch line 2 to the capability wording and add the Lan
   session(on)
   const lane = (id: string, kind: string, tags: string, data: string) => `{"id":"${id}","kind":"${kind}","tags":["${tags}"],"data":"${data}"}`
   let cache = `{"written_at":"2026-10-13T15:30:00Z","providers":[{"provider":"glm","facts":["no meter (declared plan only)"]}],"lanes":[${lane('gemini', 'cli-subscription', 'search', 'public')},${lane('glm', 'api-key', 'cheap', 'text')}]}`
-  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-quota.json' ? { value: cache } : { deny: 'missing' }))
+  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick/quota.json' ? { value: cache } : { deny: 'missing' }))
   await $.session.start(START)
   const lines = ((await contextOf($))[0] ?? '').split('\n')
   // item 2 is a block of seven lines (head, five bullets, tail); the registry swaps its lane bullet
@@ -837,7 +877,7 @@ test('a hinted verdict answered by the main session alone is blocked once at sto
   await $.turn.start({ text, turnId: 't1' })
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'wc -l a b' })
   const r = await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })
-  expect(r.block).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and nothing was delegated this turn')
+  expect(r.block).toContain('spick gate: this prompt was hinted as a verdict (对比, 差距) and no deep run completed this turn')
   expect(r.block).toContain('dispatch Agent(deep)')
   expect(r.block).toContain('`Kept:`')
   expect(world.toasts).toContain('spick: gate — verdict kept by the triage session; sent back once')
@@ -860,14 +900,14 @@ test('the gate stays quiet when something was delegated, on a short reply or a K
   await $.session.start(START)
   const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg: string) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
-  // delegated to an Agent: no gate
+  // delegated to deep: no gate
   await turn('t1', VERDICT)
   await $.tool.call({ ...agentCall('a1', 'deep'), model: 'opus', effort: 'high' })
   expect(await stop(LONG_REPLY)).toBeUndefined()
   await $.turn.complete({ turnId: 't1', ...DONE })
-  // delegated to an outside CLI: no gate
-  await turn('t2', VERDICT)
-  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'agy -p "why" --model gemini-3.8-flash --effort low' })
+  // a review prompt reviewed by Codex: no gate
+  await turn('t2', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'git diff | codex exec --sandbox read-only "Review this diff"' })
   expect(await stop(LONG_REPLY)).toBeUndefined()
   await $.turn.complete({ turnId: 't2', ...DONE })
   // a short reply with no tool call is a question back: no gate; a long one with no tool call is a verdict: gated
@@ -907,15 +947,65 @@ test('the gate stays quiet when something was delegated, on a short reply or a K
   expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(1)
 })
 
-test('each gate firing and what became of it is a line in ~/.claude/spick-gate.jsonl; design words are never gated', async ($, on) => {
+test('the gate asks for the role the hint names: deep that finished or still runs satisfies it; a coder, a search lane, a refused or failed deep does not', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  mock.store(on)
+  mock.env(on, { HOME: '/h' })
+  session(on)
+  on('classic.Stop', async () => ({}))
+  on('turn.start', async ($, e) => ({ turnId: e.turnId }))
+  on('turn.complete', async ($, e) => ({ text: e.answer }))
+  on('agent.spawn', async ($, e) => ({ model: 'claude-opus-5-5', agentId: `ag-${e.tool_use_id}` }))
+  on('tool.call', async ($, e) => {
+    if (e.tool_use_id.startsWith('refused')) return { deny: 'not allowed' }
+    if (e.tool_use_id.startsWith('failed')) return { isError: true as const, result: 'boom', text: 'boom' }
+    return { result: {} as never }
+  })
+  await $.session.start(START)
+  const turn = async (id: string, text = VERDICT) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
+  const stop = async () => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: LONG_REPLY })).block
+  const spawn = (id: string, background: boolean) => $.agent.spawn({ tool_use_id: id, prompt: 'p', description: 'd', subagentType: 'deep', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background, fork: false })
+  const cases: [string, () => Promise<unknown>, boolean][] = [
+    ['a coder', () => $.tool.call({ ...agentCall('c1', 'coder') }), true],
+    ['a search lane', () => $.tool.call({ tool: 'Bash', tool_use_id: 's1', command: 'agy -p "why" --model gemini-3.8-flash' }), true],
+    ['a refused deep', () => $.tool.call({ ...agentCall('refused1', 'deep') }), true],
+    ['a failed deep', () => $.tool.call({ ...agentCall('failed1', 'deep') }), true],
+    ['a background deep still running', async () => { await spawn('bg1', true); await $.tool.call({ ...agentCall('bg1', 'deep'), run_in_background: true }) }, false],
+    ['a background deep that died before stop', async () => {
+      await spawn('bg2', true)
+      await $.tool.call({ ...agentCall('bg2', 'deep'), run_in_background: true })
+      await $.turn.complete({ turnId: 'sub', agentId: 'ag-bg2', answer: '', durationMs: 1, isAborted: false, reason: 'error' })
+    }, true],
+    ['a foreground deep whose subagent answered', async () => {
+      await spawn('fg1', false)
+      await $.turn.complete({ turnId: 'sub', agentId: 'ag-fg1', ...DONE })
+      await $.tool.call({ ...agentCall('fg1', 'deep') })
+    }, false],
+  ]
+  for (const [i, [name, act, gated]] of cases.entries()) {
+    await turn(`t${i}`)
+    await act()
+    const block = await stop()
+    expect([name, block === undefined ? 'quiet' : block.includes('no deep run completed') ? 'gated' : block]).toEqual([name, gated ? 'gated' : 'quiet'])
+    await $.turn.complete({ turnId: `t${i}`, ...DONE })
+  }
+  // a review prompt: deep satisfies it; a search lane does not, and the reason names the review lane
+  await turn('r1', 'review this diff please')
+  await $.tool.call({ ...agentCall('d9', 'deep') })
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 'r1', ...DONE })
+  await turn('r2', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 's9', command: 'agy -p "check"' })
+  expect(await stop()).toContain('hinted as a review (review) and no review lane call returned cleanly and no deep run completed')
+})
+
+test('each gate firing and what became of it is in the turn record\'s gateEvents; design words are never gated', async ($, on) => {
   mock.clock(on, { now: Date.parse('2026-10-16T10:00:00Z') })
   mock.store(on)
   mock.env(on, { HOME: '/h' })
   const world = session(on)
-  // the log as last written (session() records every write), a foreign line in it from the start
-  const logText = () => world.writes.filter(w => w.path === '/h/.claude/spick-gate.jsonl').at(-1)?.text ?? 'not json\n'
-  on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick-gate.jsonl' ? { value: logText() } : { deny: 'missing' }))
-  on('session.id', async () => ({ value: 's1' }))
+  const lines = () => (world.writes.filter(w => w.path === '/h/.claude/spick/turns/s1.jsonl').at(-1)?.text ?? '').split('\n').filter(Boolean).map(l => JSON.parse(l) as { turnId: string; gateEvents: { kind: string; words: string[]; outcome: string }[]; gate: unknown; kept: string | null })
+  on('fs.read', async (_$, e) => { const w = world.writes.filter(x => x.path === e.path).at(-1); return w ? { value: w.text } : { deny: 'missing' } })
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
@@ -923,33 +1013,33 @@ test('each gate firing and what became of it is a line in ~/.claude/spick-gate.j
   await $.session.start(START)
   const turn = async (id: string, text: string) => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg: string, active = false) => (await $.classic.Stop({ stop_hook_active: active as false, last_assistant_message: msg })).block
-  const lines = () => parseGateLog(logText())
   // sent back, then kept with a Kept: line
   await turn('t1', VERDICT)
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'diff a b' })
   expect(await stop(LONG_REPLY)).toContain('spick gate')
-  expect(lines()).toEqual([{ at: '2026-10-16T10:00:00.000Z', sessionId: 's1', kind: 'judgement', words: ['为什么'], outcome: 'sent-back' }])
-  expect(logText().startsWith('not json\n')).toBe(true)
   expect(await stop(LONG_REPLY + '\nKept: the deliverable is a diff.', true)).toBeUndefined()
-  expect(lines().map(l => l.outcome)).toEqual(['sent-back', 'kept'])
-  // a third stop of the same turn logs nothing more
+  // a third stop of the same turn records nothing more
   await stop(LONG_REPLY + '\nKept: again.', true)
-  expect(lines().length).toBe(2)
-  await $.turn.complete({ turnId: 't1', ...DONE })
+  await $.turn.complete({ turnId: 't1', ...DONE, answer: LONG_REPLY + '\nKept: the deliverable is a diff.' })
+  expect(lines()[0]?.gateEvents).toEqual([
+    { at: '2026-10-16T10:00:00.000Z', kind: 'judgement', words: ['为什么'], outcome: 'sent-back' },
+    { at: '2026-10-16T10:00:00.000Z', kind: 'judgement', words: ['为什么'], outcome: 'kept' },
+  ])
+  expect(lines()[0]).toMatchObject({ gate: { kind: 'judgement', outcome: 'kept' }, kept: 'Kept: the deliverable is a diff.' })
   // sent back, then delegated to deep
   await turn('t2', 'review this diff please')
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'git diff' })
   expect(await stop(LONG_REPLY)).toContain('spick gate')
   await $.tool.call({ ...agentCall('a2', 'deep'), model: 'opus', effort: 'medium' })
   await stop(LONG_REPLY, true)
-  expect(lines().slice(2).map(l => [l.kind, l.outcome])).toEqual([['review', 'sent-back'], ['review', 'delegated']])
   await $.turn.complete({ turnId: 't2', ...DONE })
-  // design words alone: a Hint line, never a send-back, nothing logged
+  expect(lines()[1]?.gateEvents.map(g => [g.kind, g.outcome])).toEqual([['review', 'sent-back'], ['review', 'delegated']])
+  // design words alone: a Hint line, never a send-back, nothing recorded
   await turn('t3', '这个功能怎么设计，where is the design doc')
   await $.tool.call({ tool: 'Bash', tool_use_id: 'b3', command: 'ls docs' })
   expect(await stop(LONG_REPLY)).toBeUndefined()
   await $.turn.complete({ turnId: 't3', ...DONE })
-  expect(lines().length).toBe(4)
+  expect(lines()[2]).toMatchObject({ turnId: 't3', gateEvents: [], gate: null, kept: null })
 })
 
 test('gate off persists to the store and comes back at the next session.start', async ($, on) => {
@@ -990,53 +1080,72 @@ async function guardWorld($: Engine, on: Parameters<TestBody>[1], model = 'claud
   const world = session(on, model)
   on('fs.read', async (_$, e) => (e.path === '/h/.claude/spick.json' && spickJson !== null ? { value: spickJson } : { deny: 'missing' }))
   const ran: string[] = []
+  /** Bash commands that exit non-zero (an error result), and ones held until the test releases them */
+  const failing = new Set<string>()
+  const held = new Map<string, Promise<void>>()
   on('classic.Stop', async () => ({}))
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
   on('tool.call', async ($, e) => {
     const p = (e as { file_path?: string; notebook_path?: string }).file_path ?? (e as { notebook_path?: string }).notebook_path
     if (p) ran.push(p)
+    const command = (e as { command?: string }).command
+    if (command !== undefined) {
+      await held.get(command)
+      if (failing.has(command)) return { isError: true as const, result: 'Exit code 1', text: 'Exit code 1\nFAILED test_a.py::test_x' }
+    }
     return { result: {} as never }
   })
   await $.session.start(START)
   const turn = async (id: string, text = 'tidy the module') => { await $.prompt.submit({ ...PROMPT, text }); await $.turn.start({ text, turnId: id }) }
   const stop = async (msg = CHECKED) => (await $.classic.Stop({ ...GATE_STOP, last_assistant_message: msg })).block
   const run = async (args: string) => (await $.command.run({ command: 'spick', args, ...RUN })).text
-  return { world, ran, turn, stop, run }
+  return { world, ran, turn, stop, run, failing, held }
 }
 
-test('the guard refuses the main session\'s fourth distinct source file in a turn, naming the three, with a toast and an edit cap note', { plugins: [probePlugin] }, async ($, on) => {
+test('the guard refuses the main session\'s second distinct source file in a turn, naming the first, with a toast and an edit cap note', { plugins: [probePlugin] }, async ($, on) => {
   const { world, ran, turn } = await guardWorld($, on)
   await turn('t1')
-  for (const [i, f] of ['/repo/a.py', '/repo/b.ts', '/repo/c.go'].entries()) expect((await $.tool.call(edit(`e${i}`, f))).deny).toBeUndefined()
-  const r = await $.tool.call(edit('e4', '/repo/d.rs'))
-  expect(r.deny).toContain('spick guard')
-  for (const f of ['/repo/a.py', '/repo/b.ts', '/repo/c.go']) expect(r.deny).toContain(f)
+  expect((await $.tool.call(edit('e1', '/repo/a.py'))).deny).toBeUndefined()
+  const r = await $.tool.call(edit('e2', '/repo/b.ts'))
+  expect(r.deny).toContain('spick guard: the triage session already edited /repo/a.py itself this turn')
   expect(r.deny).toContain('Agent(coder)')
   // the refused edit never reached the tool; a Write and a NotebookEdit to a new file are refused alike
-  expect(ran).toEqual(['/repo/a.py', '/repo/b.ts', '/repo/c.go'])
-  expect((await $.tool.call(write('w5', '/repo/e.swift'))).deny).toContain('spick guard')
-  expect((await $.tool.call(notebook('n6', '/repo/f.ipynb'))).deny).toContain('spick guard')
-  expect(world.toasts.filter(t => t.startsWith('spick: guard — edit cap')).length).toBe(3)
+  expect(ran).toEqual(['/repo/a.py'])
+  expect((await $.tool.call(write('w3', '/repo/e.swift'))).deny).toContain('spick guard')
+  expect((await $.tool.call(notebook('n4', '/repo/f.ipynb'))).deny).toContain('spick guard')
+  expect(world.toasts.filter(t => t.startsWith('spick: guard — edit cap: one source file per turn')).length).toBe(3)
   expect((await probe($)).current?.note).toEqual({ kind: 'error', text: 'edit cap' })
   // the cap is per turn: the next turn starts again
   await $.turn.complete({ turnId: 't1', ...DONE })
   await turn('t2')
-  expect((await $.tool.call(edit('e7', '/repo/d.rs'))).deny).toBeUndefined()
+  expect((await $.tool.call(edit('e5', '/repo/b.ts'))).deny).toBeUndefined()
 })
 
-test('the guard lets through a file already edited, a subagent\'s edits, and paths that are not source', async ($, on) => {
+test('the guard lets through the file already edited, a subagent\'s edits, and paths that are not source', async ($, on) => {
   const { ran, turn } = await guardWorld($, on)
   await turn('t1')
-  for (const [i, f] of ['/repo/a.py', '/repo/b.py', '/repo/c.py'].entries()) await $.tool.call(edit(`e${i}`, f))
-  // the same file a fourth, fifth time: still one of the three
-  expect((await $.tool.call(edit('e4', '/repo/a.py'))).deny).toBeUndefined()
-  expect((await $.tool.call(write('w5', '/repo/b.py'))).deny).toBeUndefined()
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  // the same file a second, third time: still the one
+  expect((await $.tool.call(edit('e2', '/repo/a.py'))).deny).toBeUndefined()
+  expect((await $.tool.call(write('w3', '/repo/a.py'))).deny).toBeUndefined()
   // a subagent's edits never count against the main session's cap
   for (const f of ['/repo/d.py', '/repo/e.py', '/repo/f.py', '/repo/g.py']) expect((await $.tool.call(edit(`s-${f}`, f, 'a1'))).deny).toBeUndefined()
-  // notes, data and .claude/ are not source
-  for (const f of ['/repo/README.md', '/repo/data.json', '/repo/notes.txt', '/repo/.claude/settings.local.py']) expect((await $.tool.call(edit(`n-${f}`, f))).deny).toBeUndefined()
-  expect(ran).toHaveLength(13)
+  // notes, data and a leading .claude/ are not source
+  for (const f of ['/repo/README.md', '/repo/data.csv', '/repo/notes.txt', '/repo/.claude/settings.local.py']) expect((await $.tool.call(edit(`n-${f}`, f))).deny).toBeUndefined()
+  expect(ran).toHaveLength(11)
+})
+
+test('a worktree under .claude/worktrees/ is source: its second file is refused (regression: v1 skipped any .claude/ path)', async ($, on) => {
+  const { turn } = await guardWorld($, on)
+  await turn('t1')
+  expect((await $.tool.call(edit('e1', '/repo/.claude/worktrees/x/src/a.py'))).deny).toBeUndefined()
+  expect((await $.tool.call(edit('e2', '/repo/.claude/worktrees/x/src/b.py'))).deny).toContain('spick guard')
+  // json, yaml and toml count as source too
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  await turn('t2')
+  await $.tool.call(edit('e3', '/repo/pyproject.toml'))
+  expect((await $.tool.call(edit('e4', '/repo/.github/workflows/ci.yml'))).deny).toContain('spick guard')
 })
 
 test('the guard lets every edit through when it is off, when routing is off, and in a session that is not Haiku', async ($, on) => {
@@ -1051,7 +1160,7 @@ test('the guard lets every edit through when it is off, when routing is off, and
   expect(await run('guard off')).toBe('spick: guard off')
   expect(await four('t1')).toBe(0)
   expect(await run('guard on')).toBe('spick: guard on')
-  expect(await four('t2')).toBe(1)
+  expect(await four('t2')).toBe(3)
   expect(await run('off')).toBe('spick: routing off')
   expect(await four('t3')).toBe(0)
   await run('on')
@@ -1060,7 +1169,7 @@ test('the guard lets every edit through when it is off, when routing is off, and
   expect(await four('t4')).toBe(0)
   // forced routing on Opus: the guard applies
   await run('force')
-  expect(await four('t5')).toBe(1)
+  expect(await four('t5')).toBe(3)
 })
 
 test('a turn that edited source and ran no check is sent back once at stop, with a toast; the next stop passes', async ($, on) => {
@@ -1068,10 +1177,10 @@ test('a turn that edited source and ran no check is sent back once at stop, with
   await turn('t1')
   await $.tool.call(edit('e1', '/repo/a.py'))
   const block = await stop()
-  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py) and no check ran')
+  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py) and no check passed after the last edit')
   expect(block).toContain('`Unchecked:`')
   expect(block).toContain('`/goal <check command>; stop after 10 attempts`')
-  expect(world.toasts).toContain('spick: guard — source edited and no check ran; sent back once')
+  expect(world.toasts).toContain('spick: guard — source edited, no passing check after it; sent back once')
   expect((await $.classic.Stop({ stop_hook_active: true, last_assistant_message: CHECKED })).block).toBeUndefined()
   expect(await stop()).toBeUndefined()
   await $.turn.complete({ turnId: 't1', ...DONE })
@@ -1123,6 +1232,78 @@ test('the check before the turn ends passes after a check command, on an Uncheck
   expect(await stop()).toContain('spick guard')
 })
 
+test('a check counts only when it passed and came after the last source edit, with none landing while it ran', async ($, on) => {
+  const { turn, stop, failing, held } = await guardWorld($, on)
+  // a failing check (an error result) does not count; the same check passing afterwards does
+  failing.add('pytest -q')
+  await turn('t1')
+  await $.tool.call(edit('e1', '/repo/a.py'))
+  await $.tool.call(bash('b1', 'pytest -q'))
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  failing.clear()
+  await turn('t2')
+  await $.tool.call(edit('e2', '/repo/a.py'))
+  await $.tool.call(bash('b2', 'pytest -q'))
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  // a check before the last edit does not cover it
+  await turn('t3')
+  await $.tool.call(edit('e3', '/repo/a.py'))
+  await $.tool.call(bash('b3', 'pytest -q'))
+  await $.tool.call(edit('e4', '/repo/a.py'))
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't3', ...DONE })
+  // an edit (a subagent's) that lands while the check runs leaves the turn unchecked
+  await turn('t4')
+  await $.tool.call(edit('e5', '/repo/a.py'))
+  let release = () => {}
+  held.set('npm test', new Promise<void>(r => { release = r }))
+  const check = $.tool.call(bash('b4', 'npm test'))
+  await tick()
+  await $.tool.call(edit('e6', '/repo/b.py', 'a1'))
+  release()
+  await check
+  expect(await stop()).toContain('spick guard')
+  await $.turn.complete({ turnId: 't4', ...DONE })
+})
+
+test('the main loop\'s second failure of the same check carries one escalation line; a different check, a pass or a subagent\'s does not', async ($, on) => {
+  const { turn, failing } = await guardWorld($, on)
+  const ESC = 'spick: this check failed 2 times this turn'
+  const ctx = async (id: string, command: string, agentId?: string) => ((await $.tool.call(bash(id, command, agentId))) as { context?: readonly string[] }).context ?? []
+  failing.add('pytest -q tests/a.py')
+  failing.add('pytest tests/a.py -x')
+  failing.add('pytest tests/b.py')
+  await turn('t1')
+  expect(await ctx('b1', 'pytest -q tests/a.py')).toEqual([])
+  // another target fails once: no line
+  expect(await ctx('b2', 'pytest tests/b.py')).toEqual([])
+  // a subagent's failures of the same check do not count for the main session
+  expect(await ctx('b3', 'pytest -q tests/a.py', 'a1')).toEqual([])
+  // the same check (flags aside) fails a second time: the line rides on that result
+  const second = await ctx('b4', 'pytest tests/a.py -x')
+  expect(second.length).toBe(1)
+  expect(second[0]).toContain(`${ESC} (pytest tests/a.py -x)`)
+  // once per turn
+  expect(await ctx('b5', 'pytest -q tests/a.py')).toEqual([])
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  // a new turn counts from zero
+  await turn('t2')
+  expect(await ctx('b6', 'pytest -q tests/a.py')).toEqual([])
+})
+
+test('a runner named in an argument, a masked exit status or a version query is no check at stop', async ($, on) => {
+  const { turn, stop } = await guardWorld($, on)
+  for (const [i, c] of ['echo pytest', 'grep pytest README', 'pytest || true', 'pytest --version'].entries()) {
+    await turn(`t${i}`)
+    await $.tool.call(edit(`e${i}`, '/repo/a.py'))
+    await $.tool.call(bash(`b${i}`, c))
+    expect(await stop()).toContain('spick guard')
+    await $.turn.complete({ turnId: `t${i}`, ...DONE })
+  }
+})
+
 test('a coder that edited source and ran no check still sends the turn back, though something was delegated', async ($, on) => {
   const { world, turn, stop } = await guardWorld($, on)
   await turn('t1', 'rename the helper in a.py')
@@ -1153,14 +1334,18 @@ test('a check command the project declares in spick.json counts; a pattern that 
   expect(await stop(LONG_REPLY)).toContain('spick guard')
 })
 
-test('the gate and the guard\'s check send a turn back once between them', async ($, on) => {
+test('the gate and the guard\'s check send a turn back once between them, with both reasons in the one block', async ($, on) => {
   const { world, turn, stop } = await guardWorld($, on)
   await turn('t1', VERDICT)
   await $.tool.call(edit('e1', '/repo/a.py'))
-  expect(await stop(LONG_REPLY)).toContain('spick gate')
+  const block = await stop(LONG_REPLY)
+  expect(block).toContain('spick gate')
+  expect(block).toContain('spick guard: source files were edited this turn (/repo/a.py)')
+  expect(block).toContain('spick sends a turn back once')
   // the second stop of the turn: neither sends it back again
   expect(await stop(LONG_REPLY)).toBeUndefined()
-  expect(world.toasts.filter(t => t.startsWith('spick: guard')).length).toBe(0)
+  expect(world.toasts.filter(t => t.startsWith('spick: guard')).length).toBe(1)
+  expect(world.toasts.filter(t => t.startsWith('spick: gate')).length).toBe(1)
 })
 
 test('guard off persists to the store and comes back at the next session.start', async ($, on) => {
@@ -1185,101 +1370,154 @@ test('guard off persists to the store and comes back at the next session.start',
   await $.turn.complete({ turnId: 't1', ...DONE })
 })
 
-// --- spend: one file per session under ~/.claude/spick-spend/ -------------------------------------------------------------
+// --- the turn record: one file per session under <state>/turns/ -----------------------------------------------------
 
-type SpendDoc = { sessionId: string; cwd: string; startedAt: string; rows: Record<string, unknown>[] }
+type Line = Record<string, unknown> & { turnId: string; delegates: Record<string, unknown>[] }
 
-/** a session whose id is s1 and whose HOME is /h; every fs.write recorded (never the real file), a previous file served when given */
-function spendWorld(on: Parameters<TestBody>[1], previous: string | null = null) {
+/** a session whose id is s1 and whose HOME is /h; every fs.write recorded (never the real file) and served back to reads */
+function recordWorld(on: Parameters<TestBody>[1], previous: string | null = null) {
   const world = { writes: [] as { path: string; text: string }[], isWriteBroken: false }
   mock.env(on, { HOME: '/h' })
   mock.store(on)
   on('session.id', async () => ({ value: 's1' }))
   on('session.start', async ($, e) => ({ cwd: e.cwd }))
   on('fs.write', async ($, e) => { if (world.isWriteBroken) return { deny: 'read-only' }; world.writes.push({ path: e.path, text: e.text }); return { value: undefined } })
-  on('fs.read', async ($, e) => (e.path === '/h/.claude/spick-spend/s1.json' && previous !== null ? { value: previous } : { deny: 'missing' }))
+  on('fs.read', async ($, e) => {
+    const w = world.writes.filter(x => x.path === e.path).at(-1)
+    if (w) return { value: w.text }
+    return e.path === '/h/.claude/spick/turns/s1.jsonl' && previous !== null ? { value: previous } : { deny: 'missing' }
+  })
   on('turn.start', async ($, e) => ({ turnId: e.turnId }))
   on('turn.complete', async ($, e) => ({ text: e.answer }))
-  const spendWrites = () => world.writes.filter(w => w.path.includes('/spick-spend/'))
-  const lastDoc = (): SpendDoc | undefined => { const w = spendWrites().at(-1); return w ? JSON.parse(w.text) as SpendDoc : undefined }
-  return { world, spendWrites, lastDoc }
+  on('prompt.submit', async ($, e) => ({ text: e.text, context: e.context }))
+  const turnWrites = () => world.writes.filter(w => w.path.includes('/spick/turns/'))
+  const lines = (): Line[] => (turnWrites().at(-1)?.text ?? '').split('\n').filter(Boolean).map(l => JSON.parse(l) as Line)
+  return { world, turnWrites, lines }
 }
 
-test('a subagent turn, a CLI call and the main turn each write a row to ~/.claude/spick-spend/<session>.json, as the totals count them', { plugins: [probePlugin] }, async ($, on) => {
+test('a main turn writes one line to <state>/turns/<session>.jsonl: delegates with status and usage, edits, checks, usage, context', { plugins: [probePlugin] }, async ($, on) => {
   mock.clock(on, { now: 1000 })
-  const { spendWrites, lastDoc } = spendWorld(on)
+  const { turnWrites, lines } = recordWorld(on)
   const tools = gatedTools(on)
   on('agent.spawn', async () => ({ model: 'claude-haiku-5-5', agentId: 'a1' }))
+  on('turn.step', async function* ($, e) {
+    return { turnId: e.turnId, index: e.index, answer: '', toolUses: [], stopReason: 'end_turn' as const, usage: { model: e.model, input_tokens: 100, output_tokens: 10, cache_read_input_tokens: 40_000, cache_creation_input_tokens: 2000 } }
+  })
   await $.session.start(START)
-  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.prompt.submit({ text: 'fix the bug in a.py', wait: false, origin: { kind: 'composer' as const } })
+  await $.turn.start({ text: 'fix the bug in a.py', turnId: 't1' })
+  for await (const _ of $.turn.step({ turnId: 't1', index: 0, model: 'claude-haiku-5-5', effort: 'medium', messageCount: 1 })) { /* drain */ }
 
   const agent = $.tool.call({ ...agentCall('tu1', 'coder'), model: 'haiku', effort: 'high' })
   await tools.held('tu1')
   await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'd', subagentType: 'coder', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: false, fork: false })
+  const sub = $.tool.call({ tool: 'Edit', tool_use_id: 'e1', file_path: '/repo/b.py', old_string: 'a', new_string: 'b', agentId: 'a1' })
+  await tools.held('e1')
+  tools.release('e1')
+  await sub
   await $.turn.complete({ turnId: 'sub1', agentId: 'a1', ...DONE, usage: { ...USAGE, model: 'claude-haiku-5-5' } })
   tools.release('tu1')
   await agent
-
+  const edit = $.tool.call({ tool: 'Edit', tool_use_id: 'e2', file_path: '/repo/a.py', old_string: 'a', new_string: 'b' })
+  await tools.held('e2')
+  tools.release('e2')
+  await edit
   const cli = $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'agy -p "look it up" --model gemini-3.8-flash --effort low' })
   await tools.held('b1')
   tools.release('b1')
   await cli
-  await $.turn.complete({ turnId: 't1', ...DONE })
+  const check = $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'cd /repo && python3 -m pytest -q' })
+  await tools.held('b2')
+  tools.release('b2')
+  await check
+  await $.turn.complete({ turnId: 't1', ...DONE, durationMs: 9000 })
 
-  // one write per row, each with every row so far, all to the one file
-  expect(spendWrites().map(w => w.path)).toEqual(Array(3).fill('/h/.claude/spick-spend/s1.json'))
-  const doc = lastDoc()!
-  expect(doc).toMatchObject({ sessionId: 's1', cwd: '/repo', startedAt: new Date(1000).toISOString() })
-  expect(doc.rows).toEqual([
-    { at: new Date(1000).toISOString(), turnId: 'sub1', agentId: 'a1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: expect.any(Number) },
-    { at: new Date(1000).toISOString(), turnId: 't1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null },
-    { at: new Date(1000).toISOString(), turnId: 't1', lane: 'main session', model: 'claude-sonnet-5-5', inputTokens: 1_000_000, outputTokens: 100_000, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: 3 },
+  expect(turnWrites().map(w => w.path)).toEqual(['/h/.claude/spick/turns/s1.jsonl'])
+  const [line] = lines()
+  expect(line).toMatchObject({
+    schemaVersion: 2, at: new Date(1000).toISOString(), sessionId: 's1', turnId: 't1', cwd: '/repo', mainModel: 'claude-sonnet-5-5', routing: 'on',
+    hint: ['code'], kept: null, gate: null, gateEvents: [],
+    edits: { main: 1, agents: 1, files: ['/repo/b.py', '/repo/a.py'] },
+    check: { ran: true, passed: true, afterLastEdit: true, command: 'python3 -m pytest -q' },
+    escalation: null,
+    usage: { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0, costUsd: 3 },
+    context: { lastInput: 42_100 }, ms: 9000,
+  })
+  expect(line!.delegates).toEqual([
+    { id: 'tu1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', status: 'completed', ok: true, startedAt: new Date(1000).toISOString(), ms: 0,
+      usage: { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0, costUsd: expect.any(Number) }, costUsd: expect.any(Number) },
+    { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
   ])
-  // the same numbers as the pane's totals
-  const t = (await probe($)).totals!
-  for (const r of doc.rows) {
-    const lane = t[r.lane as string]!
-    expect(r.inputTokens).toBe(lane.inputTokens)
-    expect(r.outputTokens).toBe(lane.outputTokens)
-    expect(r.costUsd).toBe(lane.costUsd)
-  }
+  expect((line as { agentUsage: { input: number } }).agentUsage.input).toBe(1_000_000)
+  expect((line as { checks: unknown[] }).checks).toEqual([{ command: 'python3 -m pytest -q', startedAt: new Date(1000).toISOString(), finishedAt: new Date(1000).toISOString(), exitOk: true, editsDuring: 0, coversTurn: true }])
+  // the pane's totals still count every turn
+  expect((await probe($)).totals?.coder?.inputTokens).toBe(1_000_000)
 })
 
-test('a turn with no usage (interrupted, refused, an API error) writes no row; a failing write leaves the totals alone', { plugins: [probePlugin] }, async ($, on) => {
+test('a background agent that finishes after its main turn\'s line adds a late line with the same turnId and its usage', async ($, on) => {
   mock.clock(on, { now: 1000 })
-  const { world, spendWrites, lastDoc } = spendWorld(on)
+  const { lines } = recordWorld(on)
+  on('tool.call', async () => ({ result: {} as never }))
+  on('agent.spawn', async () => ({ model: 'claude-opus-5-5', agentId: 'bg' }))
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.agent.spawn({ tool_use_id: 'tu1', prompt: 'p', description: 'd', subagentType: 'deep', provider: { plugin: 'engine', tier: 'core' }, parentModel: 'claude-haiku-5-5', background: true, fork: false })
+  await $.tool.call({ ...agentCall('tu1', 'deep'), run_in_background: true })
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  expect(lines()[0]?.delegates[0]).toMatchObject({ id: 'tu1', lane: 'deep', status: 'running', ok: false, ms: null, usage: null })
+  await $.turn.complete({ turnId: 'sub', agentId: 'bg', ...DONE, usage: { ...USAGE, model: 'claude-opus-5-5' } })
+  const late = lines()[1] as Record<string, unknown> & { delegate: Record<string, unknown> }
+  expect(late).toMatchObject({ schemaVersion: 2, late: true, sessionId: 's1', turnId: 't1' })
+  expect(late.delegate).toMatchObject({ id: 'tu1', lane: 'deep', status: 'completed', ok: true, usage: { input: 1_000_000, output: 100_000 } })
+})
+
+test('a failed check, then the second failure, are in the record with the escalation and whether a coder followed', async ($, on) => {
+  mock.clock(on, { now: 1000 })
+  const { lines } = recordWorld(on)
+  on('tool.call', async ($, e) => (e.tool === 'Bash' && e.command.startsWith('pytest') ? { isError: true as const, result: 'Exit code 1', text: 'Exit code 1' } : { result: {} as never }))
+  await $.session.start(START)
+  await $.turn.start({ text: 'go', turnId: 't1' })
+  await $.tool.call({ tool: 'Edit', tool_use_id: 'e1', file_path: '/repo/a.py', old_string: 'a', new_string: 'b' })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b1', command: 'pytest -q' })
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'b2', command: 'pytest -q' })
+  await $.tool.call({ ...agentCall('c1', 'coder'), effort: 'high' })
+  await $.turn.complete({ turnId: 't1', ...DONE })
+  expect(lines()[0]).toMatchObject({ check: { ran: true, passed: false, afterLastEdit: false, command: 'pytest -q' }, escalation: { command: 'pytest -q', followed: true } })
+})
+
+test('a turn with no usage still writes its line, usage null; a failing write keeps the line for the next; a resumed file is appended to', async ($, on) => {
+  mock.clock(on, { now: 5000 })
+  const old = '{"schemaVersion":2,"turnId":"t0"}\n'
+  const { world, turnWrites, lines } = recordWorld(on, old)
   await $.session.start(START)
   await $.turn.start({ text: 'go', turnId: 't1' })
   await $.turn.complete({ turnId: 't1', answer: '', durationMs: 1, isAborted: true, reason: 'aborted' })
-  await $.turn.start({ text: 'go', turnId: 't2' })
-  await $.turn.complete({ turnId: 't2', answer: '', durationMs: 1, isAborted: false, reason: 'refusal', refusal: { category: null, explanation: null } })
-  await $.turn.start({ text: 'go', turnId: 't3' })
-  await $.turn.complete({ turnId: 't3', answer: '', durationMs: 1, isAborted: false, reason: 'error' })
-  expect(spendWrites()).toEqual([])
-  expect((await probe($)).totals ?? {}).toEqual({})
-
+  expect(lines().map(l => [l.turnId, l.usage])).toEqual([['t0', undefined], ['t1', null]])
   world.isWriteBroken = true
-  await $.turn.start({ text: 'go', turnId: 't4' })
-  await $.turn.complete({ turnId: 't4', ...DONE })
-  expect((await probe($)).totals?.['main session']?.turns).toBe(1)
-  // the row stays in memory and lands with the next write that goes through
+  await $.turn.start({ text: 'go', turnId: 't2' })
+  await $.turn.complete({ turnId: 't2', ...DONE })
+  expect(turnWrites().length).toBe(1)
   world.isWriteBroken = false
-  await $.turn.start({ text: 'go', turnId: 't5' })
-  await $.turn.complete({ turnId: 't5', ...DONE })
-  expect(lastDoc()?.rows.map(r => r.turnId)).toEqual(['t4', 't5'])
+  await $.turn.start({ text: 'go', turnId: 't3' })
+  await $.turn.complete({ turnId: 't3', ...DONE })
+  expect(lines().map(l => l.turnId)).toEqual(['t0', 't1', 't2', 't3'])
 })
 
-test('a resumed session keeps the rows its file already holds', async ($, on) => {
-  mock.clock(on, { now: 5000 })
-  const old = JSON.stringify({ sessionId: 's1', cwd: '/old', startedAt: '2026-10-01T00:00:00.000Z', rows: [{ at: '2026-10-01T00:00:01.000Z', turnId: 't0', lane: 'main session', model: 'm', inputTokens: 1, outputTokens: 2, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null }] })
-  const { lastDoc } = spendWorld(on, old)
-  await $.session.start(START)
-  await $.turn.start({ text: 'go', turnId: 't1' })
-  await $.turn.complete({ turnId: 't1', ...DONE })
-  const doc = lastDoc()!
-  expect(doc.startedAt).toBe('2026-10-01T00:00:00.000Z')
-  expect(doc.cwd).toBe('/old')
-  expect(doc.rows.map(r => r.turnId)).toEqual(['t0', 't1'])
+test('/spick audit prints what audit.py prints for the last seven days; a failure is one spick: line', async ($, on) => {
+  mock.clock(on)
+  mock.env(on, { HOME: '/h' })
+  const calls: string[][] = []
+  let exitCode = 0
+  on('process.run', async (_$, e) => {
+    calls.push([...e.argv])
+    return { value: exitCode === 0
+      ? { exitCode, stdout: 'spick audit: last 7 days, 3 turns\n', stderr: '', isStdoutTruncated: false, isStderrTruncated: false }
+      : { exitCode, stdout: '', stderr: 'audit.py: boom\n', isStdoutTruncated: false, isStderrTruncated: false } }
+  })
+  expect((await $.command.run({ command: 'spick', args: 'audit', ...RUN })).text).toBe('spick audit: last 7 days, 3 turns')
+  expect(calls).toEqual([['python3', '/h/.claude/skills/spick/scripts/audit.py', '--days', '7']])
+  exitCode = 2
+  expect((await $.command.run({ command: 'spick', args: 'audit', ...RUN })).text).toBe('spick: audit.py: boom')
 })
 
 test('/spick spend prints what spend.py prints for the last seven days; a failure is one spick: line', async ($, on) => {

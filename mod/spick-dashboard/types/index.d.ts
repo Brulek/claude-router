@@ -25,6 +25,8 @@ export type TurnRecord = {
   /** attention cause, shown in color on the band and in the pane's note column */
   note?: Note
   costUsd?: number | null
+  /** the main loop's last prompt size in tokens (input, cache read and cache write of its latest step) */
+  contextTokens?: number
 }
 
 /** a delegate (Agent or outside CLI call) the pane's Running section lists */
@@ -77,7 +79,9 @@ export type Controls = {
   manualModel: boolean
 }
 
-export type QuotaWindows = { fiveHour?: number; sevenDay?: number }
+/** a provider's meters; `sampledAt` (ms) is when the source sampled them (Claude Code's fetch, the Codex log line) */
+export type QuotaWindows = { fiveHour?: number; sevenDay?: number; sampledAt?: number }
+/** `readAt` is when the mod last read the sources (it paces re-reads); the pane shows each sample's own age */
 export type Quota = { claude: QuotaWindows | null; codex: QuotaWindows | null; readAt: number }
 
 declare module 'claude-code' {

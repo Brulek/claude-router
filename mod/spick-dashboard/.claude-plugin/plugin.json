@@ -1,7 +1,9 @@
 {
   "name": "spick-dashboard",
-  "version": "0.13.1",
-  "description": "Shows who is working now (lane, model) above the prompt, and a /spick pane with switches (routing, review, gate, guard, lanes, band), lane totals, local quota and recent turns. The switches shape the per-prompt triage checklist, which carries a keyword Hint line per prompt. The gate and the guard are the mod's only two interventions: the gate sends a hinted verdict (judgement or review words, never design words) the main session kept back once at stop time and logs each firing and its outcome to ~/.claude/spick-gate.jsonl; the guard caps the main session's own source edits at 3 files per turn and sends a turn that edited source without running a check back once at stop time. Each session's cost (one row per turn with usage, one per outside CLI call, unpriced) is written to ~/.claude/spick-spend/<session>.json; /spick spend reports the last seven days.",
-  "author": { "name": "Brulek" },
+  "version": "1.0.0",
+  "description": "Shows who is working now (lane, model, the main loop's prompt size) above the prompt, and a /spick pane with switches (routing, review, gate, guard, lanes, band), lane totals, local quota with each sample's age and recent turns. The switches shape the per-prompt triage checklist, which carries a keyword Hint line per prompt. Enforcement is on facts: the guard lets the main session edit one source file per turn (the second goes to a coder) and sends a turn back once when source was edited and no check passed after the last edit; the gate sends a turn back once when a hinted verdict's role (deep for judgement, the review lane or deep for review) did not complete and no Kept: line says why; both reasons go back in one block. A check that fails twice in a turn adds an escalation line; a coder, planner or deep call with no effort gets the default; a Haiku session past 80k tokens is warned. Each main turn is one JSON line in <config>/spick/turns/<session>.jsonl; /spick spend and /spick audit report on them.",
+  "author": {
+    "name": "Brulek"
+  },
   "types": "./types/index.d.ts"
 }

@@ -69,12 +69,15 @@ export function parseCli(command: string): CliLane | null {
     const hit = segmentLane(seg.trim().split(/\s+/).filter(Boolean))
     if (!hit) continue
     const restored = (t: string) => t.replace(/"(\d+)"/g, (_, n) => quoted[Number(n)] ?? '')
+    // a flag's value as typed, its quotes taken off: -m "grok-4.7" and --model='x' name the model, not a placeholder
+    const value = (t: string) => restored(t).replace(/^(["'])(.*)\1$/s, '$2')
     const text = hit.rest.join(' ')
     const out: CliLane = { lane: hit.lane, isReview: false }
-    const model = text.match(/(?:--model|-m)[=\s]+(\S+)/)
-    if (model?.[1]) out.model = model[1]
-    const effort = text.match(/(?:--effort|--reasoning-effort)[=\s]+(\S+)/) ?? restored(text).match(/model_reasoning_effort="?(\w+)"?/)
-    if (effort?.[1]) out.effort = effort[1]
+    const model = text.match(/(?:^|\s)(?:--model|-m)(?:=|\s+)(\S+)/)
+    if (model?.[1]) out.model = value(model[1])
+    const flag = text.match(/(?:^|\s)(?:--effort|--reasoning-effort)(?:=|\s+)(\S+)/)
+    const effort = flag ? value(flag[1]!) : restored(text).match(/model_reasoning_effort="?(\w+)"?/)?.[1]
+    if (effort) out.effort = effort
     if (hit.lane === 'Codex') {
       const prompts = [...text.matchAll(/"(\d+)"/g)].map(m => quoted[Number(m[1])] ?? '')
       out.isReview = prompts.some(p => /\breview\b/i.test(p))
@@ -84,11 +87,32 @@ export function parseCli(command: string): CliLane | null {
   return null
 }
 
-const NON_SOURCE = /\.(md|markdown|txt|json|jsonl|csv|tsv|ya?ml|toml|lock|log)$/i
-export function isSourcePath(path: string): boolean {
-  if (/(^|\/)\.claude\//.test(path)) return false
-  if (NON_SOURCE.test(path)) return false
-  return /\.[A-Za-z0-9]+$/.test(path)
+// notes, tables, logs and lock files; json, yaml and toml count as source (CI and configuration changes matter)
+const NON_SOURCE = /\.(md|markdown|txt|csv|tsv|log|lock)$/i
+const LOCK_FILES = new Set(['package-lock.json', 'npm-shrinkwrap.json', 'pnpm-lock.yaml'])
+/** build files with no extension that are code all the same */
+const EXTENSIONLESS_SOURCE = new Set(['Dockerfile', 'Makefile', 'Justfile', 'Rakefile', 'Gemfile'])
+
+/** the path relative to the session's cwd when it lies inside it, else as given; a leading ./ dropped */
+export function relativeTo(path: string, cwd = ''): string {
+  const base = cwd.replace(/\/+$/, '')
+  const rel = base && path.startsWith(`${base}/`) ? path.slice(base.length + 1) : path
+  // a git worktree under .claude/worktrees/<name>/ is a checkout of its own: judge the path inside it
+  return rel.replace(/^(\.\/)+/, '').replace(/^\.claude\/worktrees\/[^/]+\//, '')
+}
+
+/**
+ * Whether an edit to this path is a source change. Judged on the path relative to the session's cwd (and inside a
+ * worktree under .claude/worktrees/, relative to it): only a leading `.claude/` (the project's own Claude settings,
+ * plans, memory) is left out, so source in a worktree still counts, which v1's any-`.claude/` rule missed. A tool-level judgement only: Bash writes (sed -i, redirections) never reach it.
+ */
+export function isSourcePath(path: string, cwd = ''): boolean {
+  const rel = relativeTo(path, cwd)
+  if (rel.startsWith('.claude/')) return false
+  const name = rel.slice(rel.lastIndexOf('/') + 1)
+  if (EXTENSIONLESS_SOURCE.has(name)) return true
+  if (LOCK_FILES.has(name) || NON_SOURCE.test(name)) return false
+  return /\.[A-Za-z0-9]+$/.test(name)
 }
 
 /** the main session's lane name in state, totals and the pane */
@@ -113,6 +137,8 @@ export type BandView = {
   mainModel?: string
   /** routing is effectively off this session: the wordmark reads `SPICK off`, `off` in warning */
   routingOff?: boolean
+  /** the main loop's last prompt size in tokens, `ctx 84k` on the band; absent until a step reported usage */
+  contextTokens?: number
 }
 /** one provider's quota: the weekly window, else the five-hour one */
 export type QuotaMeter = { name: string; window: '7d' | '5h'; pct: number }
@@ -156,8 +182,8 @@ const segsWidth = (segs: Seg[]): number => segs.reduce((n, s) => n + displayWidt
 /** the renderer's gap={2} between the left and right groups */
 const GROUP_GAP = 2
 /** what a band too wide for its columns gives up, first to last; the wordmark and the subject never go */
-type Droppable = 'ordinal' | 'elapsed' | 'wording' | 'model'
-const DROP_ORDER: Droppable[] = ['ordinal', 'elapsed', 'wording', 'model']
+type Droppable = 'context' | 'ordinal' | 'elapsed' | 'wording' | 'model'
+const DROP_ORDER: Droppable[] = ['context', 'ordinal', 'elapsed', 'wording', 'model']
 
 /**
  * The band for a view at a width. Tiers pick the candidate segments; then the band is
@@ -177,6 +203,7 @@ export function bandSegments(v: BandView, columns: number, reserved = 0): Band {
     elapsed: v.durationMs !== undefined && !v.isIdle && columns >= 70,
     wording: true,
     model: !!v.model,
+    context: v.contextTokens !== undefined && columns >= 70,
   }
 
   const buildLeft = (): Seg[] => {
@@ -203,6 +230,7 @@ export function bandSegments(v: BandView, columns: number, reserved = 0): Band {
     }
     if (show.ordinal) parts.push([{ text: `agent ${v.agentIndex} of ${v.agents}`, style: 'dim' }])
     if (show.elapsed && v.durationMs !== undefined) parts.push([{ text: fmtDuration(v.durationMs), style: 'dim' }])
+    if (show.context && v.contextTokens !== undefined) parts.push([{ text: `ctx ${fmtTokens(v.contextTokens)}`, style: 'dim' }])
     return [...wordmark, GAP, ...parts.flatMap((p, i) => (i === 0 ? p : [SEP, ...p]))]
   }
 
@@ -384,6 +412,46 @@ export function fmtAge(ms: number): string {
   const m = Math.round(ms / 60000)
   return m < 60 ? `${m}m ago` : `${Math.floor(m / 60)}h ago`
 }
+/** a token count the way the band says it: 950, 12k, 85k, 1.2M */
+export function fmtTokens(n: number): string {
+  if (n < 1000) return String(Math.max(0, Math.round(n)))
+  if (n < 1_000_000) return `${Math.round(n / 1000)}k`
+  return `${(n / 1_000_000).toFixed(1)}M`
+}
+
+/** the main loop's prompt size from a step's usage: what the request carried, cached or not */
+export function promptTokens(u: Usage): number {
+  // the rate card goes by the whole prompt, so a cache write counts as well as a cache read and fresh input
+  return u.input_tokens + u.cache_read_input_tokens + u.cache_creation_input_tokens
+}
+
+/**
+ * Haiku 5.5 has two rate cards chosen by prompt length: $0.10 / $0.50 per MTok up to a 100K-token prompt, $0.50 /
+ * $2.50 above it (the claude-api skill's models.md and model-migration.md, Claude Code 2.1.299). Past 80k the band
+ * warns before the step, while /clear or a delegate still avoids it.
+ */
+export const HAIKU_WARN_AT = 80_000
+
+/** the band's warning for a Haiku main session whose last prompt passed HAIKU_WARN_AT; null otherwise */
+export function contextNote(tokens: number | undefined, mainModelId: string): Note | null {
+  if (tokens === undefined || tokens <= HAIKU_WARN_AT || !/haiku/i.test(mainModelId)) return null
+  return { kind: 'warning', text: `context ${fmtTokens(tokens)}: Haiku bills 5x above 100k; /clear or delegate` }
+}
+
+/**
+ * How old each provider's numbers are, as the source sampled them (never when the mod read the file: a cache read now
+ * can hold a sample from yesterday): `sampled claude 4m ago, codex 2h ago`; `no sample` when no provider has data.
+ */
+export function sampleNote(q: Quota | null | undefined, now: number, narrow = false): string {
+  if (!q) return 'not read'
+  const known = (['claude', 'codex'] as const).flatMap(name => (q[name] ? [{ name, at: q[name]!.sampledAt }] : []))
+  if (known.length === 0) return 'no sample'
+  const age = (at: number | undefined) => (at === undefined ? 'age unknown' : fmtAge(Math.max(0, now - at)))
+  // a narrow pane names the oldest sample only
+  if (narrow) return known.some(k => k.at === undefined) ? 'sample age unknown' : `sampled ${age(Math.min(...known.map(k => k.at!)))}`
+  return `sampled ${known.map(k => `${k.name} ${age(k.at)}`).join(', ')}`
+}
+
 export function fmtCost(usd: number | null): string { return usd === null ? '—' : `$${usd.toFixed(2)}` }
 
 export type Usage = { input_tokens: number; output_tokens: number; cache_read_input_tokens: number; cache_creation_input_tokens: number }

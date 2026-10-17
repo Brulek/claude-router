@@ -2,17 +2,21 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register, RenderElement, RenderSurface } from 'claude-code'
 import type { Controls, Gate, Guard, LaneInfo, LaneRow, LaneTotals, Quota, QuotaWindows, Review, RunningAgent, Routing, TurnRecord } from '../types'
 import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checklist, drawsBand, effectiveRouting, isDelivery, laneName, migrateRouting, parseGate, parseGuard, parseLaneText, parseReview, parseRouting, parseSpick } from './checklist'
-import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
+import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, sampleNote, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
-import { EDIT_CAP, UNCHECKED_RE, declaredChecks, editCapReason, isCheckCommand, uncheckedReason } from './guard'
-import { KEPT_RE, appendGateLog, gateLogPath, gateOutcome } from './gatelog'
-import type { GateLogEntry } from './gatelog'
-import { findHints, gateReason, lineOf } from './hint'
+import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, checkOf, declaredChecks, editCapReason, escalationLine, uncheckedReason } from './guard'
+import { KEPT_RE, gateFiring, gateOutcome, keptLine, roleDone, sendBackText } from './gate'
+import type { DelegateStatus } from './gate'
+import { findHints, lineOf } from './hint'
 import type { Hint } from './hint'
 import { readQuota } from './quota'
-import { parseSpendFile, spendFileText, spendPath, spendRow } from './spend'
-import type { SpendFile, SpendRow } from './spend'
+import { ZERO_USAGE, addUsage, appendLines, lateLine, lineText, turnLine, usageEntry } from './turnlog'
+import type { CheckEntry, DelegateEntry, GateEvent, UsageEntry } from './turnlog'
 import { lanesFromCache, quotaLineFromCache } from './quotaline'
+import { markerPath, spickPaths, turnsFile } from './paths'
+import { DEFAULT_EFFORTS, effortToFill, effortsFrom } from './efforts'
+import type { Efforts } from './efforts'
+import type { SpickPaths } from './paths'
 
 const P = 'spick-dashboard'
 const current = atom({ plugin: 'spick-dashboard', key: 'current' } as const, null)
@@ -47,24 +51,29 @@ async function refreshQuota($: EngineInterface, force = false): Promise<Quota> {
   return fresh
 }
 
+/** spick's paths (paths.ts): CLAUDE_CONFIG_DIR, else HOME/.claude; null when neither is set */
+async function pathsNow($: EngineInterface): Promise<SpickPaths | null> {
+  return spickPaths(await $.env.get('CLAUDE_CONFIG_DIR'), await $.env.get('HOME'))
+}
+
 /**
- * The quota line, from the cache scripts/quota.py keeps at ~/.claude/spick-quota.json. One read, no run:
+ * The quota line, from the cache scripts/quota.py keeps at <state>/quota.json. One read, no run:
  * a missing, unreadable or empty cache gives null and the line is left out. The bash hook keeps the cache warm.
  */
 async function quotaLineNow($: EngineInterface): Promise<string | null> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return null
-    return quotaLineFromCache(await $.fs.read(`${home}/.claude/spick-quota.json`), await $.clock.now())
+    const p = await pathsNow($)
+    if (!p) return null
+    return quotaLineFromCache(await $.fs.read(p.quota), await $.clock.now())
   } catch { return null }
 }
 
 /** The lanes the user declared (lane_registry), from the same cache; null for a user without one, or when it cannot be read. */
 async function lanesNow($: EngineInterface): Promise<LaneInfo[] | null> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return null
-    return lanesFromCache(await $.fs.read(`${home}/.claude/spick-quota.json`))
+    const p = await pathsNow($)
+    if (!p) return null
+    return lanesFromCache(await $.fs.read(p.quota))
   } catch { return null }
 }
 
@@ -95,15 +104,14 @@ async function setControls($: EngineInterface, change: (c: Controls) => Controls
 // --- lanes: spick.json is written by scripts/set_lane.py only; this module never writes it ---------------------------
 // $.process.run is called from command handlers and onPress closures, never from a render or a hook on the prompt path.
 
-const SET_LANE = '.claude/skills/spick/scripts/set_lane.py'
 const firstLine = (s: string): string => s.split('\n').find(l => l.trim() !== '')?.trim() ?? ''
 
 /** Run set_lane.py with the argv after the script path; ok is exit 0, err the first stderr line. */
 async function runSetLane($: EngineInterface, args: string[]): Promise<{ ok: boolean; stdout: string; err: string }> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return { ok: false, stdout: '', err: 'HOME is not set' }
-    const r = await $.process.run(['python3', `${home}/${SET_LANE}`, ...args])
+    const p = await pathsNow($)
+    if (!p) return { ok: false, stdout: '', err: 'HOME is not set' }
+    const r = await $.process.run(['python3', `${p.scripts}/set_lane.py`, ...args])
     if (r.exitCode === 0) return { ok: true, stdout: r.stdout, err: '' }
     return { ok: false, stdout: r.stdout, err: firstLine(r.stderr) || `set_lane.py failed (exit ${r.exitCode})` }
   } catch {
@@ -197,75 +205,50 @@ async function submitLaneEdit($: EngineInterface, text: string): Promise<void> {
   if (r.ok) await update($, editSeq, n => n + 1)
 }
 
-// --- spend: one file per session under ~/.claude/spick-spend/ (spend.ts); scripts/spend.py reports on them ---------------
+// --- the turn record: one file per session under <state>/turns/ (turnlog.ts); spend.py and audit.py read it ------------
 
-/** the session's spend record, kept in memory and written whole at every row; `chain` puts the writes in order */
-type SpendState = SpendFile & { chain: Promise<void> }
+/** the session's turn-record writer: lines not yet on disk, which part file, and the chain that keeps writes in order */
+type TurnWriter = { sessionId: string; pending: string[]; part: number; chain: Promise<void> }
+
+/** a part file this full is closed; the next line starts the next part, so a read never meets the 4 MiB limit */
+const TURNS_PART_BYTES = 3_500_000
 
 /**
- * A session starts: its id and directory, and the rows its file already holds when it is a resumed one (the file is
- * rewritten whole, so a resume must not start from nothing).
+ * Add lines to the session's file: read it, append, write it whole ($.fs.write writes a whole file only). Lines a
+ * failed write left stay pending and land with the next write that goes through.
  */
-async function startSpend($: EngineInterface, s: SpendState, cwd: string): Promise<void> {
-  s.sessionId = ''
-  s.rows = []
-  s.cwd = cwd
-  s.startedAt = new Date(await $.clock.now()).toISOString()
-  s.sessionId = await $.session.id()
-  const home = await $.env.get('HOME')
-  if (!home || !s.sessionId) return
-  try {
-    const prev = parseSpendFile(await $.fs.read(spendPath(home, s.sessionId)), s.sessionId)
-    if (prev) {
-      s.rows = [...prev.rows, ...s.rows]
-      s.startedAt = prev.startedAt || s.startedAt
-      s.cwd = prev.cwd || s.cwd
-    }
-  } catch {}
-}
-
-/** Add a row and write the session's file again; the writes go one after another, each with every row so far. */
-async function addSpend($: EngineInterface, s: SpendState, row: SpendRow): Promise<void> {
-  s.rows.push(row)
-  const run = s.chain.then(async () => {
+function writeTurnLines($: EngineInterface, w: TurnWriter, lines: readonly string[]): Promise<void> {
+  w.pending.push(...lines)
+  const run = w.chain.then(async () => {
     // no session.start seen (a mod loaded mid-session): ask now
-    if (!s.sessionId) s.sessionId = await $.session.id()
-    if (!s.startedAt) s.startedAt = row.at
-    const home = await $.env.get('HOME')
-    if (!home || !s.sessionId) return
-    await $.fs.write(spendPath(home, s.sessionId), spendFileText(s))
-  })
-  s.chain = run.catch(() => undefined)
-  await run
-}
-
-/** one line in ~/.claude/spick-gate.jsonl (gatelog.ts), read, appended and written whole; writes run one at a time */
-let gateLogChain: Promise<void> = Promise.resolve()
-function logGate($: EngineInterface, entry: GateLogEntry): Promise<void> {
-  const run = gateLogChain.then(async () => {
-    const home = await $.env.get('HOME')
-    if (!home) return
-    const path = gateLogPath(home)
+    if (!w.sessionId) w.sessionId = await $.session.id()
+    const p = await pathsNow($)
+    if (!p || !w.sessionId || w.pending.length === 0) return
+    const batch = [...w.pending]
+    const size = batch.reduce((n, l) => n + l.length, 0)
     let prev = ''
-    try { prev = await $.fs.read(path) } catch {}
-    await $.fs.write(path, appendGateLog(prev, entry))
+    for (;;) {
+      try { prev = await $.fs.read(turnsFile(p, w.sessionId, w.part)) } catch { prev = '' }
+      if (prev.length + size <= TURNS_PART_BYTES || prev.length === 0 || w.part >= 99) break
+      w.part++
+    }
+    await $.fs.write(turnsFile(p, w.sessionId, w.part), appendLines(prev, batch))
+    w.pending.splice(0, batch.length)
   })
-  gateLogChain = run.catch(() => undefined)
+  w.chain = run.catch(() => undefined)
   return run
 }
 
-const SPEND = '.claude/skills/spick/scripts/spend.py'
-
-/** `/spick spend`: the last seven days as scripts/spend.py sums them, or one line saying why not */
-async function spendReport($: EngineInterface): Promise<string> {
+/** run one of the skill's report scripts and answer its output, or one line saying why not */
+async function reportOf($: EngineInterface, script: 'spend.py' | 'audit.py', empty: string): Promise<string> {
   try {
-    const home = await $.env.get('HOME')
-    if (!home) return 'spick: HOME is not set'
-    const r = await $.process.run(['python3', `${home}/${SPEND}`, '--days', '7'])
-    if (r.exitCode === 0) return r.stdout.trimEnd() || 'spick spend: no records'
-    return `spick: ${firstLine(r.stderr) || `spend.py failed (exit ${r.exitCode})`}`
+    const p = await pathsNow($)
+    if (!p) return 'spick: HOME is not set'
+    const r = await $.process.run(['python3', `${p.scripts}/${script}`, '--days', '7'])
+    if (r.exitCode === 0) return r.stdout.trimEnd() || empty
+    return `spick: ${firstLine(r.stderr) || `${script} failed (exit ${r.exitCode})`}`
   } catch {
-    return 'spick: could not run spend.py'
+    return `spick: could not run ${script}`
   }
 }
 
@@ -279,14 +262,15 @@ async function readSessionModel($: EngineInterface): Promise<string> {
 }
 
 /**
- * Tell scripts/triage-hook.sh that the mod owns the checklist: it prints nothing
- * while this marker is younger than 24 hours.
+ * Tell scripts/triage-hook.sh that the mod owns this session's checklist: the hook reads session_id from its stdin and
+ * prints nothing while <state>/mod-active/<sessionId> is younger than 24 hours. Per session, so a session without the
+ * mod (another surface, the mod disabled) still gets the hook's checklist.
  */
 async function writeMarker($: EngineInterface): Promise<void> {
-  // the mod can only see HOME: a CLAUDE_CONFIG_DIR user's marker lives under ~/.claude too (the hook looks in both)
-  const home = await $.env.get('HOME')
-  if (!home) return
-  await $.fs.write(`${home}/.claude/.spick-mod-active`, new Date(await $.clock.now()).toISOString())
+  const p = await pathsNow($)
+  const id = await $.session.id()
+  if (!p || !id) return
+  await $.fs.write(markerPath(p, id), new Date(await $.clock.now()).toISOString())
 }
 
 /**
@@ -373,7 +357,34 @@ async function publishRunning($: EngineInterface, inFlight: Map<string, Lane>, t
 }
 
 /** What the band bookkeeping reads: the calls in flight, the timed-out ones, who shows now, whether the main turn is open. */
-type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean }
+/** a delegate of the main turn (an Agent call or an outside CLI call) and how it stands; the turn record lists them */
+type DelegateRec = {
+  id: string; lane: string; model: string; effort?: string; isReview?: boolean; startedAt: number; endedAt?: number; status: DelegateStatus
+  /** the main turn that started it, and whether that turn's line is written (a later end then adds a late line) */
+  turnId: string; isRecorded?: boolean
+  /** a subagent's usage, summed over its turn.complete events; null for an outside CLI and until it reports */
+  usage: UsageEntry | null
+}
+
+/** a delegate as the turn record lists it */
+const delegateEntry = (d: DelegateRec): DelegateEntry => ({
+  id: d.id, lane: d.lane, model: d.model, ...(d.effort ? { effort: d.effort } : {}), ...(d.isReview ? { isReview: true } : {}),
+  status: d.status, ok: d.status === 'completed', startedAt: new Date(d.startedAt).toISOString(),
+  ms: d.endedAt === undefined ? null : Math.max(0, d.endedAt - d.startedAt), usage: d.usage, costUsd: d.usage?.costUsd ?? null,
+})
+
+/** a check as the turn record lists it; `editCount` is the turn's source edits at the end */
+const checkEntry = (c: CheckRun, editCount: number): CheckEntry => ({
+  command: c.command, startedAt: new Date(c.startedAt).toISOString(), finishedAt: c.finishedAt === undefined ? null : new Date(c.finishedAt).toISOString(),
+  exitOk: c.exitOk ?? null, editsDuring: c.editsDuring ?? null, coversTurn: c.exitOk === true && c.editsDuring === 0 && c.editsAtStart === editCount,
+  ...(c.agentId ? { agentId: c.agentId } : {}),
+})
+
+/** how a call that returned stands: refused, failed (an error result) or completed */
+const statusOf = (r: { deny?: string; isError?: true } | undefined): DelegateStatus => (r === undefined ? 'failed' : r.deny ? 'refused' : r.isError ? 'failed' : 'completed')
+
+/** `onTimeout` hears each call that timed out, so its delegate record reads failed */
+type Tracker = { inFlight: Map<string, Lane>; timedOut: Map<string, RunningAgent>; showing: () => Lane; isMainTurnOpen: () => boolean; onTimeout: (id: string) => void }
 
 /** put the lane that works now on the band and publish the Running list */
 async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecord) => Partial<TurnRecord>): Promise<void> {
@@ -382,13 +393,14 @@ async function refreshBand($: EngineInterface, t: Tracker, extra?: (c: TurnRecor
 }
 
 /** Move calls with no completion signal for STALE_MS out of flight into `timedOut`. True when any moved. */
-async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>): Promise<boolean> {
+async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timedOut: Map<string, RunningAgent>, onTimeout: (id: string) => void = () => {}): Promise<boolean> {
   const now = await $.clock.now()
   let moved = false
   for (const [id, l] of [...inFlight]) {
     if (l.startedAt === undefined || now - l.startedAt < STALE_MS) continue
     inFlight.delete(id)
     timedOut.set(id, { id, lane: l.lane, model: l.model, effort: l.effort, startedAt: l.startedAt, timedOutAt: now })
+    onTimeout(id)
     moved = true
   }
   return moved
@@ -396,7 +408,7 @@ async function sweepStale($: EngineInterface, inFlight: Map<string, Lane>, timed
 
 /** Drop calls that have gone 30 minutes without a completion signal; the band follows. */
 async function sweep($: EngineInterface, t: Tracker): Promise<void> {
-  if (!(await sweepStale($, t.inFlight, t.timedOut))) return
+  if (!(await sweepStale($, t.inFlight, t.timedOut, t.onTimeout))) return
   // nothing left running after the main turn ended: the band goes idle
   if (!t.isMainTurnOpen() && t.inFlight.size === 0) await update($, current, () => null)
   else await showLane($, t.showing)
@@ -419,17 +431,34 @@ async function tick($: EngineInterface, lastMs: number): Promise<number> {
 const ZERO_TOTALS: LaneTotals = { turns: 0, inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheCreationTokens: 0, costUsd: null }
 
 /** a Haiku main session editing source itself is the attention case the band flags */
-async function noteEdit($: EngineInterface, mainModel: string, agentId: string | undefined, filePath: string): Promise<void> {
+async function noteEdit($: EngineInterface, mainModel: string, agentId: string | undefined, filePath: string, cwd: string): Promise<void> {
   try {
-    if (!agentId && /haiku/.test(mainModel) && isSourcePath(filePath)) {
+    if (!agentId && /haiku/.test(mainModel) && isSourcePath(filePath, cwd)) {
       const name = filePath.split('/').slice(-2).join('/')
       await setCurrent($, { note: { kind: 'error', text: `edited ${name}` } })
     }
   } catch {}
 }
 
-/** the guard's state for the main turn: the source files the main session edited itself, those any loop edited, whether a check ran */
-type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; checkRan: boolean }
+/**
+ * One check a Bash call ran in the turn, any loop's: the command from its runner on, when it started and finished,
+ * whether the tool result came back without an error, and the source-edit count at its start and how many edits
+ * landed while it ran. It covers the turn only when it passed and no source edit came after it started.
+ */
+type CheckRun = { command: string; key: string; startedAt: number; finishedAt?: number; exitOk?: boolean; editsAtStart: number; editsDuring?: number; agentId?: string }
+
+/**
+ * the guard's state for the main turn: the source files the main session edited itself, those any loop edited, how
+ * many source edits went through, the checks run; `cwd` is the session's, which isSourcePath judges paths against
+ */
+type GuardTurn = {
+  mainEdits: Set<string>; agentEdits: Set<string>; sourceEdits: Set<string>; editCount: number; checks: CheckRun[]; cwd: string
+  /** the main loop's failures per check (checkOf's key), and the escalation they raised: once per turn */
+  failures: Map<string, number>; escalation: { command: string; at: number } | null
+}
+
+/** a check that passed after the last source edit of the turn, with none landing while it ran */
+const isChecked = (g: GuardTurn): boolean => g.checks.some(c => checkEntry(c, g.editCount).coversTurn)
 
 /**
  * The guard's edit cap, in front of an Edit, Write or NotebookEdit: the main session's own edit of a source file past
@@ -439,17 +468,19 @@ type GuardTurn = { mainEdits: Set<string>; sourceEdits: Set<string>; checkRan: b
  * too, counts for the check before the turn ends.
  */
 async function guardEdit($: EngineInterface, g: GuardTurn, mainModel: string, agentId: string | undefined, path: string): Promise<string | null> {
-  if (!isSourcePath(path)) return null
+  if (!isSourcePath(path, g.cwd)) return null
   if (!agentId && !g.mainEdits.has(path) && g.mainEdits.size >= EDIT_CAP) {
     const c = await read($, controls)
     if (c.guard === 'on' && effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) {
-      $.ui.toast(`spick: guard — edit cap: ${EDIT_CAP} source files this turn; the next one goes to a coder`)
+      $.ui.toast('spick: guard — edit cap: one source file per turn; the next one goes to a coder')
       await setCurrent($, { note: { kind: 'error', text: 'edit cap' } })
       return editCapReason([...g.mainEdits])
     }
   }
   if (!agentId) g.mainEdits.add(path)
+  else g.agentEdits.add(path)
   g.sourceEdits.add(path)
+  g.editCount++
   return null
 }
 
@@ -499,6 +530,18 @@ export const register: Register = on => {
   const dropFinishedCalls = (): void => { for (const id of [...inFlight.keys()]) if (!isRunningAgentCall(id)) inFlight.delete(id) }
   /** the turn's latest delegate (Agent or CLI call), kept after the call ends: the closed turn is recorded under it */
   let delegate: Lane | null = null
+  /** every delegate of the main turn and how it stands; the gate asks them whether the required role completed */
+  let delegatesOfTurn: DelegateRec[] = []
+  /** tool_use_id -> its record, until it settles (a background agent's settles at its own turn.complete) */
+  const delegateOfCall = new Map<string, DelegateRec>()
+  const settle = (id: string, status: DelegateStatus, at: number): void => {
+    const d = delegateOfCall.get(id)
+    if (!d) return
+    // a refusal or failure the call reported stands; completion is never taken back
+    if (d.status === 'running') d.status = status
+    d.endedAt = at
+    delegateOfCall.delete(id)
+  }
   let agentsThisTurn = 0
   /** the Hint line's findings for the prompt just submitted, then for the turn it started (a delivery carries none) */
   let pendingHints: Hint[] = []
@@ -509,15 +552,22 @@ export const register: Register = on => {
   /** the turn the gate or the guard's check already sent back once (one send-back per turn, for both) */
   let gateAskedTurn = ''
   /** the gate's firing this turn, until a later stop logs what became of it (kept or delegated) */
-  let gateFired: { turnId: string; entry: GateLogEntry } | null = null
-  /** this session's spend record (~/.claude/spick-spend/<sessionId>.json) */
-  const spend: SpendState = { sessionId: '', cwd: '', startedAt: '', rows: [], chain: Promise.resolve() }
+  let gateFired: { turnId: string; kind: string; words: string[]; roles: ('deep' | 'review')[] } | null = null
+  /** the gate's firings this turn and what followed, for the turn record */
+  let gateEvents: GateEvent[] = []
+  /** the session's turn record (<state>/turns/<sessionId>.jsonl) and its cwd */
+  const turnWriter: TurnWriter = { sessionId: '', pending: [], part: 0, chain: Promise.resolve() }
+  let sessionCwd = ''
   /** the project's own check commands (spick.json guard.check_commands), read once at session.start */
   let declared: RegExp[] = []
+  /** the efforts an Agent call of coder, planner or deep gets when it names none (spick.json efforts) */
+  let efforts: Efforts = DEFAULT_EFFORTS
   /** the guard's per-turn state, cleared at turn.start */
-  const guardTurn: GuardTurn = { mainEdits: new Set(), sourceEdits: new Set(), checkRan: false }
+  const guardTurn: GuardTurn = { mainEdits: new Set(), agentEdits: new Set(), sourceEdits: new Set(), editCount: 0, checks: [], cwd: '', failures: new Map(), escalation: null }
   let mainModel = ''
   let mainEffort: string | undefined
+  /** the main loop's last prompt size in tokens, from its latest step's usage; undefined until one reported it */
+  let mainLastInput: number | undefined
   /** the last elapsed-time stamp written to `current` */
   let lastTickMs = 0
   /** when the mod-active marker was last written */
@@ -543,21 +593,25 @@ export const register: Register = on => {
   }
   /** calls that timed out (no completion signal for 30 minutes), listed in the pane until the next prompt drops them */
   const timedOut = new Map<string, RunningAgent>()
-  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen }
+  // a call with no completion signal for 30 minutes is a failed delegate
+  const tracker: Tracker = { inFlight, timedOut, showing, isMainTurnOpen: () => mainTurnOpen, onTimeout: id => settle(id, 'failed', Date.now()) }
 
   on('session.start', async ($, e, next) => {
     try {
-      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, gate, guard, lanes, band, quota, spend', argumentHint: ARGUMENT_HINT, immediate: true })
+      await $.command.register({ name: 'spick', description: 'Spick dashboard and switches: routing, review, gate, guard, lanes, band, quota, spend, audit', argumentHint: ARGUMENT_HINT, immediate: true })
       void refreshQuota($).catch(() => undefined)
     } catch {}
     try { await loadControls($) } catch {}
     try { await readSessionModel($) } catch {}
-    try { await startSpend($, spend, e.cwd) } catch {}
-    // the project's own check commands, once per session; a pattern that does not compile is ignored, with one toast.
-    // The mod sees only HOME, so this is ~/.claude/spick.json whatever CLAUDE_CONFIG_DIR says
+    guardTurn.cwd = e.cwd
+    sessionCwd = e.cwd
+    try { turnWriter.sessionId = await $.session.id() } catch {}
+    // the project's own check commands, once per session; a pattern that does not compile is ignored, with one toast
     try {
-      const home = await $.env.get('HOME')
-      const d = declaredChecks(home ? await $.fs.read(`${home}/.claude/spick.json`).catch(() => '') : '')
+      const p = await pathsNow($)
+      const cfg = p ? await $.fs.read(p.spickJson).catch(() => '') : ''
+      efforts = effortsFrom(cfg)
+      const d = declaredChecks(cfg)
       declared = d.patterns
       if (d.bad.length) $.ui.toast(`spick: guard.check_commands — ignored ${d.bad.length} pattern(s) that do not compile: ${d.bad.join(', ')}`)
     } catch {}
@@ -650,16 +704,24 @@ export const register: Register = on => {
       mainTurnOpen = true
       dropFinishedCalls()
       delegate = null
+      delegatesOfTurn = []
       agentsThisTurn = 0
       mainTurnId = e.turnId
       mainToolCalls = 0
       hintsOfTurn = pendingHints
       pendingHints = []
       guardTurn.mainEdits.clear()
+      guardTurn.agentEdits.clear()
       guardTurn.sourceEdits.clear()
-      guardTurn.checkRan = false
+      gateEvents = []
+      guardTurn.editCount = 0
+      guardTurn.checks = []
+      guardTurn.failures.clear()
+      guardTurn.escalation = null
+      // a mod loaded mid-session saw no session.start: ask for the cwd once
+      if (!guardTurn.cwd) guardTurn.cwd = await $.session.cwd().catch(() => '')
       lastTickMs = startedAt
-      await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0 }))
+      await update($, current, () => ({ turnId: e.turnId, startedAt, nowMs: startedAt, lane: MAIN_LANE, model: modelName(mainModel), effort: mainEffort, agents: 0, contextTokens: mainLastInput }))
       await sweep($, tracker)
       await refreshBand($, tracker)
       // the TTL gates it: at most one read per ten minutes, so the band's quota meters stay current
@@ -683,29 +745,58 @@ export const register: Register = on => {
       yield chunk
       try { lastTickMs = Math.max(lastTickMs, await tick($, lastTickMs)) } catch {}
     }
-    return await stream.result
+    const result = await stream.result
+    // the main loop's prompt size, from the step's own usage: the band shows it, and warns a Haiku session past 80k
+    try {
+      if (!e.agentId && result.usage) {
+        mainLastInput = promptTokens(result.usage)
+        await setCurrent($, { contextTokens: mainLastInput })
+      }
+    } catch {}
+    return result
   })
 
   // any tool call, from any loop, ticks the elapsed time; the main session's own calls are counted for the gate
   on('tool.call', async ($, e, next) => {
-    try { if (!e.agentId && String(e.tool) !== 'Agent') mainToolCalls++ } catch {}
+    try { if (!e.agentId) mainToolCalls++ } catch {}
     try { lastTickMs = Math.max(lastTickMs, await tick($, lastTickMs)) } catch {}
     try { await sweep($, tracker) } catch {}
     return next(e)
   }).catch(passThrough)
 
-  on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
+  on('tool.call', { tool: 'Agent' }, async ($, e0, next) => {
+    // a coder, planner or deep call that names no effort runs at the default: the call is passed on with it filled
+    // (next takes the rewritten envelope; tool, tool_use_id and agentId are the engine's and stay as they were)
+    let e = e0
+    try {
+      const fill = e0.agentId ? null : effortToFill(e0.subagent_type, e0.effort, efforts)
+      if (fill) e = { ...e0, effort: fill as typeof e0.effort }
+    } catch {}
     const id = e.tool_use_id
     try {
       const entry: Lane = { lane: e.subagent_type ?? 'agent', model: e.model ? modelName(e.model) : '', effort: e.effort, agentIndex: ++agentsThisTurn, startedAt: await $.clock.now() }
       inFlight.set(id, entry)
       delegate = entry
+      if (!e.agentId) {
+        const d: DelegateRec = { id, lane: entry.lane, model: e.model ?? '', effort: e.effort, startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
+        delegatesOfTurn.push(d)
+        delegateOfCall.set(id, d)
+      }
       await refreshBand($, tracker, () => ({ agents: agentsThisTurn }))
     } catch {}
     // finally: an interrupted call must not leave the subagent's lane on the band
+    let r: Awaited<ReturnType<typeof next>> | undefined
     try {
-      return await next(e)
+      r = await next(e)
+      return r
     } finally {
+      try {
+        // a foreground call that returned is over (its subagent's turn.complete came first); a background one runs on
+        // until its own turn.complete, unless the call itself was refused or failed
+        const status = statusOf(r)
+        const isBackground = (e.run_in_background === true || backgroundCalls.has(id)) && status === 'completed'
+        if (!isBackground) settle(id, status, await $.clock.now())
+      } catch {}
       try {
         // a background agent returns at once but its subagent still runs: its lane stays until turn.complete. Background
         // is the default, so a call that leaves run_in_background out is one too; agent.spawn reports what was decided.
@@ -727,6 +818,9 @@ export const register: Register = on => {
         callOfAgent.set(r.agentId, e.tool_use_id)
       }
       if (e.background && !r.deny) backgroundCalls.add(e.tool_use_id)
+      const d = delegateOfCall.get(e.tool_use_id)
+      if (d && r.deny) settle(e.tool_use_id, 'refused', await $.clock.now())
+      else if (d) { d.lane = e.subagentType; if (r.model) d.model = r.model }
       // the resolved type and model replace what the Agent call named (it may have named neither)
       const entry = inFlight.get(e.tool_use_id)
       if (entry && !r.deny) {
@@ -739,33 +833,66 @@ export const register: Register = on => {
   }).catch(passThrough)
 
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    // a check run by any loop, a subagent's included, counts for the guard's check before the turn ends
-    try { if (isCheckCommand(e.command, declared)) guardTurn.checkRan = true } catch {}
-    if (e.agentId) return next(e)
+    // a check run by any loop, a subagent's included, counts for the guard's check before the turn ends, once its
+    // result is in: bound to the edit count at its start, so an edit while it ran or after it leaves the turn unchecked
+    let run: CheckRun | null = null
+    try {
+      const check = checkOf(e.command, declared)
+      if (check) {
+        run = { ...check, startedAt: await $.clock.now(), editsAtStart: guardTurn.editCount, ...(e.agentId ? { agentId: e.agentId } : {}) }
+        guardTurn.checks.push(run)
+      }
+    } catch {}
     const id = e.tool_use_id
     let isCli = false
-    try {
+    if (!e.agentId) try {
       const cli = parseCli(e.command)
       if (cli) {
         isCli = true
         const entry: Lane = { lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview: cli.isReview, startedAt: await $.clock.now() }
         inFlight.set(id, entry)
         delegate = entry
+        // a review call: Codex with a review prompt, or a declared lane tagged review (invoke.py --lane <id>)
+        const isReview = cli.isReview || ((await lanesNow($)) ?? []).some(l => l.id === cli.lane && l.tags.includes('review'))
+        const d: DelegateRec = { id, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, isReview, startedAt: entry.startedAt!, status: 'running', turnId: mainTurnId, usage: null }
+        delegatesOfTurn.push(d)
+        delegateOfCall.set(id, d)
         await refreshBand($, tracker, () => (cli.isReview ? { note: { kind: 'warning' as const, text: 'review: codex' } } : {}))
         // outside CLIs report no usage: count the call, leave it unpriced
         await update($, totals, t => {
           const cur = t[cli.lane] ?? ZERO_TOTALS
           return { ...t, [cli.lane]: { ...cur, turns: cur.turns + 1 } }
         })
-        // and record it: tokens 0, costUsd null
-        try { await addSpend($, spend, spendRow({ at: await $.clock.now(), turnId: mainTurnId, lane: cli.lane, model: cli.model ?? '', effort: cli.effort, usage: null, costUsd: null })) } catch {}
       }
     } catch {}
+    let r: Awaited<ReturnType<typeof next>> | undefined
     try {
-      return await next(e)
+      r = await next(e)
+      // the main loop's second failure of the same check: the escalation line rides on that result itself, so the
+      // model reads it before its next step (once per turn)
+      try {
+        if (run && !e.agentId && r.isError && !guardTurn.escalation) {
+          const n = (guardTurn.failures.get(run.key) ?? 0) + 1
+          guardTurn.failures.set(run.key, n)
+          if (n >= ESCALATE_AFTER) {
+            guardTurn.escalation = { command: run.command, at: await $.clock.now() }
+            return { ...r, context: [...(r.context ?? []), escalationLine(run.command)] }
+          }
+        }
+      } catch {}
+      return r
     } finally {
+      if (run) {
+        try {
+          run.finishedAt = await $.clock.now()
+          // the exit status as the tool result carries it: a non-zero exit, a refusal or an interrupt is an error
+          run.exitOk = r !== undefined && !r.deny && !r.isError
+          run.editsDuring = guardTurn.editCount - run.editsAtStart
+        } catch {}
+      }
       if (isCli) {
         try {
+          settle(id, statusOf(r), await $.clock.now())
           inFlight.delete(id)
           await refreshBand($, tracker)
         } catch {}
@@ -777,13 +904,13 @@ export const register: Register = on => {
   on('tool.call', { tool: 'Edit' }, async ($, e, next) => {
     const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
     if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path)
+    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
     return next(e)
   }).catch(passThrough)
   on('tool.call', { tool: 'Write' }, async ($, e, next) => {
     const deny = await guardEdit($, guardTurn, mainModel, e.agentId, e.file_path).catch(() => null)
     if (deny) return { deny }
-    await noteEdit($, mainModel, e.agentId, e.file_path)
+    await noteEdit($, mainModel, e.agentId, e.file_path, guardTurn.cwd)
     return next(e)
   }).catch(passThrough)
   on('tool.call', { tool: 'NotebookEdit' }, async ($, e, next) => {
@@ -793,50 +920,52 @@ export const register: Register = on => {
   }).catch(passThrough)
 
   // Stop time, where the gate and the guard's check intervene (with the guard's edit cap, the only places this module
-  // does). Both fire at most once per turn between them, never while routing is off, and the reason returned is what
-  // Claude Code hands the model as the reason to continue.
-  // The gate: a prompt the Hint line called a verdict (judgement or review words; design words never) that the main
-  // session answered on its own, delegating nothing, is sent back to dispatch deep or to say in one line (`Kept:`) why
-  // the deliverable was a lookup after all. Never on a short reply without tool calls (a question back); /spick gate off
-  // switches it off. Each firing, and what became of it, is a line in ~/.claude/spick-gate.jsonl (gatelog.ts).
-  // The guard's check: a turn in which any loop (a subagent too) edited source and no loop ran a check is sent back to
-  // run one, hand the user a /goal line, or say in one line (`Unchecked:`) why there is none. A delegate does not
-  // excuse it. /spick guard off switches it off, with the edit cap.
+  // does). They send a turn back at most once between them, with every reason in one block, never while routing is
+  // off; the block is what Claude Code hands the model as the reason to continue.
+  // The gate, by required role: judgement words need deep, review words the review lane or deep (gate.ts). When that
+  // role did not complete this turn (a deep subagent that finished or still runs in the background, a review call
+  // that returned cleanly), the reply has no `Kept:` line and the turn was substantive (a tool call, or 400+
+  // characters), the turn is sent back. Design words never gate; /spick gate off switches it off.
+  // The guard's check: a turn in which any loop (a subagent too) edited source and no check passed after the last
+  // edit is sent back to run one, hand the user a /goal line, or say in one line (`Unchecked:`) why there is none.
+  // A delegate does not excuse it. /spick guard off switches it off, with the edit cap.
   on('classic.Stop', async ($, e, next) => {
     const r = await next(e)
     try {
-      // a turn the gate sent back: log, once, whether the model then delegated or kept it with a Kept: line
+      const answer = e.last_assistant_message ?? ''
+      // a turn the gate sent back: log, once, whether the required role then completed or the reply kept it with Kept:
       if (gateFired && gateFired.turnId === mainTurnId) {
-        const outcome = gateOutcome(e.last_assistant_message ?? '', delegate !== null)
+        const roles = gateFired.roles
+        const outcome = gateOutcome(answer, roles.every(role => roleDone(role, delegatesOfTurn)))
         if (outcome) {
-          const entry = { ...gateFired.entry, outcome }
+          gateEvents.push({ at: new Date(await $.clock.now()).toISOString(), kind: gateFired.kind, words: gateFired.words, outcome })
           gateFired = null
-          await logGate($, entry).catch(() => undefined)
         }
       }
       if (r.block || e.stop_hook_active || gateAskedTurn === mainTurnId) return r
       const c = await read($, controls)
       if (!effectiveRouting(c, (await read($, sessionModel)) || mainModel).on) return r
-      const answer = e.last_assistant_message ?? ''
-      const isGated = c.gate === 'on' && delegate === null && !KEPT_RE.test(answer) && !(mainToolCalls === 0 && answer.length < LONG_ANSWER)
-      const g = isGated ? gateReason(hintsOfTurn) : null
+      // a short reply with no tool call is a question back, not a delivered verdict
+      const isSubstantive = mainToolCalls > 0 || answer.length >= LONG_ANSWER
+      const g = c.gate === 'on' && isSubstantive && !KEPT_RE.test(answer) ? gateFiring(hintsOfTurn, delegatesOfTurn) : null
+      const isUnchecked = c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !isChecked(guardTurn) && !UNCHECKED_RE.test(answer)
+      if (!g && !isUnchecked) return r
+      // one send-back per turn, carrying every reason at once
+      gateAskedTurn = mainTurnId
+      const reasons: string[] = []
       if (g) {
-        gateAskedTurn = mainTurnId
-        const sessionId = spend.sessionId || (await $.session.id().catch(() => ''))
-        const entry: GateLogEntry = { at: new Date(await $.clock.now()).toISOString(), sessionId, kind: g.kinds.join('+'), words: g.words, outcome: 'sent-back' }
-        gateFired = { turnId: mainTurnId, entry }
-        await logGate($, entry).catch(() => undefined)
-        $.ui.toast(`spick: gate — ${g.kind} kept by the triage session; sent back once`)
-        await setCurrent($, { note: { kind: 'warning', text: `gate: ${g.kind} kept` } })
-        return { ...r, block: g.text }
+        const kind = g.kinds.join('+')
+        gateFired = { turnId: mainTurnId, kind, words: g.words, roles: g.roles }
+        gateEvents.push({ at: new Date(await $.clock.now()).toISOString(), kind, words: g.words, outcome: 'sent-back' })
+        $.ui.toast('spick: gate — verdict kept by the triage session; sent back once')
+        reasons.push(g.text)
       }
-      if (c.guard === 'on' && guardTurn.sourceEdits.size > 0 && !guardTurn.checkRan && !UNCHECKED_RE.test(answer)) {
-        gateAskedTurn = mainTurnId
-        $.ui.toast('spick: guard — source edited and no check ran; sent back once')
-        await setCurrent($, { note: { kind: 'warning', text: 'guard: unchecked' } })
-        return { ...r, block: uncheckedReason([...guardTurn.sourceEdits]) }
+      if (isUnchecked) {
+        $.ui.toast('spick: guard — source edited, no passing check after it; sent back once')
+        reasons.push(uncheckedReason([...guardTurn.sourceEdits]))
       }
-      return r
+      await setCurrent($, { note: { kind: 'warning', text: g ? `gate: ${g.roles.join('+')} missing` : 'guard: unchecked' } })
+      return { ...r, block: sendBackText(reasons) }
     } catch {
       return r
     }
@@ -859,17 +988,22 @@ export const register: Register = on => {
             costUsd: cost === null ? cur.costUsd : (cur.costUsd ?? 0) + cost,
           } }
         })
-        // the same turn, one row in the session's spend file; a turn with no usage (an interrupt, an API error) has no row,
-        // as it adds nothing to the totals
-        try {
-          const call = e.agentId ? callOfAgent.get(e.agentId) : undefined
-          const effort = e.agentId ? (call !== undefined ? inFlight.get(call)?.effort : undefined) : mainEffort
-          await addSpend($, spend, spendRow({ at: await $.clock.now(), turnId: e.turnId, agentId: e.agentId, lane, model: usage.model, effort, usage, costUsd: cost }))
-        } catch {}
+        // a subagent's usage goes on its delegate, for the turn record
+        const call = e.agentId ? callOfAgent.get(e.agentId) : undefined
+        const d = call !== undefined ? delegateOfCall.get(call) : undefined
+        if (d) d.usage = addUsage(d.usage ?? ZERO_USAGE, usageEntry(usage, cost))
       }
       if (e.agentId) {
         laneOfAgent.delete(e.agentId)
         const call = callOfAgent.get(e.agentId)
+        // the subagent's own end decides its delegate's status: an answer completed it, anything else failed it
+        const d = call !== undefined ? delegateOfCall.get(call) : undefined
+        if (call !== undefined) settle(call, e.reason === 'answer' && !e.isAborted ? 'completed' : 'failed', await $.clock.now())
+        // a background agent that outlived its main turn's line: one late line with the same turnId and its usage
+        if (d?.isRecorded) {
+          const at = await $.clock.now()
+          await writeTurnLines($, turnWriter, [lineText(lateLine({ at, sessionId: turnWriter.sessionId, turnId: d.turnId, delegate: delegateEntry(d) }))]).catch(() => undefined)
+        }
         callOfAgent.delete(e.agentId)
         // a background agent's Agent call returned long ago; its lane leaves the band now
         if (call !== undefined && inFlight.delete(call)) {
@@ -885,6 +1019,20 @@ export const register: Register = on => {
         const endedAt = await $.clock.now()
         mainTurnOpen = false
         dropFinishedCalls()
+        // the turn record: one line per main turn, whatever it delivered (an interrupted turn too, its usage null)
+        try {
+          if (!turnWriter.sessionId) turnWriter.sessionId = await $.session.id().catch(() => '')
+          const ctl = await read($, controls)
+          const line = turnLine({
+            at: endedAt, sessionId: turnWriter.sessionId, turnId: e.turnId, cwd: sessionCwd || guardTurn.cwd, mainModel: usage?.model ?? mainModel,
+            routing: ctl.manualModel ? 'off' : ctl.routing, hint: hintsOfTurn.map(h => h.kind), kept: keptLine(e.answer), gateEvents,
+            delegates: delegatesOfTurn.map(delegateEntry), mainFiles: [...guardTurn.mainEdits], agentFiles: [...guardTurn.agentEdits], files: [...guardTurn.sourceEdits],
+            checks: guardTurn.checks.map(c => checkEntry(c, guardTurn.editCount)), escalation: guardTurn.escalation,
+            usage: usage ? usageEntry(usage, estimateCost(usage.model, usage)) : null, lastInput: mainLastInput, ms: e.durationMs,
+          })
+          for (const d of delegatesOfTurn) d.isRecorded = true
+          await writeTurnLines($, turnWriter, [lineText(line)]).catch(() => undefined)
+        } catch {}
         const c = await read($, current)
         if (c) {
           // the turn is recorded under its latest delegate, the main session when it had none
@@ -911,6 +1059,8 @@ export const register: Register = on => {
 
   // Every change answers one line; the pane redraws from the state it reads.
   on('command.run', { command: 'spick' }, async ($, e) => {
+    // /spick audit: what the turn records say about the last seven days (checklist.ts's parser does not know it yet)
+    if (e.args.trim() === 'audit') return { text: await reportOf($, 'audit.py', 'spick audit: no records') }
     const cmd = parseSpick(e.args)
     switch (cmd.kind) {
       case 'band':
@@ -937,7 +1087,7 @@ export const register: Register = on => {
       case 'quota':
         return { text: await quotaLine($, true).catch(() => 'spick: quota not read') }
       case 'spend':
-        return { text: await spendReport($) }
+        return { text: await reportOf($, 'spend.py', 'spick spend: no records') }
       case 'usage':
         return { text: USAGE }
       case 'open': {
@@ -958,12 +1108,14 @@ export const register: Register = on => {
     if (e.props.hasSurvey || (await read($, hidden))) return next(e)
     const c = await read($, current)
     const l = await read($, last)
+    // a Haiku session past 80k gets the context warning where no other cause holds the right group
+    const ctxNote = contextNote(c ? c.contextTokens : l?.contextTokens, mainModel) ?? undefined
     const view: BandView | null = c
       ? { lane: c.lane, model: c.model, agents: c.agents, agentIndex: c.agentIndex, isReview: c.isReview, isIdle: false, count: c.laneCount,
           // several of one lane: the time is the oldest of them; one agent or none: the turn's, as before
-          durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - (c.laneCount !== undefined && c.laneCount > 1 && c.laneSince !== undefined ? c.laneSince : c.startedAt)), note: c.note, mainModel: mainModel ? modelName(mainModel) : undefined }
+          durationMs: Math.max(0, (c.nowMs ?? c.startedAt) - (c.laneCount !== undefined && c.laneCount > 1 && c.laneSince !== undefined ? c.laneSince : c.startedAt)), note: c.note ?? ctxNote, mainModel: mainModel ? modelName(mainModel) : undefined, contextTokens: c.contextTokens }
       : l
-        ? { lane: l.lane, model: l.model, agents: 0, isIdle: true }
+        ? { lane: l.lane, model: l.model, agents: 0, isIdle: true, note: ctxNote, contextTokens: l.contextTokens }
         : null
     // routing off is shown once the model is known (under auto it depends on it)
     const ctl = await read($, controls)
@@ -1232,7 +1384,7 @@ export const register: Register = on => {
         ]),
       ]),
       [<Button key="refresh" plain hotkey="q" onPress={() => { void refreshQuota($, true).catch(() => undefined) }}>
-        <Text>refresh</Text>{sub(q ? ` · read ${fmtAge(now - q.readAt)}` : ' · not read')}
+        <Text>refresh</Text>{sub(` · ${sampleNote(q, now, isNarrow)}`)}
       </Button>],
     ]))
 
