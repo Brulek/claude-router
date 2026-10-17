@@ -35,13 +35,25 @@ VERDICT_KINDS = ("judgement", "review")
 TOP_SESSIONS = 5
 
 
+# gate.ts MIN_REVIEW_CHARS: the floor older records (outputChars, no isReport) are read by
+MIN_REVIEW_CHARS = 20
+
+
+def _reads_as_report(d):
+    """a review call's output as the gate judged it (isReport); records before that field go by outputChars, and
+    records before outputChars count"""
+    if isinstance(d.get("isReport"), bool):
+        return d["isReport"]
+    n = spend._num(d.get("outputChars"))
+    return n is None or n >= MIN_REVIEW_CHARS
+
+
 def _done(t):
     """how a hinted verdict ended: delegated (its role completed or still runs), kept (a Kept: line) or neither"""
     ds = t.get("delegates") or []
     live = ("completed", "running")
     deep = any(d.get("lane") == "deep" and d.get("status") in live for d in ds)
-    # a review call counts from 200 characters of output (gate.ts MIN_REVIEW_CHARS); records before it lack the field
-    review = any(d.get("isReview") and d.get("status") == "completed" and (spend._num(d.get("outputChars")) is None or d["outputChars"] >= 200) for d in ds)
+    review = any(d.get("isReview") and d.get("status") == "completed" and _reads_as_report(d) for d in ds)
     hint = t.get("hint") or []
     needs_deep = "judgement" in hint
     if deep or (not needs_deep and review):

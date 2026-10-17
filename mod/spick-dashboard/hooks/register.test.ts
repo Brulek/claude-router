@@ -68,7 +68,7 @@ test('a subagent turn.complete adds to its lane totals and leaves last alone', {
 })
 
 const DONE = { answer: 'ok', durationMs: 1, isAborted: false, reason: 'answer' as const, usage: USAGE }
-/** a tool result with a report in it: an Agent call's relay, or a review CLI's output past MIN_REVIEW_CHARS */
+/** a tool result with a report in it: an Agent call's relay, or a review CLI's output that reads as a report (gate.ts isReport) */
 const REPORT = 'Findings: the two error paths differ in how they surface a missing file. '.repeat(4)
 const ANSWERED = { result: {} as never, text: REPORT }
 // the kit's types carry no timers; the runner has them
@@ -989,6 +989,7 @@ test('the gate asks for the role the hint names: deep that finished or still run
     if (e.tool_use_id.startsWith('empty')) return { result: {} as never, text: '' }
     if (e.tool_use_id.startsWith('hold')) await new Promise<void>(r => holds.set(e.tool_use_id, r))
     if (e.tool_use_id.startsWith('short')) return { result: {} as never, text: 'Usage: codex exec [OPTIONS] [PROMPT]' }
+    if (e.tool_use_id.startsWith('brief')) return { result: {} as never, text: 'No issues found in this diff.\n' }
     return ANSWERED
   })
   await $.session.start(START)
@@ -1056,6 +1057,11 @@ test('the gate asks for the role the hint names: deep that finished or still run
     expect([name, block === undefined ? 'quiet' : 'gated']).toEqual([name, gated ? 'gated' : 'quiet'])
     await $.turn.complete({ turnId: `v${i}`, ...DONE })
   }
+  // a clean review may be short: it still counts
+  await turn('w0', 'review this diff please')
+  await $.tool.call({ tool: 'Bash', tool_use_id: 'brief1', command: 'codex exec "review the diff" < /dev/null' })
+  expect(await stop()).toBeUndefined()
+  await $.turn.complete({ turnId: 'w0', ...DONE })
   // a review that printed a usage line only, and one that failed
   await turn('w1', 'review this diff please')
   await $.tool.call({ tool: 'Bash', tool_use_id: 'short1', command: 'codex exec "review the diff" < /dev/null' })
@@ -1582,7 +1588,7 @@ test('a main turn writes one line to <state>/turns/<session>.jsonl: delegates wi
   expect(line!.delegates).toEqual([
     { id: 'tu1', lane: 'coder', model: 'claude-haiku-5-5', effort: 'high', status: 'completed', ok: true, confirmedBy: 'turn.complete', startedAt: new Date(1000).toISOString(), ms: 0,
       usage: { input: 1_000_000, output: 100_000, cacheRead: 0, cacheWrite: 0, costUsd: expect.any(Number) }, costUsd: expect.any(Number) },
-    { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, outputChars: 0, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
+    { id: 'b1', lane: 'Gemini', model: 'gemini-3.8-flash', effort: 'low', status: 'completed', ok: true, outputChars: 0, isReport: false, startedAt: new Date(1000).toISOString(), ms: 0, usage: null, costUsd: null },
   ])
   expect((line as { agentUsage: { input: number } }).agentUsage.input).toBe(1_000_000)
   expect((line as { checks: unknown[] }).checks).toEqual([{ command: 'python3 -m pytest -q', startedAt: new Date(1000).toISOString(), finishedAt: new Date(1000).toISOString(), exitOk: true, editsDuring: 0, afterLastEdit: true }])

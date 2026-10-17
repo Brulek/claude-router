@@ -19,12 +19,28 @@ export type ConfirmedBy = 'turn.complete' | 'tool.result'
 
 /**
  * What the gate reads of a delegate: its lane (a subagent type or a CLI lane), whether it is a review call (a single
- * `codex exec` or review-lane command with a review prompt), how it stands, and for a CLI call how much it printed.
+ * `codex exec` or review-lane command with a review prompt), how it stands, and for a CLI call whether what it printed
+ * reads as a report (isReport) and how much it printed.
  */
-export type RoleRun = { lane: string; isReview?: boolean; status: DelegateStatus; confirmedBy?: ConfirmedBy; outputChars?: number }
+export type RoleRun = { lane: string; isReview?: boolean; status: DelegateStatus; confirmedBy?: ConfirmedBy; outputChars?: number; isReport?: boolean }
 
-/** the least a review call must print to count as a review: an error line or a usage text is shorter */
-export const MIN_REVIEW_CHARS = 200
+/**
+ * The least a review call must print to count: a clean review may be short ("No issues found in this diff."), so the
+ * floor only keeps out an empty or one-word output; usage texts are caught by their first line (isReport).
+ */
+export const MIN_REVIEW_CHARS = 20
+
+/**
+ * Whether a review call's output reads as a report: at least one non-empty line, at least MIN_REVIEW_CHARS once
+ * trimmed, and a first line that is not a usage message (starting with `usage:`/`Usage:`, or holding `--help`). That
+ * the call was not an error is its status (roleDone), not its text.
+ */
+export function isReport(output: string): boolean {
+  const text = (output ?? '').trim()
+  const first = text.split('\n').find(l => l.trim() !== '')?.trim()
+  if (first === undefined || text.length < MIN_REVIEW_CHARS) return false
+  return !/^(?:usage|Usage):/.test(first) && !first.includes('--help')
+}
 
 /** a reply with one line starting with Kept: states why a hinted task stayed with the main session */
 export const KEPT_RE = /(^|\n)\s*(Kept|自留)[:：]/
@@ -41,13 +57,13 @@ const MAX_SHOWN = 3
 
 /**
  * Whether a role completed: deep when a deep subagent finished without failure, or is still running in the background
- * (its relay comes in a later turn); review when a review call returned cleanly with at least MIN_REVIEW_CHARS of
- * output, or deep did. A refused, failed or timed-out call does not count.
+ * (its relay comes in a later turn); review when a review call returned cleanly (no error) with output that reads as
+ * a report (isReport), or deep did. A refused, failed or timed-out call does not count.
  */
 export function roleDone(role: 'deep' | 'review', runs: readonly RoleRun[]): boolean {
   const deep = runs.some(r => r.lane === 'deep' && (r.status === 'completed' || r.status === 'running'))
   if (role === 'deep') return deep
-  return deep || runs.some(r => r.isReview === true && r.status === 'completed' && (r.outputChars ?? 0) >= MIN_REVIEW_CHARS)
+  return deep || runs.some(r => r.isReview === true && r.status === 'completed' && r.isReport === true)
 }
 
 /** `kinds` and `words` are what the gate fired on, `roles` what it asked for; `text` is what the model reads */

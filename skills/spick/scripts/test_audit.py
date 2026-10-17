@@ -168,11 +168,18 @@ class TestOverrides(Base):
 
 
 class TestReviewDone(unittest.TestCase):
-    def test_a_review_call_counts_from_200_characters_of_output(self):
-        t = lambda n: {"hint": ["review"], "delegates": [dict({"lane": "Codex", "isReview": True, "status": "completed"}, **({} if n is None else {"outputChars": n}))]}  # noqa: E731
-        self.assertEqual(audit._done(t(200)), "delegated")
-        self.assertEqual(audit._done(t(36)), "neither")
-        self.assertEqual(audit._done(t(None)), "delegated")
+    @staticmethod
+    def turn(**fields):
+        return {"hint": ["review"], "delegates": [dict({"lane": "Codex", "isReview": True, "status": "completed"}, **fields)]}
+
+    def test_a_review_call_counts_when_its_output_read_as_a_report(self):
+        self.assertEqual(audit._done(self.turn(outputChars=29, isReport=True)), "delegated")
+        self.assertEqual(audit._done(self.turn(outputChars=500, isReport=False)), "neither")
+
+    def test_older_records_go_by_output_length_then_count(self):
+        self.assertEqual(audit._done(self.turn(outputChars=29)), "delegated")
+        self.assertEqual(audit._done(self.turn(outputChars=16)), "neither")
+        self.assertEqual(audit._done(self.turn()), "delegated")
 
 
 class TestCovered(unittest.TestCase):

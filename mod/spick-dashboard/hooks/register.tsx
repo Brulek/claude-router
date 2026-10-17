@@ -6,7 +6,7 @@ import { ARGUMENT_HINT, DEFAULT_CONTROLS, LANE_KEYS, MANUAL_TOAST, USAGE, checkl
 import { BAND_BUTTON_CHROME, BAND_SWITCH_GAP, HOTKEY_W, LABEL_W, MAIN_LANE, NARROW_BELOW, NARROW_RECENT_ROWS, STALE_MS, bandSegments, clip, colWidths, contextNote, estimateCost, fmtAge, isSourcePath, modelName, noteParts, parseCli, promptTokens, sampleNote, quotaBar, quotaMeters, quotaWindows, recentRows, runningRows, tagLine, usageRows, wrapWords } from './format'
 import type { Align, BandView, Cells, Seg } from './format'
 import { EDIT_CAP, ESCALATE_AFTER, UNCHECKED_RE, asksAboutItself, checkOf, declaredChecks, editCapReason, escalationLine, oneCommand, uncheckedReason } from './guard'
-import { KEPT_RE, gateFiring, gateOutcome, keptLine, roleDone, sendBackText } from './gate'
+import { KEPT_RE, gateFiring, gateOutcome, isReport, keptLine, roleDone, sendBackText } from './gate'
 import type { ConfirmedBy, DelegateStatus } from './gate'
 import { findHints, lineOf } from './hint'
 import type { Hint } from './hint'
@@ -373,15 +373,16 @@ type DelegateRec = {
   usage: UsageEntry | null
   /** an Agent call: what confirmed it completed */
   confirmedBy?: ConfirmedBy
-  /** an outside CLI call: the characters its result carried */
+  /** an outside CLI call: the characters its result carried, and whether they read as a report (gate.ts isReport) */
   outputChars?: number
+  isReport?: boolean
 }
 
 /** a delegate as the turn record lists it */
 const delegateEntry = (d: DelegateRec): DelegateEntry => ({
   id: d.id, lane: d.lane, ...(d.parent ? { parent: d.parent } : {}), model: d.model, ...(d.effort ? { effort: d.effort } : {}), ...(d.isReview ? { isReview: true } : {}),
   status: d.status, ok: d.status === 'completed', ...(d.confirmedBy ? { confirmedBy: d.confirmedBy } : {}),
-  ...(d.outputChars !== undefined ? { outputChars: d.outputChars } : {}), startedAt: new Date(d.startedAt).toISOString(),
+  ...(d.outputChars !== undefined ? { outputChars: d.outputChars } : {}), ...(d.isReport !== undefined ? { isReport: d.isReport } : {}), startedAt: new Date(d.startedAt).toISOString(),
   ms: d.endedAt === undefined ? null : Math.max(0, d.endedAt - d.startedAt), usage: d.usage, costUsd: d.usage?.costUsd ?? null,
 })
 
@@ -1017,9 +1018,13 @@ export const register: Register = on => {
       }
       if (isCli) {
         try {
-          // how much it printed: a review counts only from MIN_REVIEW_CHARS (gate.ts)
+          // what it printed: a review counts only when that reads as a report (gate.ts isReport)
           const d = delegateOfCall.get(id)
-          if (d) d.outputChars = resultText(r).length
+          if (d) {
+            const text = resultText(r)
+            d.outputChars = text.length
+            d.isReport = isReport(text)
+          }
           await writeLate($, turnWriter, settle(id, statusOf(r), await $.clock.now()))
           inFlight.delete(id)
           await refreshBand($, tracker)
