@@ -116,6 +116,27 @@ class Metrics(unittest.TestCase):
         self.assertFalse(grade.explore_ran({"modelUsage": {"claude-opus-5-5": {}}}))
 
 
+class CostFloor(unittest.TestCase):
+    def test_a_spick_run_without_its_turn_record_has_an_unknown_floor(self):
+        for recs in (None, []):
+            self.assertIsNone(grade.run_cost_floor("haiku-spick", recs))
+            self.assertIsNone(grade.run_cost_floor("haiku-hook", recs))
+
+    def test_a_record_decides_floor_or_whole(self):
+        self.assertTrue(grade.run_cost_floor("haiku-spick", [{"delegates": [{"lane": "agy", "costUsd": None}]}]))
+        self.assertTrue(grade.run_cost_floor("haiku-spick", [{"delegates": [{"lane": "deep", "costUsd": None}]}]))
+        self.assertFalse(grade.run_cost_floor("haiku-spick", [{"delegates": [{"lane": "coder", "costUsd": 0.1}]}]))
+        self.assertFalse(grade.run_cost_floor("haiku-spick", [{"delegates": []}]))
+
+    def test_arms_without_spick_keep_their_figure(self):
+        for arm in ("haiku-bare", "opus-bare", "sonnet-free"):
+            self.assertIs(grade.run_cost_floor(arm, None), False)
+
+    def test_run_metrics_carries_it(self):
+        rec = {"meta": {"arm": "haiku-spick", "task": "T2", "run": 1, "exit_code": 0}, "result": {"result": "x"}}
+        self.assertIsNone(grade.run_metrics(rec, common.load_tasks()["T2"])["cost_floor"])
+
+
 class ExploreOnHaiku(unittest.TestCase):
     """The Explore check is about the Explore agent's own model, not about Haiku showing up somewhere in the bill."""
 

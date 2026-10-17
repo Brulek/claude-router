@@ -84,6 +84,28 @@ class Stats(unittest.TestCase):
         self.assertIn("| opus-bare | 1/1 | 1/1 | >=$0.200 | >=$0.200 |", text)
         self.assertNotIn("$0.000", text)
 
+    def test_a_missing_delegate_record_is_an_unknown_floor_not_zero(self):
+        runs = {"haiku-spick/T1/run-1": g("haiku-spick", "T1", True, cost=0.10, cost_floor=None),
+                "haiku-spick/T1/run-2": dict(g("haiku-spick", "T1", True, cost=0.30, cost_floor=False), run=2)}
+        c = report.aggregate(runs)[("haiku-spick", "T1")]
+        self.assertEqual((c["cost_floor"], c["floor_unknown"]), (False, 1))
+        s = report.arm_summary(runs, "haiku-spick")
+        self.assertEqual(s["floor_unknown"], 1)
+        with tempfile.TemporaryDirectory() as d:
+            Path(d, "grades.json").write_text(json.dumps({"runs": runs, "judge": {}}))
+            text = report.render(d, "2026-10-17")
+        self.assertIn("| haiku-spick | 2/2 | 2/2 | $0.400 ? (1/2 floor unknown) | $0.200 ? (1/2 floor unknown) |", text)
+        self.assertIn("| $0.200 ? (1/2 floor unknown) |", text.split("## Per arm and task")[1])
+        self.assertEqual(report.fmt_cost(None, False, 1, 2, 1), "unknown (1/2 priced) ? (1/2 floor unknown)")
+        # a floor known for every run prints no ?
+        self.assertNotIn("?", report.fmt_cost(0.1, True, 1, 1, 0))
+
+    def test_grades_written_before_the_field_read_a_spick_run_without_a_record_as_unknown(self):
+        self.assertIsNone(report.run_floor(g("haiku-spick", "T1", True, unpriced_delegates=None)))
+        self.assertTrue(report.run_floor(g("haiku-spick", "T1", True, outside_calls=1)))
+        self.assertFalse(report.run_floor(g("haiku-spick", "T1", True, turn_record=True, outside_calls=0, unpriced_delegates=0)))
+        self.assertFalse(report.run_floor(g("haiku-bare", "T1", True)))
+
     def test_explore_column_counts_verified_haiku_and_flags_unknown(self):
         runs = {"haiku-spick/T1/run-1": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku=True),
                 "haiku-spick/T1/run-2": g("haiku-spick", "T1", True, explore_ran=True, explore_haiku="unknown"),
