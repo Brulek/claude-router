@@ -408,7 +408,10 @@ class TestUpgrade(Base):
         self.assertEqual(d["installed"]["snippet"], "replaced")
         with open(os.path.join(HERE, "..", "assets", "VERSION")) as f:
             self.assertEqual(d["installed_version"], f.read().strip())
-        self.assertIn("Kept as they were (they may predate this version; run with --force to overwrite them):\n  %s" % self.path("agents", "coder.md"), r.stdout)
+        # the kept list follows the glob's order, which the locale decides (C puts Explore.md first,
+        # en_US puts coder.md first): check the header and the line, not their adjacency
+        self.assertIn("Kept as they were (they may predate this version; run with --force to overwrite them):\n", r.stdout)
+        self.assertIn("\n  %s\n" % self.path("agents", "coder.md"), r.stdout)
         r = self.run_setup("--force")
         self.assertEqual(json.loads(self.read("spick.json"))["installed"]["agents"]["coder"], "written")
         self.assertNotIn("Kept as they were", r.stdout)
